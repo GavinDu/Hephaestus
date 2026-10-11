@@ -6,8 +6,11 @@ can render its questionnaire UI directly from `GET /v1/spec/questionnaire`;
 
 **Engines:** `html5` (simple games — easier to generate, instant load, better
 perf) or `godot` (rich 2D effects / 3D — more work, more juice). Hard rules:
-3D → godot; must-load-instantly → html5. Otherwise weighted scoring; ties go
-to html5. The response includes a plain-language `rationale`.
+3D → godot; must-load-instantly → html5. Otherwise weighted scoring with a
+Godot lean: **godot is the default** as the richer engine; html5 wins only
+for decisively simple games (simple archetype, few sprites, no effects,
+low-end budget, short session) where instant loading matters most.
+The response includes a plain-language `rationale`.
 
 **Preferences** are standing per-user defaults (difficulty, sound, art policy,
 session length, perf budget, audience). The questionnaire only needs to ask
