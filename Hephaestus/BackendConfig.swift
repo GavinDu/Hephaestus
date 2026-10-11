@@ -6,9 +6,9 @@ import Foundation
 /// file to the Xcode project, use `BackendConfig.baseURL` for API calls and
 /// `BackendConfig.playerURL` for the WKWebView player.
 enum BackendConfig {
-    /// Production backend (Replit-hosted).
+    /// Production backend (Replit deployment).
     static let baseURL = URL(
-        string: "https://7ca9cb63-0317-4dd0-b084-5ef4df88cdaf-00-1i3fhaijkqyg1.riker.replit.dev"
+        string: "https://html-5-game-generator.replit.app"
     )!
 
     /// Local development override — uncomment to run against a local server.

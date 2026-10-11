@@ -29,6 +29,6 @@ ones. A server-side decision maker routes each game to the right engine.
 
 ## Backend quick links
 
-- Production: `https://7ca9cb63-0317-4dd0-b084-5ef4df88cdaf-00-1i3fhaijkqyg1.riker.replit.dev`
+- Production: `https://html-5-game-generator.replit.app`
 - Player: `…/player`
 - API docs: `docs/API.md`

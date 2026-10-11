@@ -1,6 +1,6 @@
 # DoodleQuest backend API (for the Hephaestus iOS app)
 
-Base URL (production): `https://7ca9cb63-0317-4dd0-b084-5ef4df88cdaf-00-1i3fhaijkqyg1.riker.replit.dev`
+Base URL (production): `https://html-5-game-generator.replit.app`
 Local dev: `http://localhost:8080`
 
 Auth: pass the user id as the `X-User-ID` request header. If omitted the

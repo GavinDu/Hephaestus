@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 // MARK: - Models (mirror the backend JSON; see docs/API.md)

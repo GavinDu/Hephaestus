@@ -34,6 +34,7 @@ enum RecentGames {
         guard let data = UserDefaults.standard.data(forKey: key),
               let list = try? JSONDecoder().decode([RecentGame].self, from: data)
         else { return [] }
+        return list
     }
 }
 
@@ -204,9 +205,10 @@ struct CreateView: View {
             .buttonStyle(.bordered)
             .onChange(of: pickerItem) { _, newItem in
                 Task {
-                    if let data = try? await newItem?.loadTransferable(type: Data.self) {
+                    guard let newItem else { return }
+                    if let data = try? await newItem.loadTransferable(type: Data.self) {
                         imageData = data
-                        previewImage = data.flatMap { UIImage(data: $0) }
+                        previewImage = UIImage(data: data)
                     }
                 }
             }
