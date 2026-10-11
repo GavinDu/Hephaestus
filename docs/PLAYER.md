@@ -3,8 +3,13 @@
 ## The short version
 
 Load `GET /player` in a WKWebView. It lists public games (HTML5 GameShim
-bundles, played inline) plus a **GODOT VERSIONS** section linking to the
-Godot 4.7 web builds at `/godot/{game}/`.
+bundles, played inline).
+
+> **App decision (2026-10-11): the iOS app is HTML5-only.** Godot web builds
+> remain on the backend and the web player (`/v1/godot`, `/godot/{game}/`),
+> but the app does not surface them — the ~10MB WASM download and 30–60s
+> first load is the wrong tradeoff for a mobile game feed. The app plays
+> instant-load HTML5 games only.
 
 ## App Store strategy (guideline 4.7)
 
