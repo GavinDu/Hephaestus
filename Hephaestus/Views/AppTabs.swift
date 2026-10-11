@@ -95,7 +95,7 @@ struct DiscoverView: View {
             .navigationTitle("Discover")
             .refreshable { await load() }
             .task { await load() }
-            .sheet(item: $playerRequest) { req in
+            .fullScreenCover(item: $playerRequest) { req in
                 PlayerSheet(title: req.title, url: req.url)
             }
             .overlay {
@@ -171,7 +171,7 @@ struct CreateView: View {
                 }
             }
             .navigationTitle("Create")
-            .sheet(item: $playerRequest) { req in
+            .fullScreenCover(item: $playerRequest) { req in
                 PlayerSheet(title: req.title, url: req.url)
             }
         }
@@ -424,7 +424,7 @@ struct LibraryView: View {
                 recent = RecentGames.load()
             }
             .onAppear { recent = RecentGames.load() }
-            .sheet(item: $playerRequest) { req in
+            .fullScreenCover(item: $playerRequest) { req in
                 PlayerSheet(title: req.title, url: req.url)
             }
         }
