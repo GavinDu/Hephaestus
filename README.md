@@ -1,53 +1,34 @@
 # Hephaestus
 
-A multiplatform SwiftUI app that demonstrates persistence with SwiftData. The app presents a list of timestamped items with support for adding and deleting entries, using a data model that is stored on disk.
+The iOS app for the AI game-generation platform: turn kids' drawings into
+playable games. Photograph a drawing → the backend generates a game → play
+it in the app, share it, remix it.
+
+**Backend:** `github.com/GavinDu/html5-game-generator` (Go) — game
+generation pipeline, player, API. See `docs/API.md`.
+
+**App Store strategy:** games run as HTML5/WASM inside WKWebView (App Store
+guideline 4.7 path — no downloadable native code). Godot 4.7 web exports
+(GDScript only) cover effect-heavy games; plain HTML5 canvas covers simple
+ones. A server-side decision maker routes each game to the right engine.
+
+## Project layout
+
+- `Hephaestus/` — SwiftUI app source
+  - `BackendConfig.swift` — backend base URL + user identity config
+- `docs/` — synced progress from the backend project
+  - `API.md` — backend endpoint reference
+  - `GAME_SPEC.md` — the 31-factor game questionnaire
+  - `PLAYER.md` — WKWebView player integration + App Store notes
 
 ## Requirements
 
 - Xcode 27 or later
 - Swift 5
-- Platforms: iOS, macOS, and visionOS
+- Platforms: iOS (primary), macOS, visionOS
 
-## Features
+## Backend quick links
 
-- SwiftUI-based interface that adapts across platforms
-  - `NavigationSplitView` on macOS
-  - `NavigationStack` on iOS and visionOS
-- SwiftData-backed persistence via a shared `ModelContainer`
-- Add items with the toolbar `+` button
-- Delete items with swipe/contextual delete (`EditButton` on iOS)
-- In-memory container for SwiftUI previews
-
-## Project Structure
-
-| Path | Description |
-| --- | --- |
-| `Hephaestus/Hephaestus/HephaestusApp.swift` | App entry point and SwiftData `ModelContainer` setup |
-| `Hephaestus/Hephaestus/ContentView.swift` | Main list view with add/delete logic and platform navigation |
-| `Hephaestus/Hephaestus/Item.swift` | SwiftData `@Model` representing a timestamped item |
-| `Hephaestus/HephaestusTests/HephaestusTests.swift` | Unit tests using the Swift Testing framework |
-| `Hephaestus/HephaestusUITests/HephaestusUITests.swift` | UI tests using XCUIAutomation |
-| `Hephaestus.xcodeproj` | Xcode project and shared scheme |
-
-## Getting Started
-
-1. Open `Hephaestus.xcodeproj` in Xcode.
-2. Select the `Hephaestus` scheme and a run destination (iOS, macOS, or visionOS).
-3. Build and run with `Cmd+R`.
-
-## Testing
-
-- Unit tests use the [Swift Testing](https://developer.apple.com/documentation/testing) framework.
-- UI tests use [XCUIAutomation](https://developer.apple.com/documentation/xcuiautomation).
-
-Run tests in Xcode with `Cmd+U`, or via the command line:
-
-```sh
-xcodebuild test -scheme Hephaestus -destination 'platform=macOS'
-```
-
-## Architecture Notes
-
-- State is stored in a SwiftData `ModelContainer` configured in `HephaestusApp`.
-- Views read data with the `@Query` property wrapper and mutate it through the `@Environment(\.modelContext)`.
-- Asynchronous work should prefer Swift `async`/`await` over Combine.
+- Production: `https://7ca9cb63-0317-4dd0-b084-5ef4df88cdaf-00-1i3fhaijkqyg1.riker.replit.dev`
+- Player: `…/player`
+- API docs: `docs/API.md`
