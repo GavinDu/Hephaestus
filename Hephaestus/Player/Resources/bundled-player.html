@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<!--
+  bundled-player.html — the Hephaestus bundled game runtime (GameShim v1).
+
+  This file ships INSIDE the iOS app binary. It contains the fixed player
+  runtime only; per-game content is data fetched at play time from
+  GET /v1/games/{id}/package and injected via window.HephaestusBoot.bootGame.
+
+  SYNC NOTE: the GameShim v1 runtime below (makeShim + lifecycle) is extracted
+  from the backend's browser player at internal/api/web/player.html in
+  GavinDu/html5-game-generator. If the backend runtime changes, update this
+  file and bump SHIM_VERSION together with the manifest shim field — the
+  Swift container refuses to boot on version mismatch.
+
+  Security: this WebView is deliberately bridgeless. There are no
+  WKScriptMessageHandlers; the game never calls into native code. Swift
+  talks to JS one-way via evaluateJavaScript. Score submission uses plain
+  fetch() to the backend, same as the browser player.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Hephaestus Player</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: #10142b; color: #fff;
+         display: flex; align-items: center; justify-content: center; }
+  #stage { position: relative; width: 100%; max-width: 480px; aspect-ratio: 390 / 844; max-height: 100%;
+           background: #000; overflow: hidden; touch-action: none; }
+  #stage canvas { width: 100%; height: 100%; display: block; }
+  #endcard { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+             background: rgba(10, 14, 35, .82); }
+  #endcard .box { background: #1b2340; border-radius: 18px; padding: 28px; text-align: center; width: 82%; }
+  #endcard h2 { margin: 0 0 8px; font-size: 26px; }
+  #endcard p { color: #9fb2ff; margin: 6px 0 18px; }
+  #endcard button { background: #4f7cff; color: #fff; border: 0; border-radius: 12px;
+                    padding: 14px 26px; font-size: 17px; font-weight: 700; margin: 4px; }
+  #endlevel { color: #ffe27a; font-weight: 700; margin: 2px 0 10px; font-size: 17px; }
+  #lbwrap { margin: 6px 0 12px; text-align: left; }
+  #lbtitle { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+  #lb { max-height: 150px; overflow-y: auto; display: grid; gap: 4px; }
+  .lbrow { display: flex; justify-content: space-between; background: #252e57;
+           border-radius: 8px; padding: 7px 10px; font-size: 14px; }
+  .lbrow.me { background: #3b4a8f; font-weight: 700; }
+  #namerow { font-size: 14px; color: #9fb2ff; margin-bottom: 12px; }
+  #pname { background: #252e57; color: #fff; border: 1px solid #3b4a8f; border-radius: 8px;
+           padding: 8px 10px; font-size: 15px; width: 150px; }
+  #err { display: none; position: absolute; left: 12px; right: 12px; bottom: 12px;
+         background: #5b1f1f; color: #ffd7d7; border-radius: 10px; padding: 12px;
+         font-size: 13px; white-space: pre-wrap; }
+  #boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+          color: #9fb2ff; font-size: 15px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv" width="390" height="844"></canvas>
+  <div id="boot">Loading game…</div>
+  <div id="endcard"><div class="box">
+    <h2 id="endtitle">You win!</h2>
+    <p id="endsub"></p>
+    <p id="endlevel"></p>
+    <div id="lbwrap"><div id="lbtitle">🏆 Leaderboard</div><div id="lb"></div></div>
+    <div id="namerow">Name: <input id="pname" maxlength="24" placeholder="Player"></div>
+    <button id="again">Play again</button>
+  </div></div>
+  <div id="err"></div>
+</div>
+
+<script>
+'use strict';
+
+/**
+ * Entry point for the native container. The Swift side calls:
+ *   window.HephaestusBoot.bootGame(packageBase64, backendBaseUrl)
+ * where packageBase64 is the base64 of the UTF-8 JSON from
+ * GET /v1/games/{id}/package. Base64 keeps the injection free of
+ * quoting hazards; the game never calls back into native code.
+ */
+window.HephaestusBoot = (function () {
+  var SHIM_VERSION = 'gameshim/v1';
+
+  var API = '';
+  var W = 390, H = 844;
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var currentGameId = null;
+  var lastScore = 0, lastLevel = 1;
+  var rafId = 0;
+
+  function gameError(e) {
+    var el = document.getElementById('err');
+    el.style.display = 'block';
+    el.textContent = 'Game error: ' + (e && e.message || e);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // ---- GameShim v1 runtime (extracted from backend internal/api/web/player.html) ----
+  function makeShim(bundleBase, spriteImgs) {
+    var sprites = [];
+    var texts = {};
+    var inputCb = null;
+    var audioCtx = null;
+    var musicEl = null;
+    var running = true;
+
+    function tone(o) {
+      try {
+        audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        var osc = audioCtx.createOscillator();
+        var g = audioCtx.createGain();
+        osc.type = o.type || 'sine';
+        osc.frequency.value = o.freq || 440;
+        g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (o.dur || 0.15));
+        osc.connect(g); g.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + (o.dur || 0.15));
+      } catch (e) { /* audio unavailable */ }
+    }
+
+    var Shim = {
+      init: function (o) { W = o.width || 390; H = o.height || 844; cv.width = W; cv.height = H; },
+      sprite: function (id, o) {
+        o = o || {};
+        var s = { id: id, x: o.x || 0, y: o.y || 0, w: o.w || 64, h: o.h || 64,
+                  visible: o.visible !== false, img: spriteImgs[id] || null };
+        sprites.push(s);
+        return s;
+      },
+      text: function (id, str, o) {
+        o = o || {};
+        texts[id] = { str: String(str), x: o.x || 0, y: o.y || 0, size: o.size || 20, color: o.color || '#fff' };
+      },
+      input: function (verb, cb) { if (verb === 'tap') inputCb = cb; },
+      audio: {
+        music: function (src, o) {
+          o = o || {};
+          try {
+            musicEl = new Audio(bundleBase + '/' + src);
+            musicEl.loop = !!o.loop;
+            musicEl.volume = (o.volume == null) ? 0.6 : o.volume;
+            musicEl.play().catch(function () {});
+          } catch (e) { /* ignore */ }
+        },
+        tone: tone
+      },
+      loop: function (fn) {
+        var last = performance.now();
+        function frame(t) {
+          if (!running) return;
+          var dt = Math.min(0.05, (t - last) / 1000);
+          last = t;
+          try { fn(dt); } catch (e) { running = false; gameError(e); return; }
+          draw();
+          rafId = requestAnimationFrame(frame);
+        }
+        rafId = requestAnimationFrame(frame);
+      },
+      end: function (res) {
+        running = false;
+        cancelAnimationFrame(rafId);
+        if (musicEl) { try { musicEl.pause(); } catch (e) {} }
+        showEnd(res || {});
+      },
+      _sprites: sprites,
+      _stop: function () { running = false; cancelAnimationFrame(rafId); if (musicEl) { try { musicEl.pause(); } catch (e) {} } }
+    };
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      for (var i = 0; i < sprites.length; i++) {
+        var s = sprites[i];
+        if (!s.visible || !s.img || !s.img.complete) continue;
+        ctx.drawImage(s.img, s.x - s.w / 2, s.y - s.h / 2, s.w, s.h);
+      }
+      for (var k in texts) {
+        var t = texts[k];
+        ctx.fillStyle = t.color;
+        ctx.font = '600 ' + t.size + 'px -apple-system, sans-serif';
+        ctx.fillText(t.str, t.x, t.y + t.size);
+      }
+    }
+
+    cv.onpointerdown = function (ev) {
+      if (!inputCb) return;
+      var r = cv.getBoundingClientRect();
+      var x = (ev.clientX - r.left) / r.width * W;
+      var y = (ev.clientY - r.top) / r.height * H;
+      try { inputCb(x, y); } catch (e) { gameError(e); }
+    };
+
+    return Shim;
+  }
+  // ---- end GameShim v1 runtime ----
+
+  function showEnd(res) {
+    document.getElementById('endtitle').textContent = res.won === false ? 'Game over' : '🎉 You win!';
+    var sub = 'Score: ' + (res.score == null ? '—' : res.score);
+    if (res.stats && res.stats.time_s != null) sub += ' · ' + res.stats.time_s + 's';
+    document.getElementById('endsub').textContent = sub;
+    lastScore = res.score || 0;
+    lastLevel = (res.stats && res.stats.level) || 1;
+    document.getElementById('endlevel').textContent = 'Reached Level ' + lastLevel;
+    document.getElementById('lb').innerHTML = '<div class="lbrow">Saving score…</div>';
+    document.getElementById('endcard').style.display = 'flex';
+    submitScore();
+  }
+
+  function playerName() {
+    var saved = '';
+    try { saved = localStorage.getItem('dq_name') || ''; } catch (e) {}
+    var input = document.getElementById('pname');
+    if (input && !input.value && saved) input.value = saved;
+    var name = ((input && input.value) || saved || 'Player').slice(0, 24);
+    try { localStorage.setItem('dq_name', name); } catch (e) {}
+    return name;
+  }
+
+  function submitScore() {
+    if (!currentGameId) { loadLeaderboard(''); return; }
+    var name = playerName();
+    var body = JSON.stringify({ name: name, score: lastScore, level: lastLevel });
+    fetch(API + '/v1/games/' + currentGameId + '/scores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body
+    }).then(function () { loadLeaderboard(name); },
+            function () { loadLeaderboard(name); });
+  }
+
+  function loadLeaderboard(me) {
+    if (!currentGameId) return;
+    fetch(API + '/v1/games/' + currentGameId + '/leaderboard')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var rows = (data && data.scores) || [];
+        var lb = document.getElementById('lb');
+        if (!rows.length) {
+          lb.innerHTML = '<div class="lbrow">No scores yet — be the first!</div>';
+          return;
+        }
+        lb.innerHTML = rows.map(function (s, i) {
+          var cls = (me && s.name === me) ? 'lbrow me' : 'lbrow';
+          return '<div class="' + cls + '"><span>#' + (i + 1) + ' ' + escapeHtml(s.name) + '</span>' +
+            '<span>LV ' + s.level + ' · ' + s.score + '</span></div>';
+        }).join('');
+      })
+      .catch(function () {
+        document.getElementById('lb').innerHTML = '<div class="lbrow">Leaderboard unavailable</div>';
+      });
+  }
+
+  function b64ToJson(b64) {
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+
+  function bootGame(pkgB64, baseUrl) {
+    try {
+      var pkg = b64ToJson(pkgB64);
+      API = baseUrl.replace(/\/$/, '');
+      currentGameId = pkg.gameId;
+      document.getElementById('boot').style.display = 'none';
+      document.getElementById('endcard').style.display = 'none';
+      cancelAnimationFrame(rafId);
+
+      // bundleBase mirrors the browser player: entry URL minus the filename.
+      var entryUrl = pkg.data.entry.url;
+      var bundleBase = API + entryUrl.substring(0, entryUrl.lastIndexOf('/'));
+
+      var imgs = {};
+      var list = (pkg.data.sprites) || [];
+      var loads = list.map(function (sp) {
+        return new Promise(function (resolve) {
+          var img = new Image();
+          img.onload = function () { imgs[sp.id] = img; resolve(); };
+          img.onerror = function () { resolve(); };
+          img.src = API + sp.url;
+        });
+      });
+      Promise.all(loads).then(function () {
+        return fetch(API + pkg.data.entry.url).then(function (r) {
+          if (!r.ok) throw new Error('entry HTTP ' + r.status);
+          return r.text();
+        }).then(function (code) {
+          var Shim = makeShim(bundleBase, imgs);
+          var bg = '#8ecae6';
+          var m = /Shim\.init\(\{\s*[^}]*background:\s*'([^']+)'/.exec(code);
+          if (m) bg = m[1];
+          document.getElementById('stage').style.background = bg;
+          new Function('Shim', code)(Shim);
+          document.getElementById('again').onclick = function () { bootGame(pkgB64, baseUrl); };
+        });
+      }).catch(function (e) { gameError(e); });
+    } catch (e) {
+      gameError(e);
+    }
+  }
+
+  return { SHIM_VERSION: SHIM_VERSION, bootGame: bootGame };
+})();
+</script>
+</body>
+</html>

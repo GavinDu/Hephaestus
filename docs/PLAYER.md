@@ -1,15 +1,40 @@
 # Player integration (WKWebView)
 
-## The short version
+## Bundled-runtime player (current architecture, 2026-10-11)
+
+The app no longer loads the remote `/player` page for HTML5 games. Instead:
+
+- **Runtime ships in the app binary.** `Hephaestus/Player/Resources/bundled-player.html`
+  contains the fixed GameShim v1 runtime (`window.HephaestusBoot`, `SHIM_VERSION =
+  "gameshim/v1"`), extracted from the backend's browser player
+  (`internal/api/web/player.html` in GavinDu/html5-game-generator). If the backend
+  runtime changes, update this file and bump the version together with the manifest
+  `shim` field.
+- **Only game data comes from the network.** On Play, the app fetches
+  `GET /v1/games/{id}/package` (the data-plane descriptor: manifest + runtime
+  handshake + relative data URLs) and injects it into the shell via one-way
+  `evaluateJavaScript` (base64-encoded JSON — no quoting hazards).
+- **Handshake lives in Swift.** `BundledPlayerState` compares
+  `package.runtime.required` against `bundledRuntimeVersion` *before* the WebView
+  boots. Mismatch shows a native "update the app" screen; the game never loads.
+- **Bridgeless by design.** No `WKScriptMessageHandlers` — game code can never call
+  into native code (4.7.2 posture: no native API exposure to hosted content).
+  Score submission uses plain `fetch()` from inside the shell, same as the browser.
+- **Files:** `Hephaestus/Player/BundledPlayerView.swift` (package models, state
+  machine, `BundledPlayerView`, `BundledPlayerSheet`) wired into Discover and
+  Create via `BundledPlayerRequest`. The legacy `WebPlayerView`/`PlayerSheet`
+  remain for the Godot section and as fallback.
+
+**Xcode steps (must be done in Xcode, never by hand-editing the pbxproj):**
+1. Add `Hephaestus/Player/BundledPlayerView.swift` to the Hephaestus target.
+2. Add `Hephaestus/Player/Resources/bundled-player.html` to the target's
+   Copy Bundle Resources (it is loaded via `Bundle.main.url(forResource:)`).
+
+## The short version (legacy remote player)
 
 Load `GET /player` in a WKWebView. It lists public games (HTML5 GameShim
-bundles, played inline).
-
-> **App decision (2026-10-11): the iOS app is HTML5-only.** Godot web builds
-> remain on the backend and the web player (`/v1/godot`, `/godot/{game}/`),
-> but the app does not surface them — the ~10MB WASM download and 30–60s
-> first load is the wrong tradeoff for a mobile game feed. The app plays
-> instant-load HTML5 games only.
+bundles, played inline) plus a **GODOT VERSIONS** section linking to the
+Godot 4.7 web builds at `/godot/{game}/`.
 
 ## App Store strategy (guideline 4.7)
 

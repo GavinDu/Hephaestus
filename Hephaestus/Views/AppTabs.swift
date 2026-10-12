@@ -40,10 +40,12 @@ enum RecentGames {
 
 // MARK: - Discover
 
-/// Public games feed (HTML5). Games open the web player full-screen.
+/// Public games feed. HTML5 games open the web player; Godot builds open directly.
 struct DiscoverView: View {
     @State private var games: [FeedGame] = []
+    @State private var godotGames: [GodotGame] = []
     @State private var playerRequest: PlayerRequest?
+    @State private var bundledRequest: BundledPlayerRequest?
     @State private var errorMessage: String?
     @State private var isLoading = false
 
@@ -62,9 +64,31 @@ struct DiscoverView: View {
                             Spacer()
                             Button("Play") {
                                 RecentGames.record(gameID: game.id, title: game.title)
-                                playerRequest = PlayerRequest(title: game.title, url: BackendConfig.playerURL)
+                                bundledRequest = BundledPlayerRequest(gameID: game.id, title: game.title)
                             }
                             .buttonStyle(.borderedProminent)
+                        }
+                    }
+                }
+                Section("Godot versions") {
+                    ForEach(godotGames) { game in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(game.title)
+                                Text("Godot 4 engine build")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Play") {
+                                if let url = game.absoluteURL {
+                                    RecentGames.record(gameID: game.id, title: game.title)
+                                    playerRequest = PlayerRequest(title: game.title, url: url)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.purple)
+                            .disabled(!game.ready)
                         }
                     }
                 }
@@ -75,8 +99,11 @@ struct DiscoverView: View {
             .fullScreenCover(item: $playerRequest) { req in
                 PlayerSheet(title: req.title, url: req.url)
             }
+            .fullScreenCover(item: $bundledRequest) { req in
+                BundledPlayerSheet(gameID: req.gameID, title: req.title)
+            }
             .overlay {
-                if isLoading && games.isEmpty {
+                if isLoading && games.isEmpty && godotGames.isEmpty {
                     ProgressView("Loading games…")
                 }
             }
@@ -87,8 +114,11 @@ struct DiscoverView: View {
         isLoading = true
         defer { isLoading = false }
         errorMessage = nil
+        async let feed = BackendAPI.shared.fetchFeed()
+        async let godot = BackendAPI.shared.fetchGodotGames()
         do {
-            games = try await BackendAPI.shared.fetchFeed()
+            games = try await feed
+            godotGames = try await godot
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -115,7 +145,7 @@ struct CreateView: View {
     @State private var previewImage: UIImage?
     @State private var keywordsText = ""
     @State private var intentText = ""
-    @State private var playerRequest: PlayerRequest?
+    @State private var bundledRequest: BundledPlayerRequest?
 
     var body: some View {
         NavigationStack {
@@ -145,8 +175,8 @@ struct CreateView: View {
                 }
             }
             .navigationTitle("Create")
-            .fullScreenCover(item: $playerRequest) { req in
-                PlayerSheet(title: req.title, url: req.url)
+            .fullScreenCover(item: $bundledRequest) { req in
+                BundledPlayerSheet(gameID: req.gameID, title: req.title)
             }
         }
     }
@@ -262,7 +292,7 @@ struct CreateView: View {
                 .foregroundStyle(.green)
             Text("Your game is ready!").font(.title2)
             Button("Play now") {
-                playerRequest = PlayerRequest(title: "Your game", url: BackendConfig.playerURL)
+                bundledRequest = BundledPlayerRequest(gameID: gameID, title: "Your game")
             }
             .buttonStyle(.borderedProminent)
             Button("Make another") { reset() }
@@ -349,36 +379,66 @@ struct CreateView: View {
 
 // MARK: - Library
 
-/// Recently played games.
+/// Godot builds plus recently played games.
 struct LibraryView: View {
+    @State private var godotGames: [GodotGame] = []
     @State private var recent: [RecentGame] = []
     @State private var playerRequest: PlayerRequest?
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
             List {
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage).foregroundStyle(.red)
+                    }
+                }
+                Section("Godot builds") {
+                    ForEach(godotGames) { game in
+                        HStack {
+                            Text(game.title)
+                            Spacer()
+                            Button("Play") {
+                                if let url = game.absoluteURL {
+                                    RecentGames.record(gameID: game.id, title: game.title)
+                                    playerRequest = PlayerRequest(title: game.title, url: url)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.purple)
+                            .disabled(!game.ready)
+                        }
+                    }
+                }
                 Section("Recently played") {
                     if recent.isEmpty {
                         Text("Nothing yet — play a game from Discover.")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(recent) { game in
-                        HStack {
-                            Text(game.title)
-                            Spacer()
-                            Button("Play") {
-                                playerRequest = PlayerRequest(title: game.title, url: BackendConfig.playerURL)
-                            }
-                            .buttonStyle(.bordered)
-                        }
+                        Text(game.title)
                     }
                 }
             }
             .navigationTitle("Library")
+            .refreshable { await load() }
+            .task {
+                await load()
+                recent = RecentGames.load()
+            }
             .onAppear { recent = RecentGames.load() }
             .fullScreenCover(item: $playerRequest) { req in
                 PlayerSheet(title: req.title, url: req.url)
             }
+        }
+    }
+
+    private func load() async {
+        do {
+            godotGames = try await BackendAPI.shared.fetchGodotGames()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
