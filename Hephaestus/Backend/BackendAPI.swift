@@ -36,18 +36,6 @@ struct FeedResponse: Codable {
     var games: [FeedGame]
 }
 
-/// One Godot web build, from GET /v1/godot.
-struct GodotGame: Codable, Identifiable {
-    var id: String
-    var title: String
-    var ready: Bool
-    var url: String // relative, e.g. "/godot/bobos-rainbow/"
-
-    var absoluteURL: URL? {
-        URL(string: url, relativeTo: BackendConfig.baseURL)?.absoluteURL
-    }
-}
-
 struct IngestResult: Codable {
     var ingest_id: String
     var elements: [Element]
@@ -150,11 +138,6 @@ final class BackendAPI: ObservableObject {
     func fetchFeed() async throws -> [FeedGame] {
         let req = try makeRequest("v1/feed")
         return try await send(FeedResponse.self, req).games
-    }
-
-    func fetchGodotGames() async throws -> [GodotGame] {
-        let req = try makeRequest("v1/godot")
-        return try await send([GodotGame].self, req)
     }
 
     struct IngestBody: Encodable {

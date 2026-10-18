@@ -2,7 +2,7 @@ import SwiftUI
 import WebKit
 
 /// WKWebView wrapper for the DoodleQuest player. Loads `/player` (game list +
-/// inline HTML5 player) or a direct Godot build URL (`/godot/{game}/`).
+/// inline HTML5 player).
 /// Per the App Store guideline 4.7 strategy, games execute as web content —
 /// no downloadable native code.
 struct WebPlayerView: UIViewRepresentable {

@@ -152,8 +152,7 @@ struct BundledPlayerView: UIViewRepresentable {
 
 // MARK: - Full-screen sheet
 
-/// Request type for presenting the bundled player (game-ID based, unlike the
-/// URL-based PlayerRequest used by the legacy remote player).
+/// Request type for presenting the bundled player (game-ID based).
 struct BundledPlayerRequest: Identifiable {
     let id = UUID()
     let gameID: String

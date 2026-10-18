@@ -14,7 +14,7 @@ enum BackendConfig {
     /// Local development override — uncomment to run against a local server.
     // static let baseURL = URL(string: "http://localhost:8080")!
 
-    /// The web player (game list + inline HTML5 player + Godot versions).
+    /// The web player (game list + inline HTML5 player).
     /// Load in WKWebView.
     static var playerURL: URL {
         baseURL.appendingPathComponent("player")
@@ -23,11 +23,6 @@ enum BackendConfig {
     /// User identity sent as the `X-User-ID` header. Stub for Sign in with
     /// Apple — the parent account owns creations.
     static let userID = "demo-parent"
-
-    /// Godot web builds served by the backend (`GET /v1/godot` lists them).
-    static var godotListURL: URL {
-        baseURL.appendingPathComponent("v1/godot")
-    }
 
     /// GameSpec questionnaire + engine decision maker.
     static var specQuestionnaireURL: URL {
