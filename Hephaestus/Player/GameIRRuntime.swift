@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Foundation
 import SwiftUI
 import UIKit
@@ -321,29 +322,42 @@ final class BundledPlayerState: ObservableObject {
     func load(gameID: String) async {
         phase = .loading
         do {
-            var request = URLRequest(url: BackendConfig.baseURL.appendingPathComponent("v1/games/\(gameID)/package"))
+            guard Self.validIdentifier(gameID) else { throw PlayerError.invalidPackage }
+            var request = URLRequest(url: BackendConfig.baseURL
+                .appendingPathComponent("v1/games")
+                .appendingPathComponent(gameID)
+                .appendingPathComponent("package"))
+            request.timeoutInterval = 15
             request.setValue(BackendConfig.userID, forHTTPHeaderField: "X-User-ID")
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
                 throw PlayerError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
             }
+            guard data.count <= PlayerLimits.maxPackageBytes else { throw PlayerError.packageTooLarge }
             let package = try JSONDecoder().decode(GamePackageResponse.self, from: data)
-            guard package.packageVersion == "2.0" else {
-                throw PlayerError.packageVersion(package.packageVersion)
-            }
-            guard package.gameId == gameID, package.irVersionIsValid else {
-                throw PlayerError.invalidPackage
-            }
+            try package.validate(expectedGameID: gameID)
             var images: [String: UIImage] = [:]
+            var totalAssetBytes = 0
             for asset in package.assets where asset.kind == "image" {
-                guard let url = URL(string: asset.url, relativeTo: BackendConfig.baseURL)?.absoluteURL else { continue }
+                let url = try Self.validatedAssetURL(asset.url, gameID: gameID, assetID: asset.id)
                 var assetRequest = URLRequest(url: url)
-                assetRequest.setValue(BackendConfig.userID, forHTTPHeaderField: "X-User-ID")
-                if let (assetData, assetResponse) = try? await URLSession.shared.data(for: assetRequest),
-                   (assetResponse as? HTTPURLResponse)?.statusCode == 200,
-                   let image = UIImage(data: assetData) {
-                    images[asset.id] = image
+                assetRequest.timeoutInterval = 12
+                // Same-origin only; never forward identity headers to package-supplied URLs.
+                let (assetData, assetResponse) = try await URLSession.shared.data(for: assetRequest)
+                guard let http = assetResponse as? HTTPURLResponse, http.statusCode == 200 else {
+                    throw PlayerError.assetUnavailable(asset.id)
                 }
+                guard assetData.count <= PlayerLimits.maxAssetBytes else { throw PlayerError.assetTooLarge(asset.id) }
+                totalAssetBytes += assetData.count
+                guard totalAssetBytes <= PlayerLimits.maxTotalAssetBytes else { throw PlayerError.assetsTooLarge }
+                if let expected = asset.sha256, !expected.isEmpty {
+                    let actual = SHA256.hash(data: assetData).map { String(format: "%02x", $0) }.joined()
+                    guard actual.caseInsensitiveCompare(expected) == .orderedSame else {
+                        throw PlayerError.assetIntegrity(asset.id)
+                    }
+                }
+                guard let image = UIImage(data: assetData) else { throw PlayerError.invalidImage(asset.id) }
+                images[asset.id] = image
             }
             phase = .ready(try GameIRRuntime(document: package.ir, images: images))
         } catch {
@@ -351,17 +365,127 @@ final class BundledPlayerState: ObservableObject {
         }
     }
 
+    private static func validIdentifier(_ value: String) -> Bool {
+        guard !value.isEmpty, value.utf8.count <= 64 else { return false }
+        return value.unicodeScalars.allSatisfy {
+            CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-").contains($0)
+        }
+    }
+
+    private static func validatedAssetURL(_ raw: String, gameID: String, assetID: String) throws -> URL {
+        guard validIdentifier(assetID),
+              let url = URL(string: raw, relativeTo: BackendConfig.baseURL)?.absoluteURL,
+              let base = URLComponents(url: BackendConfig.baseURL, resolvingAgainstBaseURL: false),
+              let target = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              target.scheme?.lowercased() == "https",
+              target.host?.lowercased() == base.host?.lowercased(),
+              target.port == base.port,
+              target.user == nil, target.password == nil,
+              target.query == nil, target.fragment == nil else {
+            throw PlayerError.invalidAssetURL(assetID)
+        }
+        let expectedPath = BackendConfig.baseURL
+            .appendingPathComponent("v1/games")
+            .appendingPathComponent(gameID)
+            .appendingPathComponent("assets")
+            .appendingPathComponent(assetID).path
+        guard target.path == expectedPath else { throw PlayerError.invalidAssetURL(assetID) }
+        return url
+    }
+
     enum PlayerError: LocalizedError {
-        case http(Int), packageVersion(String), invalidPackage
+        case http(Int), packageVersion(String), invalidPackage, packageTooLarge
+        case invalidAssetURL(String), assetUnavailable(String), assetTooLarge(String)
+        case assetsTooLarge, assetIntegrity(String), invalidImage(String)
         var errorDescription: String? {
             switch self {
-            case .http(let code): return "Couldn't load this game (HTTP \(code))."
-            case .packageVersion(let version): return "Unsupported package version \(version); this app expects 2.0."
-            case .invalidPackage: return "The package identity or Game IR version is invalid."
+            case .http(let code): return "Couldn't load this game (HTTP \\(code))."
+            case .packageVersion(let version): return "Unsupported package version \\(version); this app expects 2.0."
+            case .invalidPackage: return "The package is malformed, inconsistent, or exceeds supported runtime capabilities."
+            case .packageTooLarge: return "The game package exceeds the size limit."
+            case .invalidAssetURL(let id): return "Asset \\(id) has an unsafe or invalid delivery URL."
+            case .assetUnavailable(let id): return "Asset \\(id) could not be downloaded."
+            case .assetTooLarge(let id): return "Asset \\(id) exceeds the size limit."
+            case .assetsTooLarge: return "The game's total downloaded assets exceed the size limit."
+            case .assetIntegrity(let id): return "Asset \\(id) failed its SHA-256 integrity check."
+            case .invalidImage(let id): return "Asset \\(id) is not a supported image."
             }
         }
     }
 }
+
+private enum PlayerLimits {
+    static let maxPackageBytes = 2 * 1024 * 1024
+    static let maxAssetBytes = 8 * 1024 * 1024
+    static let maxTotalAssetBytes = 32 * 1024 * 1024
+    static let maxAssets = 256
+    static let maxScenes = 64
+    static let maxEntitiesPerScene = 500
+    static let maxTotalEntities = 2_000
+    static let maxRules = 256
+    static let maxInputBindings = 32
+}
+
+extension GamePackageResponse {
+    func validate(expectedGameID: String) throws {
+        guard packageVersion == "2.0", gameId == expectedGameID,
+              ir.irVersion == "1.0", ir.game.id == gameId,
+              !ir.game.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !ir.scenes.isEmpty, ir.scenes.count <= PlayerLimits.maxScenes,
+              ir.assets.count <= PlayerLimits.maxAssets, assets.count <= PlayerLimits.maxAssets,
+              ir.rules.count <= PlayerLimits.maxRules,
+              ir.inputBindings.count <= PlayerLimits.maxInputBindings,
+              ir.scenes.contains(where: { $0.id == ir.game.entryScene }) else {
+            throw BundledPlayerState.PlayerError.invalidPackage
+        }
+        var irAssetIDs = Set<String>()
+        for asset in ir.assets {
+            guard irAssetIDs.insert(asset.id).inserted else {
+                throw BundledPlayerState.PlayerError.invalidPackage
+            }
+        }
+        let irAssets = Dictionary(uniqueKeysWithValues: ir.assets.map { ($0.id, $0) })
+        var packageAssetIDs = Set<String>()
+        for asset in assets {
+            guard !asset.id.isEmpty, asset.id.utf8.count <= 64,
+                  packageAssetIDs.insert(asset.id).inserted,
+                  let declared = irAssets[asset.id],
+                  declared.uri == asset.uri, declared.kind == asset.kind else {
+                throw BundledPlayerState.PlayerError.invalidPackage
+            }
+        }
+        guard packageAssetIDs == Set(irAssets.keys) else { throw BundledPlayerState.PlayerError.invalidPackage }
+        var entityIDs = Set<String>()
+        var totalEntities = 0
+        for scene in ir.scenes {
+            guard !scene.id.isEmpty, scene.entities.count <= PlayerLimits.maxEntitiesPerScene else {
+                throw BundledPlayerState.PlayerError.invalidPackage
+            }
+            totalEntities += scene.entities.count
+            for entity in scene.entities {
+                guard !entity.id.isEmpty, entityIDs.insert(entity.id).inserted,
+                      entity.position.count == 2, entity.position.allSatisfy({ $0.isFinite && abs($0) <= 100_000 }),
+                      entity.size == nil || (entity.size!.count == 2 && entity.size!.allSatisfy({ $0.isFinite && $0 > 0 && $0 <= 100_000 })),
+                      entity.assetId == nil || irAssets[entity.assetId!] != nil else {
+                    throw BundledPlayerState.PlayerError.invalidPackage
+                }
+            }
+        }
+        guard totalEntities <= PlayerLimits.maxTotalEntities else { throw BundledPlayerState.PlayerError.invalidPackage }
+        let supportedActions: Set<String> = ["add_score", "set_variable", "move_entity", "destroy_entity", "show_text", "set_health", "end_game"]
+        let supportedEvents: Set<String> = ["game_start", "input", "collision", "collected", "timer_elapsed", "score_reached", "health_changed", "scene_entered"]
+        for rule in ir.rules {
+            guard !rule.id.isEmpty, supportedEvents.contains(rule.when.event),
+                  !rule.actions.isEmpty, rule.actions.count <= 16,
+                  rule.actions.allSatisfy({ supportedActions.contains($0.type) }),
+                  rule.when.source == nil || entityIDs.contains(rule.when.source!),
+                  rule.when.target == nil || entityIDs.contains(rule.when.target!) else {
+                throw BundledPlayerState.PlayerError.invalidPackage
+            }
+        }
+    }
+}
+
 
 private extension GamePackageResponse {
     var irVersionIsValid: Bool { ir.irVersion == "1.0" && ir.game.id == gameId }
