@@ -372,7 +372,7 @@ final class BundledPlayerState: ObservableObject {
         }
     }
 
-    private static func validatedAssetURL(_ raw: String, gameID: String, assetID: String) throws -> URL {
+    static func validatedAssetURL(_ raw: String, gameID: String, assetID: String) throws -> URL {
         guard validIdentifier(assetID),
               let url = URL(string: raw, relativeTo: BackendConfig.baseURL)?.absoluteURL,
               let base = URLComponents(url: BackendConfig.baseURL, resolvingAgainstBaseURL: false),
@@ -453,6 +453,10 @@ extension GamePackageResponse {
                   declared.uri == asset.uri, declared.kind == asset.kind else {
                 throw BundledPlayerState.PlayerError.invalidPackage
             }
+            // Reject unsafe URLs before accepting the package; validate again before download.
+            _ = try BundledPlayerState.validatedAssetURL(
+                asset.url, gameID: expectedGameID, assetID: asset.id
+            )
         }
         guard packageAssetIDs == Set(irAssets.keys) else { throw BundledPlayerState.PlayerError.invalidPackage }
         var entityIDs = Set<String>()

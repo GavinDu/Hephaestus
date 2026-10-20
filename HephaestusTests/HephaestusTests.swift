@@ -84,6 +84,23 @@ struct HephaestusTests {
     }
 
     @MainActor
+    @Test func rejectsPackageWithUnexpectedSameOriginAssetPath() throws {
+        let json = """
+        {
+          "packageVersion":"2.0","gameId":"fixture-game",
+          "ir":{"irVersion":"1.0","game":{"id":"fixture-game","title":"Fixture","entryScene":"main","orientation":"portrait"},
+            "assets":[{"id":"sprite","kind":"image","uri":"sprites/sprite.png"}],
+            "scenes":[{"id":"main","entities":[]}],"inputBindings":[],"rules":[]},
+          "assets":[{"id":"sprite","kind":"image","uri":"sprites/sprite.png","url":"https://html-5-game-generator.replit.app/player"}]
+        }
+        """.data(using: .utf8)!
+        let package = try JSONDecoder().decode(GamePackageResponse.self, from: json)
+        #expect(throws: BundledPlayerState.PlayerError.self) {
+            try package.validate(expectedGameID: "fixture-game")
+        }
+    }
+
+    @MainActor
     @Test func rejectsUnsupportedRuntimeActionsBeforePlay() throws {
         let json = """
         {
