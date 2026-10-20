@@ -48,3 +48,8 @@ Hephaestus now decodes package version `2.0` (`gameId`, canonical `ir`, asset de
 - The entry scene's background image is rendered when available; `game_start` rules run when a new runtime is created.
 - The initial supported gameplay subset is drag movement, overlap collection, score updates, entity removal, status text, health, and end/restart. Scene changes, spawning, and audio are not implemented yet and must not be assumed playable.
 - Run the `Hephaestus` scheme and `HephaestusTests` in Xcode on a simulator/device. This repository-editing environment cannot execute Xcode builds.
+
+
+## Local Xcode verification
+
+Open `Hephaestus.xcodeproj`, select the `Hephaestus` scheme and an iOS Simulator, then choose **Product → Test**. The GitHub Actions workflow builds for iOS Simulator and runs the Game IR unit tests. Simulator/device validation remains necessary for touch handling and layout.

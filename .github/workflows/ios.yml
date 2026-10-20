@@ -1,0 +1,19 @@
+name: iOS build and tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, feat/native-game-ir-player]
+
+jobs:
+  xcode:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: List Xcode schemes
+        run: xcodebuild -list -project Hephaestus.xcodeproj
+      - name: Build for iOS Simulator
+        run: xcodebuild -project Hephaestus.xcodeproj -scheme Hephaestus -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - name: Run unit tests
+        run: xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO
