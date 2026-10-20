@@ -57,6 +57,7 @@ struct HephaestusTests {
         #expect(runtime.destroyedIDs.contains("pickup"))
     }
 
+    @MainActor
     @Test func rejectsUnknownIRVersion() throws {
         let json = """
         {"irVersion":"9.0","game":{"id":"g","title":"G","entryScene":"main","orientation":"portrait"},
