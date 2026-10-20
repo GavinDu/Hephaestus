@@ -34,3 +34,8 @@ Manage Xcode target membership and resource removal in Xcode or project tooling;
 ## First vertical slice
 
 Implement Bobo's Rainbow from a local Game IR fixture in Defold. Draw background/sprites, move the player by touch/drag, detect collection, update score and end the game at the target score. Add remote delivery only after the local interpreter and contract tests pass.
+
+
+## Native Game IR player implementation
+
+Hephaestus now decodes package version `2.0` (`gameId`, canonical `ir`, asset descriptors) and runs a native SwiftUI interpreter for Game IR `1.0`. The first playable subset renders entities and downloaded image assets, supports drag movement, detects player/pickup overlap, applies `add_score` and `destroy_entity`, displays score/status, and supports `end_game`/restart. Unsupported actions fail closed rather than executing downloaded code. The Xcode unit tests cover package decoding, collection/actions, and unsupported IR versions. Run the `Hephaestus` and `HephaestusTests` schemes locally to verify on the target simulator/device; no Xcode toolchain is available in this editing session.
