@@ -39,3 +39,12 @@ Implement Bobo's Rainbow from a local Game IR fixture in Defold. Draw background
 ## Native Game IR player implementation
 
 Hephaestus now decodes package version `2.0` (`gameId`, canonical `ir`, asset descriptors) and runs a native SwiftUI interpreter for Game IR `1.0`. The first playable subset renders entities and downloaded image assets, supports drag movement, detects player/pickup overlap, applies `add_score` and `destroy_entity`, displays score/status, and supports `end_game`/restart. Unsupported actions fail closed rather than executing downloaded code. The Xcode unit tests cover package decoding, collection/actions, and unsupported IR versions. Run the `Hephaestus` and `HephaestusTests` schemes locally to verify on the target simulator/device; no Xcode toolchain is available in this editing session.
+
+
+### Current runtime behavior
+
+- Package v2.0 is fetched from `GET /v1/games/{id}/package`; image assets are fetched through the returned asset descriptors.
+- Game IR 1.0 is interpreted as declarative data only. The iOS runtime does not evaluate downloaded scripts.
+- The entry scene's background image is rendered when available; `game_start` rules run when a new runtime is created.
+- The initial supported gameplay subset is drag movement, overlap collection, score updates, entity removal, status text, health, and end/restart. Scene changes, spawning, and audio are not implemented yet and must not be assumed playable.
+- Run the `Hephaestus` scheme and `HephaestusTests` in Xcode on a simulator/device. This repository-editing environment cannot execute Xcode builds.
