@@ -112,14 +112,30 @@ final class BackendAPI: ObservableObject {
     }
 
     private func send<T: Decodable>(_ type: T.Type, _ req: URLRequest) async throws -> T {
-        let (data, resp) = try await session.data(for: req)
-        guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw APIError.badStatus((resp as? HTTPURLResponse)?.statusCode ?? -1)
-        }
+        let method = req.httpMethod ?? "GET"
+        let path = req.url?.path ?? "?"
+        let started = Date()
         do {
-            return try JSONDecoder().decode(T.self, from: data)
+            let (data, resp) = try await session.data(for: req)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                DevLog.error(.api, "\(method) \(path) -> \(status) (\(ms)ms)")
+                throw APIError.badStatus(status)
+            }
+            DevLog.info(.api, "\(method) \(path) -> \(status) (\(ms)ms, \(data.count) B)")
+            do {
+                return try JSONDecoder().decode(T.self, from: data)
+            } catch {
+                DevLog.error(.api, "\(method) \(path) decode failed: \(error.localizedDescription)")
+                throw APIError.decoding(error)
+            }
+        } catch let err as APIError {
+            throw err
         } catch {
-            throw APIError.decoding(error)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            DevLog.error(.api, "\(method) \(path) network error (\(ms)ms): \(error.localizedDescription)")
+            throw error
         }
     }
 
@@ -130,8 +146,10 @@ final class BackendAPI: ObservableObject {
             let req = try makeRequest("healthz")
             let (data, _) = try await session.data(for: req)
             isHealthy = (try? JSONDecoder().decode([String: String].self, from: data))?["status"] == "ok"
+            DevLog.info(.api, "healthz -> \(isHealthy ? "ok" : "unexpected body")")
         } catch {
             isHealthy = false
+            DevLog.warn(.api, "healthz failed: \(error.localizedDescription)")
         }
     }
 

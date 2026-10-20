@@ -171,6 +171,7 @@ final class GameIRRuntime: ObservableObject {
         self.scene = scene
         self.images = images
         self.positions = Dictionary(uniqueKeysWithValues: scene.entities.map { ($0.id, $0.logicalPosition) })
+        DevLog.info(.runtime, "start '\(document.game.id)' scene '\(scene.id)': \(scene.entities.count) entities, \(document.rules.count) rules, \(images.count) images")
         emit(event: "game_start")
     }
 
@@ -199,6 +200,7 @@ final class GameIRRuntime: ObservableObject {
         statusMessage = nil
         isEnded = false
         didWin = false
+        DevLog.info(.runtime, "restart '\(document.game.id)'")
         emit(event: "game_start")
     }
 
@@ -262,6 +264,7 @@ final class GameIRRuntime: ObservableObject {
 
     private func emit(event: String, source: String? = nil, target: String? = nil, value: Double? = nil) {
         for rule in document.rules where ruleMatches(rule, event: event, source: source, target: target, value: value) {
+            DevLog.info(.runtime, "rule '\(rule.id)' fired by \(event)\(source.map { " src=\($0)" } ?? "")\(target.map { " tgt=\($0)" } ?? "")")
             execute(rule.actions)
             if isEnded { break }
         }
@@ -289,9 +292,11 @@ final class GameIRRuntime: ObservableObject {
             case "end_game":
                 isEnded = true
                 didWin = action.value?.boolValue ?? ((action.value?.numberValue ?? 0) != 0)
+                DevLog.info(.runtime, "game ended: \(didWin ? "WIN" : "LOSE"), score \(score), health \(health)")
             case "change_scene", "spawn_entity", "play_sound":
                 // These actions are reserved by the contract; this first iOS slice
                 // fails closed by not executing unsupported scene/audio/spawn behavior.
+                DevLog.warn(.runtime, "unsupported action '\(action.type)' skipped (fail-closed)")
                 if action.type == "change_scene" { statusMessage = "Scene changes are not supported by this player yet." }
             default:
                 break
@@ -321,6 +326,7 @@ final class BundledPlayerState: ObservableObject {
 
     func load(gameID: String) async {
         phase = .loading
+        DevLog.info(.package, "load \(gameID): fetching package")
         do {
             guard Self.validIdentifier(gameID) else { throw PlayerError.invalidPackage }
             var request = URLRequest(url: BackendConfig.baseURL
@@ -329,13 +335,17 @@ final class BundledPlayerState: ObservableObject {
                 .appendingPathComponent("package"))
             request.timeoutInterval = 15
             request.setValue(BackendConfig.userID, forHTTPHeaderField: "X-User-ID")
+            let started = Date()
             let (data, response) = try await URLSession.shared.data(for: request)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
             guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
                 throw PlayerError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
             }
+            DevLog.info(.package, "load \(gameID): package 200 (\(ms)ms, \(data.count) B)")
             guard data.count <= PlayerLimits.maxPackageBytes else { throw PlayerError.packageTooLarge }
             let package = try JSONDecoder().decode(GamePackageResponse.self, from: data)
             try package.validate(expectedGameID: gameID)
+            DevLog.info(.package, "load \(gameID): validated package v\(package.packageVersion), IR v\(package.ir.irVersion), \(package.assets.count) assets, \(package.ir.scenes.count) scenes, \(package.ir.rules.count) rules")
             var images: [String: UIImage] = [:]
             var totalAssetBytes = 0
             for asset in package.assets where asset.kind == "image" {
@@ -358,9 +368,12 @@ final class BundledPlayerState: ObservableObject {
                 }
                 guard let image = UIImage(data: assetData) else { throw PlayerError.invalidImage(asset.id) }
                 images[asset.id] = image
+                DevLog.info(.package, "load \(gameID): asset '\(asset.id)' ok (\(assetData.count) B\(asset.sha256 != nil ? ", sha256 verified" : ""))")
             }
+            DevLog.info(.package, "load \(gameID): \(images.count) images ready, \(totalAssetBytes) B total")
             phase = .ready(try GameIRRuntime(document: package.ir, images: images))
         } catch {
+            DevLog.error(.package, "load \(gameID) failed: \(error.localizedDescription)")
             phase = .failed(error.localizedDescription)
         }
     }

@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UIKit
 
 // MARK: - Shared pieces
 
@@ -384,6 +385,7 @@ struct LibraryView: View {
 struct ProfileView: View {
     @State private var backendOK = false
     @State private var checked = false
+    @State private var logEntries = DevLog.shared.count
 
     var body: some View {
         NavigationStack {
@@ -426,8 +428,29 @@ struct ProfileView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Section("Diagnostics") {
+                    HStack {
+                        Text("Session log")
+                        Spacer()
+                        Text("\(logEntries) entries")
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("Copy session log") {
+                        UIPasteboard.general.string = DevLog.shared.exportText()
+                        DevLog.info(.app, "session log copied (\(DevLog.shared.count) entries)")
+                        logEntries = DevLog.shared.count
+                    }
+                    ShareLink(item: DevLog.shared.exportText()) {
+                        Text("Share session log")
+                    }
+                    Button("Clear log", role: .destructive) {
+                        DevLog.shared.clear()
+                        logEntries = DevLog.shared.count
+                    }
+                }
             }
             .navigationTitle("Profile")
+            .onAppear { logEntries = DevLog.shared.count }
             .task {
                 await BackendAPI.shared.checkHealth()
                 backendOK = BackendAPI.shared.isHealthy
