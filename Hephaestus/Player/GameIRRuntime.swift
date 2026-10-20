@@ -68,12 +68,12 @@ struct GameIREntity: Decodable, Identifiable {
     let properties: [String: JSONValue]?
 
     var logicalSize: CGSize {
-        CGSize(width: max(8, size?.first ?? 48),
-               height: max(8, size?.dropFirst().first ?? size?.first ?? 48))
+        CGSize(width: CGFloat(max(8, size?.first ?? 48)),
+               height: CGFloat(max(8, size?.dropFirst().first ?? size?.first ?? 48)))
     }
 
     var logicalPosition: CGPoint {
-        CGPoint(x: position.first ?? 195, y: position.dropFirst().first ?? 422)
+        CGPoint(x: CGFloat(position.first ?? 195), y: CGFloat(position.dropFirst().first ?? 422))
     }
 }
 
