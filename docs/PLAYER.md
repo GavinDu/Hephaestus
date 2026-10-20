@@ -1,77 +1,36 @@
-# Player integration (WKWebView)
+# Player architecture and breaking runtime migration
 
-## Bundled-runtime player (current architecture, 2026-10-11)
+## Target: Defold interpreter for Game IR
 
-The app no longer loads the remote `/player` page for HTML5 games. Instead:
+Hephaestus should ship one primary game runtime: a Defold-based iOS/iPadOS interpreter for the versioned, engine-independent Game IR defined by the Game Inventory backend.
 
-- **Runtime ships in the app binary.** `Hephaestus/Player/Resources/bundled-player.html`
-  contains the fixed GameShim v1 runtime (`window.HephaestusBoot`, `SHIM_VERSION =
-  "gameshim/v1"`), extracted from the backend's browser player
-  (`internal/api/web/player.html` in GavinDu/html5-game-generator). If the backend
-  runtime changes, update this file and bump the version together with the manifest
-  `shim` field.
-- **Only game data comes from the network.** On Play, the app fetches
-  `GET /v1/games/{id}/package` (the data-plane descriptor: manifest + runtime
-  handshake + relative data URLs) and injects it into the shell via one-way
-  `evaluateJavaScript` (base64-encoded JSON — no quoting hazards).
-- **Handshake lives in Swift.** `BundledPlayerState` compares
-  `package.runtime.required` against `bundledRuntimeVersion` *before* the WebView
-  boots. Mismatch shows a native "update the app" screen; the game never loads.
-- **Bridgeless by design.** No `WKScriptMessageHandlers` — game code can never call
-  into native code (4.7.2 posture: no native API exposure to hosted content).
-  Score submission uses plain `fetch()` from inside the shell, same as the browser.
-- **Files:** `Hephaestus/Player/BundledPlayerView.swift` (package models, state
-  machine, `BundledPlayerView`, `BundledPlayerSheet`) wired into Discover and
-  Create via `BundledPlayerRequest`. The legacy `WebPlayerView`/`PlayerSheet`
-  remain for the Godot section and as fallback.
+- Backend contract: [Game IR v1](https://github.com/GavinDu/html5-game-generator/blob/main/docs/game-package-ir-v1.md), [schema](https://github.com/GavinDu/html5-game-generator/blob/main/schemas/game-ir-v1.schema.json), and [Bobo's Rainbow fixture](https://github.com/GavinDu/html5-game-generator/blob/main/examples/game-ir-v1/bobos-rainbow.json). The current package API is version 2.0 and returns canonical `ir` plus asset descriptors.
+- The canonical package must not contain Defold project files, HTML/JavaScript source, arbitrary downloaded Lua, native libraries or unrestricted native API calls.
+- The Defold runtime interprets an allowlisted set of scenes, entities, components, input bindings, events and actions. Unknown IR versions and unsupported capabilities fail closed.
+- Defold Live Update is resource delivery/mounting, not a scene compiler; the runtime still implements Game IR semantics.
+- The app owns device permissions and native services. Game packages receive only explicitly authorized assets through the bounded runtime interface.
 
-**Xcode steps (must be done in Xcode, never by hand-editing the pbxproj):**
-1. Add `Hephaestus/Player/BundledPlayerView.swift` to the Hephaestus target.
-2. Add `Hephaestus/Player/Resources/bundled-player.html` to the target's
-   Copy Bundle Resources (it is loaded via `Bundle.main.url(forResource:)`).
+## Breaking migration policy
 
-## The short version (legacy remote player)
+Do not preserve the existing player/API shape merely for compatibility. Change backend package models, API contracts and Swift models together when the new contract is ready. Prefer deleting obsolete branches over maintaining two permanent runtimes.
 
-Load `GET /player` in a WKWebView. It lists public games (HTML5 GameShim
-bundles, played inline) plus a **GODOT VERSIONS** section linking to the
-Godot 4.7 web builds at `/godot/{game}/`.
+The existing HTML5/GameShim player may be used temporarily as a test oracle, but it is not a long-term fallback promise. After Defold passes the contract suite:
+1. Remove bundled GameShim JavaScript and related Swift package models/state.
+2. Remove legacy remote HTML player and obsolete Godot paths/selection branches.
+3. Replace the old package endpoint/model with the canonical versioned Game Package API.
+4. If published legacy games matter, use a one-time conversion job and report games that cannot be converted; do not retain an old runtime without a demonstrated requirement.
 
-## App Store strategy (guideline 4.7)
+Manage Xcode target membership and resource removal in Xcode or project tooling; do not hand-edit `pbxproj` blindly.
 
-Games are HTML5/WASM executed in WKWebView — no downloadable native code —
-which keeps the app on the guideline 4.7 path (the same rule that allows
-other game-creation apps). Verified 2026-10-06/07:
+## Acceptance gates
 
-- Godot 4.3+ web export defaults to single-threaded and **works on iOS**.
-- **GDScript only**: Godot 4 cannot export C# (or native GDExtension modules)
-  to web. All Godot games must stay GDScript while web is the distribution
-  path. Native iOS export remains a later, higher-performance option.
+1. **Contract:** schema + semantic validation, negative fixtures, resource budgets and package integrity checks.
+2. **Interpreter:** local fixture executes movement, collision, collection, score, state changes and end-game rules.
+3. **Determinism:** same fixture and input trace produce the same gameplay state transitions.
+4. **iOS:** orientation, safe areas, memory, performance, lifecycle interruption/resume and asset cleanup pass on physical iPhone and iPad.
+5. **Network/cache:** package integrity, offline cache, interrupted download and corrupt-package rejection work.
+6. **Security/review:** no arbitrary script/native code execution; required moderation/report/block/takedown flows exist. No engine choice guarantees App Review approval.
 
-## What the player serves
+## First vertical slice
 
-| URL | Content |
-|---|---|
-| `/player` | Game list + inline HTML5 player (canvas 390×844) |
-| `/v1/feed` | Public games JSON the player lists |
-| `/v1/godot` | `[{id, title, ready, url}]` for the Godot builds |
-| `/godot/{game}/` | Full Godot engine page (own HTML shell, not an iframe) |
-
-The server sends `Cross-Origin-Opener-Policy: same-origin` and
-`Cross-Origin-Embedder-Policy: require-corp` on `/godot/*` — required by the
-Godot 4 web runtime. WKWebView respects these headers; no app-side work
-needed. First load of a Godot game takes ~30–60s (server fetches/extracts a
-~10MB zip on first request, then caches it).
-
-## Native bridge surface (GameShim v1)
-
-HTML5 games run against a small JS bridge injected before `game.js`. If the
-app wants native hooks (haptics, share sheet, telemetry), expose them on
-`window.webkit.messageHandlers` and mirror the existing `Shim.*` surface:
-`Shim.audio.*`, `Shim.store.get/set`, `Shim.end({score, won, stats})`,
-`Shim.log(event, data)`.
-
-## Current games
-
-- Bobo's Rainbow (HTML5 + Godot) — catch falling hearts, endless meta-levels
-- Ribbon Mends the Sky (HTML5 + Godot) — tap-to-stitch sky holes, dodge demons
-- Escape from the Injection (HTML5 + Godot) — 3-lane syringe dodge chase
+Implement Bobo's Rainbow from a local Game IR fixture in Defold. Draw background/sprites, move the player by touch/drag, detect collection, update score and end the game at the target score. Add remote delivery only after the local interpreter and contract tests pass.
