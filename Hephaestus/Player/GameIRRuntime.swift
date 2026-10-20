@@ -137,6 +137,7 @@ indirect enum JSONValue: Decodable {
 
     var numberValue: Double? { if case .number(let v) = self { return v }; return nil }
     var stringValue: String? { if case .string(let v) = self { return v }; return nil }
+    var boolValue: Bool? { if case .bool(let v) = self { return v }; return nil }
 }
 
 // MARK: - Runtime engine (only allowlisted declarative actions)
@@ -259,7 +260,7 @@ final class GameIRRuntime: ObservableObject {
                 if health == 0 { isEnded = true; didWin = false }
             case "end_game":
                 isEnded = true
-                didWin = (action.value?.numberValue != 0 && action.value?.stringValue != "false")
+                didWin = action.value?.boolValue ?? ((action.value?.numberValue ?? 0) != 0)
             case "change_scene", "spawn_entity", "play_sound":
                 // These actions are reserved by the contract; this first iOS slice
                 // fails closed by not executing unsupported scene/audio/spawn behavior.
