@@ -426,7 +426,7 @@ private enum PlayerLimits {
     static let maxInputBindings = 32
 }
 
-private extension GamePackageResponse {
+extension GamePackageResponse {
     func validate(expectedGameID: String) throws {
         guard packageVersion == "2.0", gameId == expectedGameID,
               ir.irVersion == "1.0", ir.game.id == gameId,
@@ -438,8 +438,13 @@ private extension GamePackageResponse {
               ir.scenes.contains(where: { $0.id == ir.game.entryScene }) else {
             throw BundledPlayerState.PlayerError.invalidPackage
         }
+        var irAssetIDs = Set<String>()
+        for asset in ir.assets {
+            guard irAssetIDs.insert(asset.id).inserted else {
+                throw BundledPlayerState.PlayerError.invalidPackage
+            }
+        }
         let irAssets = Dictionary(uniqueKeysWithValues: ir.assets.map { ($0.id, $0) })
-        guard irAssets.count == ir.assets.count else { throw BundledPlayerState.PlayerError.invalidPackage }
         var packageAssetIDs = Set<String>()
         for asset in assets {
             guard !asset.id.isEmpty, asset.id.utf8.count <= 64,

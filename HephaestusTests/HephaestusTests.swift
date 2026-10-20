@@ -66,6 +66,7 @@ struct HephaestusTests {
         let doc = try JSONDecoder().decode(GameIRDocument.self, from: json)
         #expect(throws: GameIRRuntime.RuntimeError.self) { try GameIRRuntime(document: doc) }
     }
+    @MainActor
     @Test func rejectsPackageWithUnsafeAssetURL() throws {
         let json = """
         {
@@ -82,6 +83,7 @@ struct HephaestusTests {
         }
     }
 
+    @MainActor
     @Test func rejectsUnsupportedRuntimeActionsBeforePlay() throws {
         let json = """
         {
