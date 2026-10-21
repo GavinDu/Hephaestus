@@ -25,6 +25,7 @@ enum DevLogCategory: String {
     case player = "PLAYER"
     case create = "CREATE"
     case ui = "UI"
+    case ai = "AI"
 }
 
 enum DevLogLevel: String {
