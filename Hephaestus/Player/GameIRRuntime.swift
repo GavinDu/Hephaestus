@@ -68,6 +68,7 @@ struct GameIREntity: Decodable, Identifiable {
     let size: [Double]?
     let components: [String]
     let properties: [String: JSONValue]?
+    let behavior: GameIRBehavior?
 
     var logicalSize: CGSize {
         CGSize(width: CGFloat(max(8, size?.first ?? 48)),
@@ -77,6 +78,16 @@ struct GameIREntity: Decodable, Identifiable {
     var logicalPosition: CGPoint {
         CGPoint(x: CGFloat(position.first ?? 195), y: CGFloat(position.dropFirst().first ?? 422))
     }
+}
+
+/// Autonomous motion declared in the IR, interpreted by the runtime tick
+/// loop: fall (down at speed px/s, wraps; collected falling pickups
+/// respawn at the top), chase (toward the player), patrol (horizontal
+/// oscillation around the authored position), oscillate (vertical).
+struct GameIRBehavior: Decodable {
+    let type: String
+    let speed: Double?
+    let range: Double?
 }
 
 struct GameIRInputBinding: Decodable {
@@ -159,6 +170,12 @@ final class GameIRRuntime: ObservableObject {
 
     private var variables: [String: Double] = [:]
     private var collectedPairs = Set<String>()
+    private var hazardContacts = Set<String>()
+    private var anchors: [String: CGPoint] = [:]
+    private var tickTask: Task<Void, Never>?
+    private var lastTick: Date?
+    private var elapsed: Double = 0
+    private var respawnIndex = 0
 
     init(document: GameIRDocument, images: [String: UIImage] = [:]) throws {
         guard document.irVersion == "1.0" else {
@@ -171,8 +188,112 @@ final class GameIRRuntime: ObservableObject {
         self.scene = scene
         self.images = images
         self.positions = Dictionary(uniqueKeysWithValues: scene.entities.map { ($0.id, $0.logicalPosition) })
-        DevLog.info(.runtime, "start '\(document.game.id)' scene '\(scene.id)': \(scene.entities.count) entities, \(document.rules.count) rules, \(images.count) images")
+        self.anchors = self.positions
+        DevLog.info(.runtime, "start '\(document.game.id)' scene '\(scene.id)': \(scene.entities.count) entities (\(scene.entities.filter { $0.behavior != nil }.count) animated), \(document.rules.count) rules, \(images.count) images")
         emit(event: "game_start")
+        startLoop()
+    }
+
+    deinit {
+        tickTask?.cancel()
+    }
+
+    // MARK: - Tick loop (autonomous motion)
+
+    private func startLoop() {
+        tickTask?.cancel()
+        lastTick = Date()
+        tickTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(33))
+                guard let self else { return }
+                self.tick()
+            }
+        }
+    }
+
+    /// One motion step: apply each entity's IR behavior, then re-check
+    /// pickups and hazards — collisions no longer depend on the player
+    /// dragging. Falling pickups are renewable: on wrap or after being
+    /// collected they re-enter at the top in a fresh column.
+    private func tick() {
+        guard !isEnded else { return }
+        let now = Date()
+        let dt = min(now.timeIntervalSince(lastTick ?? now), 0.05)
+        lastTick = now
+        guard dt > 0 else { return }
+        elapsed += dt
+        guard let player = scene.entities.first(where: { $0.kind == "player" || $0.components.contains("movement") }),
+              let playerPos = positions[player.id] else { return }
+
+        for entity in scene.entities {
+            guard let behavior = entity.behavior else { continue }
+            let size = entity.logicalSize
+            if destroyedIDs.contains(entity.id) {
+                if behavior.type == "fall" {
+                    destroyedIDs.remove(entity.id)
+                    collectedPairs.remove(player.id + ":" + entity.id)
+                    respawnIndex += 1
+                    positions[entity.id] = CGPoint(x: CGFloat(50 + (respawnIndex * 83) % 290),
+                                                   y: -size.height / 2)
+                }
+                continue
+            }
+            guard var pos = positions[entity.id] else { continue }
+            switch behavior.type {
+            case "fall":
+                pos.y += CGFloat(behavior.speed ?? 80) * CGFloat(dt)
+                if pos.y > 844 + size.height / 2 {
+                    respawnIndex += 1
+                    pos = CGPoint(x: CGFloat(50 + (respawnIndex * 83) % 290), y: -size.height / 2)
+                }
+                positions[entity.id] = pos
+            case "chase":
+                let dx = playerPos.x - pos.x
+                let dy = playerPos.y - pos.y
+                let dist = max(1, sqrt(dx * dx + dy * dy))
+                let step = min(CGFloat(behavior.speed ?? 50) * CGFloat(dt), dist)
+                positions[entity.id] = CGPoint(x: pos.x + dx / dist * step,
+                                               y: pos.y + dy / dist * step)
+            case "patrol":
+                let anchor = anchors[entity.id] ?? entity.logicalPosition
+                positions[entity.id] = CGPoint(
+                    x: anchor.x + CGFloat(sin(elapsed * (behavior.speed ?? 1))) * CGFloat(behavior.range ?? 60),
+                    y: anchor.y)
+            case "oscillate":
+                let anchor = anchors[entity.id] ?? entity.logicalPosition
+                positions[entity.id] = CGPoint(
+                    x: anchor.x,
+                    y: anchor.y + CGFloat(sin(elapsed * (behavior.speed ?? 1.2))) * CGFloat(behavior.range ?? 10))
+            default:
+                break
+            }
+        }
+        checkCollections(player: player)
+        checkHazards(player: player)
+    }
+
+    /// Enemy/obstacle contact, emitted once per approach as the
+    /// "collision" event IR rules listen for.
+    private func checkHazards(player: GameIREntity) {
+        guard let playerPosition = positions[player.id] else { return }
+        for target in visibleEntities where target.id != player.id &&
+            (target.kind == "obstacle" || target.kind == "enemy") {
+            guard let targetPosition = positions[target.id] else { continue }
+            let dx = abs(playerPosition.x - targetPosition.x)
+            let dy = abs(playerPosition.y - targetPosition.y)
+            let touching = dx < (player.logicalSize.width + target.logicalSize.width) * 0.45 &&
+                           dy < (player.logicalSize.height + target.logicalSize.height) * 0.45
+            if touching {
+                if !hazardContacts.contains(target.id) {
+                    hazardContacts.insert(target.id)
+                    DevLog.info(.runtime, "hazard contact: \(target.id)")
+                    emit(event: "collision", source: player.id, target: target.id)
+                }
+            } else {
+                hazardContacts.remove(target.id)
+            }
+        }
     }
 
     enum RuntimeError: LocalizedError {
@@ -192,9 +313,14 @@ final class GameIRRuntime: ObservableObject {
 
     func restart() {
         positions = Dictionary(uniqueKeysWithValues: scene.entities.map { ($0.id, $0.logicalPosition) })
+        anchors = positions
         destroyedIDs.removeAll()
         collectedPairs.removeAll()
+        hazardContacts.removeAll()
         variables.removeAll()
+        elapsed = 0
+        respawnIndex = 0
+        lastTick = Date()
         score = 0
         health = 3
         statusMessage = nil
@@ -213,6 +339,7 @@ final class GameIRRuntime: ObservableObject {
         positions[player.id] = CGPoint(x: min(390 - halfW, max(halfW, point.x)),
                                        y: min(844 - halfH, max(halfH, point.y)))
         checkCollections(player: player)
+        checkHazards(player: player)
     }
 
     private func checkCollections(player: GameIREntity) {
