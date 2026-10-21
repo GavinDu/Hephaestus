@@ -37,7 +37,7 @@ enum RecentGames {
 /// Public games feed. HTML5 games open the bundled player.
 struct DiscoverView: View {
     @State private var games: [FeedGame] = []
-    @State private var bundledRequest: BundledPlayerRequest?
+    @State private var playerRequest: PixiPlayerRequest?
     @State private var errorMessage: String?
     @State private var isLoading = false
 
@@ -56,7 +56,7 @@ struct DiscoverView: View {
                             Spacer()
                             Button("Play") {
                                 RecentGames.record(gameID: game.id, title: game.title)
-                                bundledRequest = BundledPlayerRequest(gameID: game.id, title: game.title)
+                                playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
                             }
                             .buttonStyle(.borderedProminent)
                         }
@@ -66,8 +66,8 @@ struct DiscoverView: View {
             .navigationTitle("Discover")
             .refreshable { await load() }
             .task { await load() }
-            .fullScreenCover(item: $bundledRequest) { req in
-                BundledPlayerSheet(gameID: req.gameID, title: req.title)
+            .fullScreenCover(item: $playerRequest) { req in
+                PixiPlayerSheet(gameID: req.gameID, title: req.title)
             }
             .overlay {
                 if isLoading && games.isEmpty {
@@ -109,7 +109,7 @@ struct CreateView: View {
     @State private var previewImage: UIImage?
     @State private var keywordsText = ""
     @State private var intentText = ""
-    @State private var bundledRequest: BundledPlayerRequest?
+    @State private var playerRequest: PixiPlayerRequest?
 
     var body: some View {
         NavigationStack {
@@ -139,8 +139,8 @@ struct CreateView: View {
                 }
             }
             .navigationTitle("Create")
-            .fullScreenCover(item: $bundledRequest) { req in
-                BundledPlayerSheet(gameID: req.gameID, title: req.title)
+            .fullScreenCover(item: $playerRequest) { req in
+                PixiPlayerSheet(gameID: req.gameID, title: req.title)
             }
         }
     }
@@ -256,7 +256,7 @@ struct CreateView: View {
                 .foregroundStyle(.green)
             Text("Your game is ready!").font(.title2)
             Button("Play now") {
-                bundledRequest = BundledPlayerRequest(gameID: gameID, title: "Your game")
+                playerRequest = PixiPlayerRequest(gameID: gameID, title: "Your game")
             }
             .buttonStyle(.borderedProminent)
             Button("Make another") { reset() }
