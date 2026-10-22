@@ -386,6 +386,10 @@ struct ProfileView: View {
     @State private var backendOK = false
     @State private var checked = false
     @State private var logEntries = DevLog.shared.count
+    @State private var incidents: [BackendAPI.IncidentSummary] = []
+    @State private var incidentsLoaded = false
+    @State private var incidentsError: String?
+    @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
 
     var body: some View {
         NavigationStack {
@@ -448,6 +452,37 @@ struct ProfileView: View {
                         logEntries = DevLog.shared.count
                     }
                 }
+                Section("Player health") {
+                    HStack {
+                        Text("Quality")
+                        Spacer()
+                        Text("\(qualityRaw) → \(PlayerQuality.effective(preference: PlayerQuality(rawValue: qualityRaw) ?? .auto))")
+                            .foregroundStyle(.secondary)
+                    }
+                    if let incidentsError {
+                        Text(incidentsError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else if incidentsLoaded && incidents.isEmpty {
+                        Text("No incidents reported — players are healthy.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(incidents.prefix(5)) { inc in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("×\(inc.count) \(inc.sampleName)\(inc.runtimeScope ? " · runtime-wide" : "")")
+                                    .font(.subheadline)
+                                Text(inc.games.joined(separator: ", "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    Button("Refresh player health") {
+                        Task { await loadIncidents() }
+                    }
+                }
             }
             .navigationTitle("Profile")
             .onAppear { logEntries = DevLog.shared.count }
@@ -455,7 +490,19 @@ struct ProfileView: View {
                 await BackendAPI.shared.checkHealth()
                 backendOK = BackendAPI.shared.isHealthy
                 checked = true
+                await loadIncidents()
             }
+        }
+    }
+
+    private func loadIncidents() async {
+        do {
+            incidents = try await BackendAPI.shared.fetchIncidents()
+            incidentsError = nil
+            incidentsLoaded = true
+        } catch {
+            incidentsError = "Couldn't load incidents: \(error.localizedDescription)"
+            incidentsLoaded = true
         }
     }
 }
