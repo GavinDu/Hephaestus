@@ -72,13 +72,22 @@ jobs:
             [ "$code" = "200" ] && break
             sleep 5
           done
+          # Boot the device ourselves and wait for it, then forbid
+          # parallel-testing clones: across four runs the failure was
+          # never inside the test — xcodebuild's "Clone 1 of iPhone 17
+          # Pro" either stalled ~63s before the test started or had its
+          # runner launch denied by SpringBoard outright
+          # (FBSOpenApplicationServiceErrorDomain). Running on the
+          # booted device itself removes the clone from the path.
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
           # Single attempt, deliberately: the earlier manual retry ran
           # xcodebuild back-to-back against the same destination and the
           # second run's simulator clone was denied launch by
           # SpringBoard in two consecutive runs — the retry produced
           # noise, not signal.
           set -o pipefail
-          xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusUITests/PlayerSmokeTests -resultBundlePath /tmp/smoke.xcresult CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/smoke.log
+          xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusUITests/PlayerSmokeTests -parallel-testing-enabled NO -resultBundlePath /tmp/smoke.xcresult CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/smoke.log
       - name: Upload smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
