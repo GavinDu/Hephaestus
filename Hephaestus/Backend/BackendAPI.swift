@@ -158,6 +158,49 @@ final class BackendAPI: ObservableObject {
         return try await send(FeedResponse.self, req).games
     }
 
+    // MARK: - Player telemetry + incidents (detect-and-fix flow)
+
+    /// One telemetry report, mirroring the web runtime's beacon payload
+    /// so the backend files web and native player events in one store.
+    struct PlayerTelemetryReport: Encodable {
+        var gameId: String
+        var runtimeVersion: String
+        var kind: String
+        var name: String
+        var message: String
+        var stack: String = ""
+        var logTail: [String] = []
+    }
+
+    /// Fire-and-forget: telemetry must never fail the user, so errors
+    /// are swallowed by design (the dev log keeps the local record).
+    func postPlayerTelemetry(_ report: PlayerTelemetryReport) async {
+        guard let req = try? makeRequest("v1/telemetry/runtime-error", method: "POST", body: report) else { return }
+        _ = try? await session.data(for: req)
+    }
+
+    struct IncidentSummary: Decodable, Identifiable {
+        var fingerprint: String
+        var count: Int
+        var games: [String]
+        var sampleName: String
+        var sampleMessage: String
+        var lastSeen: String
+        var runtimeScope: Bool
+        var id: String { fingerprint }
+    }
+
+    private struct IncidentsResponse: Decodable {
+        var incidents: [IncidentSummary]
+    }
+
+    /// Aggregated runtime-error incidents from the backend (web + iOS
+    /// player events in one view), worst first.
+    func fetchIncidents() async throws -> [IncidentSummary] {
+        let req = try makeRequest("v1/telemetry/incidents")
+        return try await send(IncidentsResponse.self, req).incidents
+    }
+
     struct IngestBody: Encodable {
         var images: [[String: String]]
         var keywords: [String]
