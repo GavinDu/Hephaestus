@@ -22,14 +22,17 @@ final class PlayerSmokeTests: XCTestCase {
     func testDiscoverLaunchesPlayer() throws {
         let app = XCUIApplication()
         app.launch()
+        print("SMOKE: app launched")
 
-        // The Discover feed comes from the live backend; a cold runner
-        // plus a cold backend can be slow, so the waits are generous.
-        // On failure the message carries the UI hierarchy — the CI log
-        // is the only diagnostic this job produces.
+        // The Discover feed comes from the live backend; the workflow
+        // warms the deployment first, but the wait still leaves room
+        // for a slow first response. On failure the message carries
+        // the UI hierarchy — the CI log is the only diagnostic this
+        // job produces.
         let play = app.buttons["Play"].firstMatch
-        XCTAssertTrue(play.waitForExistence(timeout: 60),
+        XCTAssertTrue(play.waitForExistence(timeout: 120),
                       "Discover feed should offer at least one Play button. UI: \(app.debugDescription)")
+        print("SMOKE: Play button visible")
         play.tap()
 
         // The player is a bridgeless WKWebView in a full-screen sheet;
@@ -38,6 +41,7 @@ final class PlayerSmokeTests: XCTestCase {
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 30),
                       "Player sheet should host a WKWebView. UI: \(app.debugDescription)")
+        print("SMOKE: player web view visible")
 
         // Let the game boot, then keep a screenshot as evidence.
         _ = XCTWaiter.wait(for: [expectation(description: "boot settle")], timeout: 6)
