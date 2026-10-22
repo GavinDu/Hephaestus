@@ -243,7 +243,7 @@ private struct GameFeedCard: View {
                     Label(isSaved ? "Saved" : "Save",
                           systemImage: isSaved ? "heart.fill" : "heart")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isSaved ? .pink : .primary)
+                        .foregroundStyle(isSaved ? Color.pink : Color.primary)
                         .frame(minHeight: 44)
                 }
                 .buttonStyle(.plain)
