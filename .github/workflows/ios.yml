@@ -61,11 +61,21 @@ jobs:
           fi
           echo "Smoke testing on iPhone simulator $UDID"
           set +e
-          xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusUITests/PlayerSmokeTests CODE_SIGNING_ALLOWED=NO
-          status=$?
+          xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusUITests/PlayerSmokeTests -resultBundlePath /tmp/smoke.xcresult CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/smoke.log
+          status=${PIPESTATUS[0]}
           if [ $status -ne 0 ]; then
             echo "First smoke attempt failed with exit $status; retrying once"
-            xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusUITests/PlayerSmokeTests CODE_SIGNING_ALLOWED=NO
-            status=$?
+            xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusUITests/PlayerSmokeTests -resultBundlePath /tmp/smoke2.xcresult CODE_SIGNING_ALLOWED=NO 2>&1 | tee -a /tmp/smoke.log
+            status=${PIPESTATUS[0]}
           fi
           exit $status
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-smoke
+          path: |
+            /tmp/smoke.log
+            /tmp/smoke.xcresult
+            /tmp/smoke2.xcresult
+          if-no-files-found: ignore
