@@ -1,23 +1,111 @@
+import Network
 import SwiftUI
+import UIKit
 import WebKit
 
 // MARK: - Player presentation
 //
 // The player is the PixiJS + Rapier Game IR runtime — the single runtime
-// since the 2026-10-20 consolidation (the native Swift IR interpreter in
-// GameIRRuntime.swift was removed, along with Defold and Godot). The
-// runtime is served by the backend at /player and embedded here in a
-// bridgeless WKWebView: no WKScriptMessageHandler, no evaluateJavaScript
-// control channel, no native API exposure (App Store Guideline 4.7
-// posture). The web player loads its Game IR package over HTTPS from the
-// backend exactly like any browser; this shell only hosts the page and
-// surfaces load failures honestly.
+// since the 2026-10-20 consolidation. The runtime is served by the backend
+// at /player and embedded here in a bridgeless WKWebView: no
+// WKScriptMessageHandler, no evaluateJavaScript control channel, no
+// native API exposure (App Store Guideline 4.7 posture). Everything this
+// shell does for resource control, performance, and telemetry respects
+// that boundary:
+//   - performance reaches the page only as a URL parameter (?quality=),
+//     never as a script call;
+//   - telemetry leaves the app as ordinary HTTPS POSTs from the app's
+//     own networking (the same endpoint the page beacons to), never as
+//     a message from the page;
+//   - lifecycle signals come from WKNavigationDelegate, KVO on the web
+//     view, and OS notifications — all native-side.
 
 struct PixiPlayerRequest: Identifiable {
     let id = UUID()
     let gameID: String
     let title: String
 }
+
+// MARK: - Quality (performance control)
+
+/// The family's quality preference for the player. `auto` resolves at
+/// load time from device pressure: Low Power Mode or a serious/critical
+/// thermal state drops the effective quality to low. The effective value
+/// reaches the runtime as ?quality=, where low caps render resolution
+/// at 1x, disables antialiasing, and shrinks particle pools.
+enum PlayerQuality: String, CaseIterable {
+    case auto, high, low
+
+    static let defaultsKey = "hephaestus.playerQuality"
+
+    static func effective(preference: PlayerQuality) -> String {
+        switch preference {
+        case .high:
+            return "high"
+        case .low:
+            return "low"
+        case .auto:
+            let info = ProcessInfo.processInfo
+            if info.isLowPowerModeEnabled { return "low" }
+            switch info.thermalState {
+            case .serious, .critical:
+                return "low"
+            default:
+                return "high"
+            }
+        }
+    }
+}
+
+// MARK: - Telemetry (monitoring)
+
+/// Fire-and-forget reports to the backend's telemetry endpoint — the
+/// same store the web runtime beacons its errors to, so one incidents
+/// view covers web and native player health. Kinds: `perf` samples are
+/// filed server-side but never counted as incidents; the `ios-*` kinds
+/// are real failure signals and aggregate like web errors. Payloads
+/// carry no account identifiers and no user content — game id, event
+/// kind, a message, and the tail of the on-device dev log.
+enum PlayerTelemetry {
+    static func report(gameID: String?, kind: String, name: String, message: String) {
+        let tail = DevLog.shared.exportText()
+            .split(separator: "\n").suffix(20).map(String.init)
+        let report = BackendAPI.PlayerTelemetryReport(
+            gameId: gameID ?? "",
+            runtimeVersion: "ios-player-1.1",
+            kind: kind,
+            name: name,
+            message: message,
+            logTail: tail
+        )
+        Task.detached {
+            await BackendAPI.shared.postPlayerTelemetry(report)
+        }
+    }
+}
+
+// MARK: - Reachability
+
+/// Minimal path monitor for the player sheet: an offline device should
+/// get an honest offline state, not an endless spinner.
+final class PlayerPathMonitor: ObservableObject {
+    @Published var isOffline = false
+    private let monitor = NWPathMonitor()
+    private let queue = DispatchQueue(label: "hephaestus.player.path")
+
+    init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                self?.isOffline = path.status != .satisfied
+            }
+        }
+        monitor.start(queue: queue)
+    }
+
+    deinit { monitor.cancel() }
+}
+
+// MARK: - Sheet
 
 struct PixiPlayerSheet: View {
     let gameID: String
@@ -26,11 +114,30 @@ struct PixiPlayerSheet: View {
     @State private var isLoading = true
     @State private var loadError: String?
     @State private var attempt = 0
+    @State private var progress: Double = 0
+    @State private var showSlowHint = false
+    @State private var loadStartedAt = Date()
+    @State private var autoReloads = 0
+    @State private var reportedThermal = false
+    @State private var reportedMemoryWarning = false
+    @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
+    @StateObject private var pathMonitor = PlayerPathMonitor()
+
+    private var qualityPreference: PlayerQuality {
+        PlayerQuality(rawValue: qualityRaw) ?? .auto
+    }
+
+    private var effectiveQuality: String {
+        PlayerQuality.effective(preference: qualityPreference)
+    }
 
     private var playerURL: URL? {
         var components = URLComponents(url: BackendConfig.baseURL, resolvingAgainstBaseURL: false)
         components?.path = "/player"
-        components?.queryItems = [URLQueryItem(name: "game", value: gameID)]
+        components?.queryItems = [
+            URLQueryItem(name: "game", value: gameID),
+            URLQueryItem(name: "quality", value: effectiveQuality),
+        ]
         return components?.url
     }
 
@@ -40,15 +147,44 @@ struct PixiPlayerSheet: View {
                 if let url = playerURL {
                     PlayerWebView(
                         url: url,
+                        onProgress: { progress = $0 },
                         onLoadFinish: {
                             isLoading = false
                             loadError = nil
-                            DevLog.info(.player, "player loaded \(gameID)")
+                            let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
+                            DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
+                            PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
+                                                   message: "loaded in \(ms)ms quality=\(effectiveQuality)")
                         },
                         onLoadFail: { message in
                             isLoading = false
                             loadError = message
                             DevLog.error(.player, "player load failed for \(gameID): \(message)")
+                            PlayerTelemetry.report(gameID: gameID, kind: "ios-load-failed",
+                                                   name: "LoadFailed", message: message)
+                        },
+                        onTerminate: {
+                            // The web content process died (usually
+                            // memory pressure): the page is a white
+                            // void unless we reload it ourselves.
+                            if autoReloads < 2 {
+                                autoReloads += 1
+                                DevLog.warn(.player, "web content process terminated for \(gameID); auto-reload \(autoReloads)/2")
+                                PlayerTelemetry.report(gameID: gameID, kind: "ios-webview-terminated",
+                                                       name: "WebContentProcessTerminated",
+                                                       message: "auto-reload \(autoReloads) of 2")
+                                loadError = nil
+                                isLoading = true
+                                loadStartedAt = Date()
+                                attempt += 1
+                            } else {
+                                isLoading = false
+                                loadError = "The player kept stopping — its web process ended repeatedly. Close and reopen the game."
+                                DevLog.error(.player, "web content process terminated repeatedly for \(gameID)")
+                                PlayerTelemetry.report(gameID: gameID, kind: "ios-webview-terminated",
+                                                       name: "WebContentProcessTerminated",
+                                                       message: "gave up after 2 auto-reloads")
+                            }
                         }
                     )
                     .id(attempt)
@@ -57,11 +193,35 @@ struct PixiPlayerSheet: View {
 
                 if isLoading && loadError == nil {
                     VStack(spacing: 12) {
-                        ProgressView()
+                        ProgressView(value: progress)
+                            .progressViewStyle(.linear)
+                            .frame(width: 180)
                         Text("Loading \(title)…")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        if showSlowHint {
+                            Text("Still loading — the connection may be slow.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                }
+
+                if pathMonitor.isOffline && loadError == nil {
+                    VStack(spacing: 14) {
+                        Image(systemName: "wifi.slash")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.secondary)
+                        Text("You're offline")
+                            .font(.headline)
+                        Text("Games load from the internet. Reconnect and the player will retry on its own.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.background)
                 }
 
                 if let loadError {
@@ -78,7 +238,9 @@ struct PixiPlayerSheet: View {
                             .padding(.horizontal, 32)
                         Button("Retry") {
                             self.loadError = nil
+                            self.autoReloads = 0
                             isLoading = true
+                            loadStartedAt = Date()
                             attempt += 1
                         }
                         .buttonStyle(.borderedProminent)
@@ -91,9 +253,64 @@ struct PixiPlayerSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Picker("Quality", selection: $qualityRaw) {
+                            ForEach(PlayerQuality.allCases, id: \.rawValue) { q in
+                                Text(q == .auto ? "Auto" : (q == .high ? "High" : "Low"))
+                                    .tag(q.rawValue)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "gauge.with.dots.needle.67percent")
+                    }
+                    .accessibilityLabel("Player quality")
+                }
+            }
+            .onChange(of: qualityRaw) { _, _ in
+                // A new quality takes effect by reloading the player
+                // with the new URL parameter — no script channel.
+                DevLog.info(.player, "quality preference -> \(qualityRaw) (effective \(effectiveQuality))")
+                loadError = nil
+                isLoading = true
+                loadStartedAt = Date()
+                attempt += 1
+            }
+            .onChange(of: pathMonitor.isOffline) { _, offline in
+                if !offline, loadError != nil {
+                    // Back online after a failed load: one quiet retry.
+                    loadError = nil
+                    isLoading = true
+                    loadStartedAt = Date()
+                    attempt += 1
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+                if !reportedMemoryWarning {
+                    reportedMemoryWarning = true
+                    DevLog.warn(.player, "memory warning while player open for \(gameID)")
+                    PlayerTelemetry.report(gameID: gameID, kind: "ios-memory-warning",
+                                           name: "MemoryWarning", message: "UIApplication memory warning during play")
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
+                let state = ProcessInfo.processInfo.thermalState
+                if (state == .serious || state == .critical), !reportedThermal {
+                    reportedThermal = true
+                    DevLog.warn(.player, "thermal state \(state.rawValue) while player open for \(gameID)")
+                    PlayerTelemetry.report(gameID: gameID, kind: "ios-thermal",
+                                           name: "ThermalState", message: "thermal state serious/critical during play")
+                }
+            }
+            .task {
+                // Slow-load hint: still loading after 8s deserves an
+                // explanation, not just a longer stare at the spinner.
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                if isLoading { showSlowHint = true }
             }
             .onAppear {
-                DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView")
+                loadStartedAt = Date()
+                DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView (quality \(effectiveQuality))")
             }
         }
     }
@@ -103,24 +320,35 @@ struct PixiPlayerSheet: View {
 
 private struct PlayerWebView: UIViewRepresentable {
     let url: URL
+    let onProgress: (Double) -> Void
     let onLoadFinish: () -> Void
     let onLoadFail: (String) -> Void
+    let onTerminate: () -> Void
+
+    /// One process pool for every player web view: the web content
+    /// process (and its JIT/engine state) is reused across games
+    /// instead of being spun up cold on every open.
+    private static let processPool = WKProcessPool()
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onLoadFinish: onLoadFinish, onLoadFail: onLoadFail)
+        Coordinator(onProgress: onProgress, onLoadFinish: onLoadFinish,
+                    onLoadFail: onLoadFail, onTerminate: onTerminate)
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         // Deliberately no script message handlers and no user scripts:
         // the web runtime must not reach native code (bridgeless).
+        configuration.processPool = Self.processPool
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.applicationNameForUserAgent = "HephaestusPlayer/1.1"
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        context.coordinator.observeProgress(of: webView)
         webView.load(URLRequest(url: url))
         return webView
     }
@@ -130,16 +358,46 @@ private struct PlayerWebView: UIViewRepresentable {
         // sheet), so there is nothing to update in place.
     }
 
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.stopObserving()
+        webView.navigationDelegate = nil
+        webView.stopLoading()
+    }
+
     final class Coordinator: NSObject, WKNavigationDelegate {
+        let onProgress: (Double) -> Void
         let onLoadFinish: () -> Void
         let onLoadFail: (String) -> Void
+        let onTerminate: () -> Void
+        private var progressObservation: NSKeyValueObservation?
 
-        init(onLoadFinish: @escaping () -> Void, onLoadFail: @escaping (String) -> Void) {
+        init(onProgress: @escaping (Double) -> Void,
+             onLoadFinish: @escaping () -> Void,
+             onLoadFail: @escaping (String) -> Void,
+             onTerminate: @escaping () -> Void) {
+            self.onProgress = onProgress
             self.onLoadFinish = onLoadFinish
             self.onLoadFail = onLoadFail
+            self.onTerminate = onTerminate
+        }
+
+        func observeProgress(of webView: WKWebView) {
+            progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
+                self?.onProgress(view.estimatedProgress)
+            }
+        }
+
+        func stopObserving() {
+            progressObservation?.invalidate()
+            progressObservation = nil
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            onProgress(0)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            onProgress(1)
             onLoadFinish()
         }
 
@@ -149,6 +407,10 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             onLoadFail(error.localizedDescription)
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            onTerminate()
         }
     }
 }
