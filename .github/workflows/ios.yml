@@ -60,15 +60,25 @@ jobs:
             exit 1
           fi
           echo "Smoke testing on iPhone simulator $UDID"
-          set +e
+          # Warm the production backend first: the Replit deployment
+          # cold-starts after idle, and its first response can take most
+          # of a minute — the app's feed fetch should not have to absorb
+          # that inside the test's wait budget. (Three consecutive CI
+          # runs failed with the Play button appearing just past the
+          # 60s wait while a warm backend answers in ~1s.)
+          for i in $(seq 1 18); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://html-5-game-generator.replit.app/v1/feed || true)
+            echo "backend warm-up attempt $i: HTTP $code"
+            [ "$code" = "200" ] && break
+            sleep 5
+          done
+          # Single attempt, deliberately: the earlier manual retry ran
+          # xcodebuild back-to-back against the same destination and the
+          # second run's simulator clone was denied launch by
+          # SpringBoard in two consecutive runs — the retry produced
+          # noise, not signal.
+          set -o pipefail
           xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusUITests/PlayerSmokeTests -resultBundlePath /tmp/smoke.xcresult CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/smoke.log
-          status=${PIPESTATUS[0]}
-          if [ $status -ne 0 ]; then
-            echo "First smoke attempt failed with exit $status; retrying once"
-            xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusUITests/PlayerSmokeTests -resultBundlePath /tmp/smoke2.xcresult CODE_SIGNING_ALLOWED=NO 2>&1 | tee -a /tmp/smoke.log
-            status=${PIPESTATUS[0]}
-          fi
-          exit $status
       - name: Upload smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -77,5 +87,4 @@ jobs:
           path: |
             /tmp/smoke.log
             /tmp/smoke.xcresult
-            /tmp/smoke2.xcresult
           if-no-files-found: ignore
