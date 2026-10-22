@@ -23,20 +23,24 @@ final class PlayerSmokeTests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        // The Discover feed comes from the live backend; give it time.
+        // The Discover feed comes from the live backend; a cold runner
+        // plus a cold backend can be slow, so the waits are generous.
+        // On failure the message carries the UI hierarchy — the CI log
+        // is the only diagnostic this job produces.
         let play = app.buttons["Play"].firstMatch
-        XCTAssertTrue(play.waitForExistence(timeout: 30),
-                      "Discover feed should offer at least one Play button")
+        XCTAssertTrue(play.waitForExistence(timeout: 60),
+                      "Discover feed should offer at least one Play button. UI: \(app.debugDescription)")
         play.tap()
 
-        // The player is a bridgeless WKWebView in a full-screen sheet.
+        // The player is a bridgeless WKWebView in a full-screen sheet;
+        // the web view is in the hierarchy from the moment the sheet
+        // presents (a loading overlay sits on top while it boots).
         let web = app.webViews.firstMatch
-        XCTAssertTrue(web.waitForExistence(timeout: 20),
-                      "Player sheet should host a WKWebView")
+        XCTAssertTrue(web.waitForExistence(timeout: 30),
+                      "Player sheet should host a WKWebView. UI: \(app.debugDescription)")
 
         // Let the game boot, then keep a screenshot as evidence.
-        let bootWait = XCTWaiter.wait(for: [expectation(description: "boot settle")], timeout: 6)
-        _ = bootWait
+        _ = XCTWaiter.wait(for: [expectation(description: "boot settle")], timeout: 6)
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "player-after-boot"
         shot.lifetime = .keepAlways
