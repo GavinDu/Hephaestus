@@ -34,8 +34,8 @@ enum RecentGames {
 
 // MARK: - Discover
 
-/// The three feed destinations are visible now; social feeds stay honest until
-/// authenticated account and relationship endpoints are available.
+/// Backend-backed social feeds use the current development identity. Follow
+/// edges are intentionally ephemeral and X-User-ID is not production authentication.
 struct DiscoverView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedFeed: SocialFeedScope = .forYou
@@ -241,15 +241,20 @@ struct DiscoverView: View {
     private func loadMore() async {
         guard let cursor = nextCursor, !isLoadingMore else { return }
         let requestedScope = selectedFeed
+        let requestedGeneration = loadGeneration
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
             let page = try await BackendAPI.shared.fetchFeed(scope: requestedScope, cursor: cursor)
-            guard requestedScope == selectedFeed else { return }
+            guard requestedScope == selectedFeed, requestedGeneration == loadGeneration else { return }
             var seen = Set(games.map(\.id))
             games.append(contentsOf: page.games.filter { seen.insert($0.id).inserted })
             nextCursor = page.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
-        } catch { errorMessage = "Couldn't load more games: \(error.localizedDescription)" }
+        } catch {
+            if requestedGeneration == loadGeneration {
+                errorMessage = "Couldn't load more games: \(error.localizedDescription)"
+            }
+        }
     }
 
     private func toggleSaved(_ game: FeedGame) {
@@ -279,7 +284,9 @@ struct DiscoverView: View {
         do {
             try await BackendAPI.shared.setFollowing(creatorID, following: shouldFollow)
             if shouldFollow { followedCreatorIDs.insert(creatorID) } else { followedCreatorIDs.remove(creatorID) }
-            await BackendAPI.shared.trackSocialEvent(gameID: games.first(where: { $0.ownerID == creatorID })?.id ?? "", kind: "follow")
+            if let gameID = games.first(where: { $0.ownerID == creatorID })?.id {
+                await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "follow")
+            }
             await load()
         } catch { errorMessage = "Couldn't update follow: \(error.localizedDescription)" }
     }
