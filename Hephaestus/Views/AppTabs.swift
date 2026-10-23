@@ -34,8 +34,7 @@ enum RecentGames {
 
 // MARK: - Discover
 
-/// The three feed destinations are visible now; social feeds stay honest until
-/// authenticated account and relationship endpoints are available.
+/// Feed scope values map to the backend's public, following, and mutual-follow feeds.
 enum SocialFeedScope: String, CaseIterable, Identifiable {
     case forYou
     case following
@@ -266,55 +265,6 @@ struct DiscoverView: View {
             guard generation == feedLoadGeneration else { return }
             errorMessage = error.localizedDescription
         }
-    }
-}
-
-/// A deliberate empty state rather than showing the public catalog as a user's
-/// Following or Friends feed before the social graph is connected.
-private struct SocialFeedUnavailableView: View {
-    let scope: SocialFeedScope
-    let onExplore: () -> Void
-
-    private var title: String {
-        switch scope {
-        case .forYou: "Discover games"
-        case .following: "Your Following feed starts here"
-        case .friends: "Your Friends feed starts here"
-        }
-    }
-
-    private var message: String {
-        switch scope {
-        case .forYou:
-            "Discover games from the wider community."
-        case .following:
-            "Posts from creators you follow will appear here when account and follow services are connected."
-        case .friends:
-            "Games from mutual follows and friend recommendations will appear here when the social graph is connected."
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: scope == .friends ? "person.2" : "person.crop.circle.badge.clock")
-                .font(.system(size: 36))
-                .foregroundStyle(.secondary)
-            Text(title)
-                .font(.headline)
-                .multilineTextAlignment(.center)
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-            Button("Explore For You", action: onExplore)
-                .buttonStyle(.borderedProminent)
-                .padding(.top, 4)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
-        .accessibilityElement(children: .contain)
     }
 }
 
