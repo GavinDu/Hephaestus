@@ -29,9 +29,11 @@ final class PlayerSmokeTests: XCTestCase {
         // for a slow first response. On failure the message carries
         // the UI hierarchy — the CI log is the only diagnostic this
         // job produces.
-        let play = app.buttons["Play"].firstMatch
+        // Use a stable identifier instead of matching visible copy ("Play now"),
+        // which can change as the social-feed card design evolves.
+        let play = app.buttons["game.play"].firstMatch
         XCTAssertTrue(play.waitForExistence(timeout: 120),
-                      "Discover feed should offer at least one Play button. UI: \(app.debugDescription)")
+                      "Discover feed should offer at least one playable game card. UI: \(app.debugDescription)")
         print("SMOKE: Play button visible")
         play.tap()
 

@@ -9,6 +9,11 @@ import Testing
 // App-level tests will regrow around the WebView player and the
 // creation flow.
 struct HephaestusTests {
+    @Test func socialFeedScopesAreStableAndDistinct() {
+        #expect(SocialFeedScope.allCases.map(\.rawValue) == ["forYou", "following", "friends"])
+        #expect(SocialFeedScope.allCases.map(\.title) == ["For You", "Following", "Friends"])
+    }
+
     @Test func backendConfigIsSane() {
         #expect(BackendConfig.baseURL.scheme == "https")
         #expect(!BackendConfig.userID.isEmpty)
