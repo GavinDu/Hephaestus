@@ -47,3 +47,36 @@ struct HephaestusTests {
         #expect(game.topics == ["puzzle", "family"])
         #expect(game.publishedVersion == 1)
     }
+
+    @Test func creatorDiscoveryDecodesSearchResultsAndCursor() throws {
+        let json = """
+        {
+          "creators": [
+            {
+              "creator_id": "alice",
+              "post_count": 3,
+              "topics": ["puzzle", "family"]
+            }
+          ],
+          "next_cursor": "alice"
+        }
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(CreatorDiscoveryResponse.self, from: json)
+        #expect(response.creators.count == 1)
+        #expect(response.creators[0].id == "alice")
+        #expect(response.creators[0].post_count == 3)
+        #expect(response.creators[0].topics == ["puzzle", "family"])
+        #expect(response.next_cursor == "alice")
+    }
+
+    @Test func creatorDiscoveryDecodesEmptyResultsWithoutCursor() throws {
+        let json = """
+        {
+          "creators": [],
+          "next_cursor": ""
+        }
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(CreatorDiscoveryResponse.self, from: json)
+        #expect(response.creators.isEmpty)
+        #expect(response.next_cursor == "")
+    }
