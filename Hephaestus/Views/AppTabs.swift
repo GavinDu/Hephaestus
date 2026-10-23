@@ -50,6 +50,9 @@ struct DiscoverView: View {
     @State private var loadGeneration = 0
     @State private var nextCursor: String?
     @State private var isLoadingMore = false
+    @State private var loadGeneration = 0
+    @State private var appliedSearchText = ""
+    @State private var appliedTopicText = ""
     @State private var commentsGame: FeedGame?
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
@@ -655,31 +658,39 @@ private struct CreatorDiscoverySheet: View {
 
     private func load(reset: Bool) async {
         if reset {
-            isLoading = true
+            loadGeneration += 1
+            appliedSearchText = searchText
+            appliedTopicText = topicText
             nextCursor = nil
+            isLoading = true
+            isLoadingMore = false
         } else {
-            guard nextCursor != nil, !isLoadingMore else { return }
+            guard nextCursor != nil, !isLoadingMore, !isLoading else { return }
             isLoadingMore = true
         }
+        let generation = loadGeneration
         defer {
+            guard generation == loadGeneration else { return }
             if reset { isLoading = false } else { isLoadingMore = false }
         }
         errorMessage = nil
         do {
             let response = try await BackendAPI.shared.fetchCreators(
-                query: searchText,
-                topic: topicText,
+                query: appliedSearchText,
+                topic: appliedTopicText,
                 cursor: reset ? nil : nextCursor
             )
+            guard generation == loadGeneration else { return }
             if reset {
                 creators = response.creators
             } else {
-                var seen = Set(creators.map(\.creator_id))
+                var seen = Set(creators.map(\\.creator_id))
                 creators.append(contentsOf: response.creators.filter { seen.insert($0.creator_id).inserted })
             }
             nextCursor = response.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
         } catch {
-            errorMessage = "Couldn't load creators: \(error.localizedDescription)"
+            guard generation == loadGeneration else { return }
+            errorMessage = "Couldn't load creators: \\(error.localizedDescription)"
         }
     }
 }
