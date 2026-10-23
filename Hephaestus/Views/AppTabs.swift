@@ -763,6 +763,9 @@ private struct CommentsSheet: View {
     @State private var errorMessage: String?
     @State private var isLoading = true
     @State private var isSubmitting = false
+    @State private var pendingCommentKey: String?
+    @State private var pendingCommentBody: String?
+    @State private var deletingCommentIDs = Set<String>()
 
     var body: some View {
         NavigationStack {
@@ -772,6 +775,16 @@ private struct CommentsSheet: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(comment.user_id).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         Text(comment.body)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if comment.user_id == BackendConfig.userID {
+                            Button(role: .destructive) {
+                                Task { await delete(comment) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .disabled(deletingCommentIDs.contains(comment.id))
+                        }
                     }
                 }
                 if let errorMessage { Text(errorMessage).font(.caption).foregroundStyle(.red).padding(.horizontal) }
@@ -799,13 +812,44 @@ private struct CommentsSheet: View {
     private func submit() async {
         let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return }
+        let key: String
+        if pendingCommentBody == body, let pendingCommentKey {
+            key = pendingCommentKey
+        } else {
+            key = UUID().uuidString
+            pendingCommentKey = key
+            pendingCommentBody = body
+        }
         isSubmitting = true
         defer { isSubmitting = false }
         do {
-            let comment = try await BackendAPI.shared.addComment(gameID: game.id, body: body)
-            comments.append(comment)
+            let comment = try await BackendAPI.shared.addComment(gameID: game.id, body: body, idempotencyKey: key)
+            if !comments.contains(where: { $0.id == comment.id }) {
+                comments.append(comment)
+            }
             draft = ""
-        } catch { errorMessage = error.localizedDescription }
+            pendingCommentKey = nil
+            pendingCommentBody = nil
+            errorMessage = nil
+        } catch {
+            // Keep the same key/body so retrying a request whose response was lost
+            // returns the original server comment instead of creating a duplicate.
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func delete(_ comment: SocialComment) async {
+        guard comment.user_id == BackendConfig.userID,
+              !deletingCommentIDs.contains(comment.id) else { return }
+        deletingCommentIDs.insert(comment.id)
+        defer { deletingCommentIDs.remove(comment.id) }
+        do {
+            try await BackendAPI.shared.deleteComment(gameID: game.id, commentID: comment.id)
+            comments.removeAll { $0.id == comment.id }
+            errorMessage = nil
+        } catch {
+            errorMessage = "Couldn't delete comment: \\(error.localizedDescription)"
+        }
     }
 }
 
