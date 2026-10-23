@@ -34,8 +34,27 @@ enum RecentGames {
 
 // MARK: - Discover
 
-/// A scroll-first feed where a game is the post, and play is the primary action.
+/// The three feed destinations are visible now; social feeds stay honest until
+/// authenticated account and relationship endpoints are available.
+enum SocialFeedScope: String, CaseIterable, Identifiable {
+    case forYou
+    case following
+    case friends
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .forYou: "For You"
+        case .following: "Following"
+        case .friends: "Friends"
+        }
+    }
+}
+
 struct DiscoverView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var selectedFeed: SocialFeedScope = .forYou
     @State private var games: [FeedGame] = []
     @State private var playerRequest: PixiPlayerRequest?
     @State private var errorMessage: String?
@@ -49,10 +68,25 @@ struct DiscoverView: View {
         return games.filter { $0.title.localizedCaseInsensitiveContains(query) }
     }
 
+    private var feedGridColumns: [GridItem] {
+        if horizontalSizeClass == .regular {
+            return [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
+        }
+        return [GridItem(.flexible())]
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
+                    Picker("Feed", selection: $selectedFeed) {
+                        ForEach(SocialFeedScope.allCases) { scope in
+                            Text(scope.title).tag(scope)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityLabel("Social feed")
+
                     VStack(alignment: .leading, spacing: 8) {
                         Label("PLAYABLE STORIES", systemImage: "sparkles")
                             .font(.caption.weight(.bold))
@@ -69,7 +103,13 @@ struct DiscoverView: View {
                     .padding(.vertical, 6)
                     .accessibilityElement(children: .combine)
 
-                    if isLoading && games.isEmpty {
+                    if selectedFeed != .forYou {
+                        SocialFeedUnavailableView(scope: selectedFeed) {
+                            selectedFeed = .forYou
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 44)
+                    } else if isLoading && games.isEmpty {
                         VStack(spacing: 12) {
                             ProgressView()
                             Text("Finding something fun…")
@@ -108,14 +148,17 @@ struct DiscoverView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 44)
                     } else {
-                        ForEach(visibleGames) { game in
-                            GameFeedCard(
-                                game: game,
-                                isSaved: savedGameIDs.contains(game.id),
-                                onPlay: { play(game) },
-                                onToggleSaved: { toggleSaved(game) }
-                            )
+                        LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: 18) {
+                            ForEach(visibleGames) { game in
+                                GameFeedCard(
+                                    game: game,
+                                    isSaved: savedGameIDs.contains(game.id),
+                                    onPlay: { play(game) },
+                                    onToggleSaved: { toggleSaved(game) }
+                                )
+                            }
                         }
+                        .frame(maxWidth: 1120)
                     }
 
                     if let errorMessage, !games.isEmpty {
@@ -178,6 +221,55 @@ struct DiscoverView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+/// A deliberate empty state rather than showing the public catalog as a user's
+/// Following or Friends feed before the social graph is connected.
+private struct SocialFeedUnavailableView: View {
+    let scope: SocialFeedScope
+    let onExplore: () -> Void
+
+    private var title: String {
+        switch scope {
+        case .forYou: "Discover games"
+        case .following: "Your Following feed starts here"
+        case .friends: "Your Friends feed starts here"
+        }
+    }
+
+    private var message: String {
+        switch scope {
+        case .forYou:
+            "Discover games from the wider community."
+        case .following:
+            "Posts from creators you follow will appear here when account and follow services are connected."
+        case .friends:
+            "Games from mutual follows and friend recommendations will appear here when the social graph is connected."
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: scope == .friends ? "person.2" : "person.crop.circle.badge.clock")
+                .font(.system(size: 36))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            Button("Explore For You", action: onExplore)
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 4)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+        .accessibilityElement(children: .contain)
     }
 }
 
