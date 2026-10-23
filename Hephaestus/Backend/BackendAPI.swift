@@ -239,7 +239,7 @@ final class BackendAPI: ObservableObject {
     private struct TopicPreferencesBody: Encodable { var muted_topics: [String] }
     private struct TopicPreferencesResponse: Decodable { var muted_topics: [String] }
     struct FeedPreferences: Decodable { var muted_topics: [String]; var not_interested_game_ids: [String] }
-    private struct EventBody: Encodable { var game_id: String; var kind: String; var duration_ms: Int; var expected_duration_ms: Int }
+    private struct EventBody: Encodable { var event_id: String; var game_id: String; var kind: String; var duration_ms: Int; var expected_duration_ms: Int }
 
     func fetchFeed(scope: SocialFeedScope = .forYou, cursor: String? = nil) async throws -> FeedResponse {
         var path = "v1/feed?scope=\(scope.rawValue)&limit=20"
@@ -333,9 +333,9 @@ final class BackendAPI: ObservableObject {
         let _: ActionResponse = try await send(ActionResponse.self, req)
     }
 
-    func trackSocialEvent(gameID: String, kind: String, durationMS: Int = 0, expectedMS: Int = 0) async {
+    func trackSocialEvent(gameID: String, kind: String, durationMS: Int = 0, expectedMS: Int = 0, eventID: String = UUID().uuidString) async {
         guard let req = try? makeRequest("v1/telemetry/social-event", method: "POST",
-                                         body: EventBody(game_id: gameID, kind: kind, duration_ms: durationMS, expected_duration_ms: expectedMS)) else { return }
+                                         body: EventBody(event_id: eventID, game_id: gameID, kind: kind, duration_ms: durationMS, expected_duration_ms: expectedMS)) else { return }
         _ = try? await session.data(for: req)
     }
 
