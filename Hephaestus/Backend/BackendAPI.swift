@@ -225,6 +225,7 @@ final class BackendAPI: ObservableObject {
     private struct ReportBody: Encodable { var reason: String }
     private struct FeedbackBody: Encodable { var kind: String }
     private struct TopicPreferencesBody: Encodable { var muted_topics: [String] }
+    private struct TopicPreferencesResponse: Decodable { var muted_topics: [String] }
     struct FeedPreferences: Decodable { var muted_topics: [String]; var not_interested_game_ids: [String] }
     private struct EventBody: Encodable { var game_id: String; var kind: String; var duration_ms: Int; var expected_duration_ms: Int }
 
@@ -306,7 +307,7 @@ final class BackendAPI: ObservableObject {
     func setMutedTopics(_ topics: [String]) async throws {
         let req = try makeRequest("v1/users/me/preferences/topics", method: "PUT",
                                   body: TopicPreferencesBody(muted_topics: topics))
-        let _: FeedPreferences = try await send(FeedPreferences.self, req)
+        let _: TopicPreferencesResponse = try await send(TopicPreferencesResponse.self, req)
     }
 
     func resetFeedPreferences() async throws {
