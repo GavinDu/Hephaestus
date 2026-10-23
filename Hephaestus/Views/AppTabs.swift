@@ -46,6 +46,8 @@ struct DiscoverView: View {
     @State private var searchText = ""
     @State private var savedGameIDs = Set<String>()
     @State private var followedCreatorIDs = Set<String>()
+    @State private var mutedTopics = Set<String>()
+    @State private var isFeedPreferencesPresented = false
     @State private var likedGameIDs = Set<String>()
     @State private var loadGeneration = 0
     @State private var nextCursor: String?
@@ -57,6 +59,10 @@ struct DiscoverView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return games }
         return games.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var availableTopics: [String] {
+        Array(Set(games.flatMap { $0.topics ?? [] }.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty })).sorted()
     }
 
     private var feedGridColumns: [GridItem] {
@@ -184,6 +190,14 @@ struct DiscoverView: View {
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Find a game")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        isFeedPreferencesPresented = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .accessibilityLabel("Tune feed recommendations")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await load() }
@@ -207,6 +221,14 @@ struct DiscoverView: View {
             }
             .sheet(item: $profileRequest) { request in
                 CreatorProfileSheet(creatorID: request.id)
+            }
+            .sheet(isPresented: $isFeedPreferencesPresented) {
+                FeedPreferencesSheet(
+                    availableTopics: availableTopics,
+                    selectedTopics: mutedTopics,
+                    onSave: { topics in saveMutedTopics(topics) },
+                    onReset: { resetFeedPreferences() }
+                )
             }
         }
     }
@@ -281,6 +303,30 @@ struct DiscoverView: View {
         } catch { errorMessage = "Couldn't save feedback: \(error.localizedDescription)" }
     }
 
+    private func saveMutedTopics(_ topics: [String]) {
+        Task {
+            do {
+                try await BackendAPI.shared.setMutedTopics(topics)
+                mutedTopics = Set(topics.map { $0.lowercased() })
+                await load()
+            } catch {
+                errorMessage = "Couldn't update feed preferences: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func resetFeedPreferences() {
+        Task {
+            do {
+                try await BackendAPI.shared.resetFeedPreferences()
+                mutedTopics.removeAll()
+                await load()
+            } catch {
+                errorMessage = "Couldn't reset feed preferences: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func load() async {
         loadGeneration += 1
         let generation = loadGeneration
@@ -298,6 +344,9 @@ struct DiscoverView: View {
             if let ids = try? await BackendAPI.shared.fetchSavedGameIDs(), generation == loadGeneration {
                 savedGameIDs = ids
                 UserDefaults.standard.set(ids.sorted(), forKey: "hephaestus.savedGames")
+            }
+            if let preferences = try? await BackendAPI.shared.fetchFeedPreferences(), generation == loadGeneration {
+                mutedTopics = Set(preferences.muted_topics.map { $0.lowercased() })
             }
         } catch {
             if generation == loadGeneration { errorMessage = error.localizedDescription }
@@ -1138,6 +1187,57 @@ struct ProfileView: View {
         } catch {
             incidentsError = "Couldn't load incidents: \(error.localizedDescription)"
             incidentsLoaded = true
+        }
+    }
+}
+
+
+private struct FeedPreferencesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let availableTopics: [String]
+    let selectedTopics: Set<String>
+    let onSave: ([String]) -> Void
+    let onReset: () -> Void
+    @State private var selected = Set<String>()
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Hide topics") {
+                    if availableTopics.isEmpty {
+                        Text("Topics will appear here as games with topics enter your feed.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(availableTopics, id: \.self) { topic in
+                        Toggle(topic, isOn: Binding(
+                            get: { selected.contains(topic) },
+                            set: { isMuted in
+                                if isMuted { selected.insert(topic) }
+                                else { selected.remove(topic) }
+                            }
+                        ))
+                    }
+                }
+                Section {
+                    Button("Save preferences") {
+                        onSave(selected.sorted())
+                        dismiss()
+                    }
+                    Button("Reset recommendations", role: .destructive) {
+                        selected.removeAll()
+                        onReset()
+                        dismiss()
+                    }
+                }
+            }
+            .navigationTitle("Tune your feed")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .onAppear { selected = selectedTopics }
         }
     }
 }
