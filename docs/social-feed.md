@@ -2,34 +2,30 @@
 
 ## Current client behavior
 
-- Compact-width windows use bottom navigation (Discover, Create, Library, Profile).
-- Regular-width windows use a persistent sidebar and a two-column game discovery grid.
-- Discover exposes For You, Following, and Friends feed scopes.
-- For You is connected to the existing public feed API.
-- Following and Friends show an explicit not-yet-connected state. They do not disguise the public catalog as a personalized/social feed.
-- Save and recent-play state are currently local to the device.
-- Game cards avoid fabricated creator names, avatars, engagement counts, or activity.
-- The current player remains the immersive destination for a game.
+- Compact-width windows use bottom navigation (Discover, Create, Library, Profile); regular-width windows use a sidebar and adaptive two-column discovery grid.
+- For You, Following, and Friends call distinct backend feed scopes. Friends means mutual follows.
+- Feed cards support creator profile views, follow/unfollow, like/unlike, comments, server-backed saves, sharing, reporting, blocking, and Not interested feedback.
+- New games can be published with a caption and topics from the creation completion screen. Publication enters moderation and is not shown in public discovery until approved.
+- Feed impressions and play starts are submitted as lightweight social events. Completion/replay/share events can be added where the player lifecycle can report them accurately.
+- Creator profiles show public posts and real relationship counts returned by the backend. The UI does not fabricate engagement metrics or avatars.
+- The native player remains the immersive destination for a game.
 
-## Backend contract needed to complete the social product
+## Backend endpoints used
 
-1. Authentication and stable account identity. The existing demo user ID header must not be treated as authentication.
-2. Creator profiles and follow/unfollow relationships. Mutual follows can initially define Friends.
-3. A published post/game model with immutable game-package version, creator ID, caption, topics, visibility, timestamps, moderation state, and remix attribution.
-4. Cursor-paginated endpoints for For You, Following, and Friends.
-5. Server-backed reactions, comments, saves, shares, reports, blocks, and creator/topic follows.
-6. Event ingestion for feed impressions, play starts, normalized play duration, completion, replay, shares, follows, and negative feedback.
-7. Server-side moderation/eligibility before content enters public recommendation feeds.
+- `GET /v1/feed?scope=for_you|following|friends`
+- `GET /v1/users/me/following`, `GET /v1/users/me/saved`
+- `GET /v1/users/{id}`, `POST|DELETE /v1/users/{id}/follow`
+- `POST /v1/games/{id}/publish`
+- `POST|DELETE /v1/games/{id}/reactions`
+- `GET|POST /v1/games/{id}/comments`
+- `POST|DELETE /v1/games/{id}/save`
+- `POST /v1/games/{id}/report`, `POST|DELETE /v1/users/{id}/block`
+- `POST /v1/games/{id}/feedback`, `POST /v1/telemetry/social-event`
 
-Suggested initial API shape (names are proposals, not implemented endpoints):
+## Explicit limitations
 
-- GET /v1/feed?scope=for_you&cursor=...
-- GET /v1/feed?scope=following&cursor=...
-- GET /v1/feed?scope=friends&cursor=...
-- POST /v1/posts (publish a validated immutable game version with caption/topics)
-- POST /v1/users/{id}/follow and DELETE /v1/users/{id}/follow
-- POST /v1/posts/{id}/reactions
-- POST /v1/posts/{id}/comments
-- POST /v1/events
-
-The client should only enable a feed mode when the corresponding authenticated API is available. Publishing should be an explicit, validated server operation, not a local-only success message.
+- Authentication is still the development `X-User-ID` identity and is not trusted authentication.
+- Follow relationships remain process-local by deliberate deferral. Social interactions use a lightweight server-side JSON snapshot when configured by the backend; this is not a substitute for a database or multi-instance shared storage.
+- Moderation approval is an operator action guarded by `DQ_MODERATION_TOKEN`; no automated content classifier or moderation dashboard is claimed.
+- For You uses a simple explainable freshness/engagement baseline, not machine-learned personalization. Recommendation quality should be evaluated against actual usage before adding complexity.
+- Media delivery remains the existing backend package/asset endpoints. CDN/object storage should be adopted only when package size, bandwidth, and latency measurements justify it.

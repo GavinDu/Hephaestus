@@ -10,7 +10,7 @@ import Testing
 // creation flow.
 struct HephaestusTests {
     @Test func socialFeedScopesAreStableAndDistinct() {
-        #expect(SocialFeedScope.allCases.map(\.rawValue) == ["forYou", "following", "friends"])
+        #expect(SocialFeedScope.allCases.map(\.rawValue) == ["for_you", "following", "friends"])
         #expect(SocialFeedScope.allCases.map(\.title) == ["For You", "Following", "Friends"])
     }
 
@@ -26,3 +26,24 @@ struct HephaestusTests {
         #expect(DevLog.shared.exportText().contains("test entry"))
     }
 }
+
+
+    @Test func feedGameDecodesSocialPostMetadata() throws {
+        let json = """
+        {
+          "game_id": "game-1",
+          "title": "Tiny Adventure",
+          "owner_id": "creator-1",
+          "caption": "A small story",
+          "topics": ["puzzle", "family"],
+          "published_version": 1,
+          "moderation_status": "approved"
+        }
+        """.data(using: .utf8)!
+        let game = try JSONDecoder().decode(FeedGame.self, from: json)
+        #expect(game.id == "game-1")
+        #expect(game.ownerID == "creator-1")
+        #expect(game.caption == "A small story")
+        #expect(game.topics == ["puzzle", "family"])
+        #expect(game.publishedVersion == 1)
+    }
