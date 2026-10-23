@@ -370,6 +370,7 @@ private struct GameFeedCard: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("game.play")
             .padding(14)
         }
         .background(Color(uiColor: .secondarySystemGroupedBackground))
