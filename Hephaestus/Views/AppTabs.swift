@@ -652,6 +652,8 @@ private struct CommentsSheet: View {
     @State private var errorMessage: String?
     @State private var isLoading = true
     @State private var isSubmitting = false
+    @State private var pendingIdempotencyKey: String?
+    @State private var pendingBody: String?
 
     var body: some View {
         NavigationStack {
@@ -690,10 +692,20 @@ private struct CommentsSheet: View {
         guard !body.isEmpty else { return }
         isSubmitting = true
         defer { isSubmitting = false }
+        if pendingBody != body {
+            pendingIdempotencyKey = UUID().uuidString
+            pendingBody = body
+        }
+        let key = pendingIdempotencyKey ?? UUID().uuidString
+        pendingIdempotencyKey = key
         do {
-            let comment = try await BackendAPI.shared.addComment(gameID: game.id, body: body)
-            comments.append(comment)
+            let comment = try await BackendAPI.shared.addComment(gameID: game.id, body: body, idempotencyKey: key)
+            if !comments.contains(where: { $0.id == comment.id }) {
+                comments.append(comment)
+            }
             draft = ""
+            pendingIdempotencyKey = nil
+            pendingBody = nil
         } catch { errorMessage = error.localizedDescription }
     }
 }
