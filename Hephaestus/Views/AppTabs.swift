@@ -670,8 +670,9 @@ private struct CreatorDiscoverySheet: View {
         }
         let generation = loadGeneration
         defer {
-            guard generation == loadGeneration else { return }
-            if reset { isLoading = false } else { isLoadingMore = false }
+            if generation == loadGeneration {
+                if reset { isLoading = false } else { isLoadingMore = false }
+            }
         }
         errorMessage = nil
         do {
