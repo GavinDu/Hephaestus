@@ -91,6 +91,18 @@ struct CreatorProfile: Decodable {
     var is_friend: Bool
 }
 
+struct CreatorDiscoveryEntry: Decodable, Identifiable {
+    var creator_id: String
+    var post_count: Int
+    var topics: [String]
+    var id: String { creator_id }
+}
+
+struct CreatorDiscoveryResponse: Decodable {
+    var creators: [CreatorDiscoveryEntry]
+    var next_cursor: String?
+}
+
 struct IngestResult: Codable {
     var ingest_id: String
     var elements: [Element]
@@ -325,6 +337,23 @@ final class BackendAPI: ObservableObject {
     func fetchCreatorProfile(id: String) async throws -> CreatorProfile {
         let req = try makeRequest("v1/users/\(id)")
         return try await send(CreatorProfile.self, req)
+    }
+
+    func fetchCreators(query: String = "", topic: String = "", cursor: String? = nil) async throws -> CreatorDiscoveryResponse {
+        guard var components = URLComponents(url: url("v1/creators"), resolvingAgainstBaseURL: false) else {
+            throw APIError.badStatus(-1)
+        }
+        var items: [URLQueryItem] = [URLQueryItem(name: "limit", value: "20")]
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedQuery.isEmpty { items.append(URLQueryItem(name: "q", value: trimmedQuery)) }
+        if !trimmedTopic.isEmpty { items.append(URLQueryItem(name: "topic", value: trimmedTopic)) }
+        if let cursor, !cursor.isEmpty { items.append(URLQueryItem(name: "cursor", value: cursor)) }
+        components.queryItems = items
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.setValue(BackendConfig.userID, forHTTPHeaderField: "X-User-ID")
+        return try await send(CreatorDiscoveryResponse.self, request)
     }
 
     func publishPost(gameID: String, caption: String, topics: [String], remixParentID: String? = nil) async throws -> FeedGame {
