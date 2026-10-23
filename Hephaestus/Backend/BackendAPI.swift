@@ -39,6 +39,31 @@ struct FeedResponse: Codable {
     var games: [FeedGame]
 }
 
+struct GameSocialSummary: Decodable {
+    var game_id: String
+    var reaction_count: Int
+    var comment_count: Int
+    var reacted_by_me: Bool
+}
+
+struct GameReactionResponse: Decodable {
+    var game_id: String
+    var reaction_count: Int
+    var reacted_by_me: Bool
+}
+
+struct GameComment: Codable, Identifiable {
+    var id: String
+    var game_id: String
+    var user_id: String
+    var text: String
+    var created_at: String
+}
+
+struct GameCommentsResponse: Decodable {
+    var comments: [GameComment]
+}
+
 struct IngestResult: Codable {
     var ingest_id: String
     var elements: [Element]
@@ -184,6 +209,28 @@ final class BackendAPI: ObservableObject {
         let method = follow ? "POST" : "DELETE"
         let req = try makeRequest("v1/users/\(creatorID)/follow", method: method, body: EmptyBody())
         let _: FollowResponse = try await send(FollowResponse.self, req)
+    }
+
+    func fetchSocialSummary(gameID: String) async throws -> GameSocialSummary {
+        let req = try makeRequest("v1/games/\(gameID)/social")
+        return try await send(GameSocialSummary.self, req)
+    }
+
+    func setReaction(gameID: String, active: Bool) async throws -> GameReactionResponse {
+        let method = active ? "POST" : "DELETE"
+        let req = try makeRequest("v1/games/\(gameID)/reaction", method: method, body: EmptyBody())
+        return try await send(GameReactionResponse.self, req)
+    }
+
+    func fetchComments(gameID: String) async throws -> [GameComment] {
+        let req = try makeRequest("v1/games/\(gameID)/comments")
+        return try await send(GameCommentsResponse.self, req).comments
+    }
+
+    func createComment(gameID: String, text: String) async throws -> GameComment {
+        struct CommentBody: Encodable { var text: String }
+        let req = try makeRequest("v1/games/\(gameID)/comments", method: "POST", body: CommentBody(text: text))
+        return try await send(GameComment.self, req)
     }
 
     // MARK: - Player telemetry + incidents (detect-and-fix flow)

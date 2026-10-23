@@ -220,7 +220,7 @@ struct DiscoverView: View {
         do {
             followedCreatorIDs = try await BackendAPI.shared.fetchFollowingCreatorIDs()
         } catch {
-            DevLog.warn(.api, "following list unavailable: \\(error.localizedDescription)")
+            DevLog.warn(.api, "following list unavailable: \(error.localizedDescription)")
         }
     }
 
@@ -238,7 +238,7 @@ struct DiscoverView: View {
             }
             await load()
         } catch {
-            errorMessage = "Couldn't update follow: \\(error.localizedDescription)"
+            errorMessage = "Couldn't update follow: \(error.localizedDescription)"
         }
     }
 
@@ -328,6 +328,9 @@ private struct GameFeedCard: View {
     let onPlay: () -> Void
     let onToggleSaved: () -> Void
     let onToggleFollow: () -> Void
+    @State private var socialSummary: GameSocialSummary?
+    @State private var isReacting = false
+    @State private var showComments = false
 
     private var palette: [Color] {
         let palettes: [[Color]] = [
@@ -379,6 +382,33 @@ private struct GameFeedCard: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
+                Button {
+                    Task { await toggleReaction() }
+                } label: {
+                    Label(socialSummary.map { String($0.reaction_count) } ?? "Like",
+                          systemImage: socialSummary?.reacted_by_me == true ? "heart.fill" : "heart")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(socialSummary?.reacted_by_me == true ? Color.pink : Color.primary)
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .disabled(isReacting || socialSummary == nil)
+                .accessibilityLabel(socialSummary?.reacted_by_me == true ? "Unlike game" : "Like game")
+                Button {
+                    showComments = true
+                } label: {
+                    Label(String(socialSummary?.comment_count ?? 0), systemImage: "bubble.right")
+                        .font(.caption.weight(.semibold))
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("View comments")
+                .disabled(socialSummary == nil)
+                .sheet(isPresented: $showComments) {
+                    GameCommentsSheet(game: game) {
+                        Task { await refreshSocialSummary() }
+                    }
+                }
                 if canFollowCreator {
                     Button(action: onToggleFollow) {
                         Label(isFollowingCreator ? "Following" : "Follow",
@@ -438,6 +468,119 @@ private struct GameFeedCard: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 5)
+        .task(id: game.id) {
+            await refreshSocialSummary()
+        }
+    }
+
+    private func refreshSocialSummary() async {
+        do {
+            socialSummary = try await BackendAPI.shared.fetchSocialSummary(gameID: game.id)
+        } catch {
+            DevLog.warn(.api, "social summary unavailable for \(game.id): \(error.localizedDescription)")
+        }
+    }
+
+    private func toggleReaction() async {
+        guard let current = socialSummary, !isReacting else { return }
+        isReacting = true
+        defer { isReacting = false }
+        do {
+            let response = try await BackendAPI.shared.setReaction(gameID: game.id, active: !current.reacted_by_me)
+            socialSummary = GameSocialSummary(
+                game_id: response.game_id,
+                reaction_count: response.reaction_count,
+                comment_count: current.comment_count,
+                reacted_by_me: response.reacted_by_me
+            )
+        } catch {
+            DevLog.warn(.api, "reaction update failed: \(error.localizedDescription)")
+        }
+    }
+}
+
+private struct GameCommentsSheet: View {
+    let game: FeedGame
+    let onCommentChanged: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var comments: [GameComment] = []
+    @State private var draft = ""
+    @State private var isLoading = false
+    @State private var isSending = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if isLoading && comments.isEmpty {
+                    ProgressView("Loading comments…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if comments.isEmpty {
+                    ContentUnavailableView("No comments yet", systemImage: "bubble.left",
+                                           description: Text("Start the conversation about this game."))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(comments) { comment in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(comment.user_id)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(comment.text)
+                        }
+                        .padding(.vertical, 3)
+                    }
+                    .listStyle(.plain)
+                }
+                if let errorMessage {
+                    Text(errorMessage).font(.footnote).foregroundStyle(.red).padding(.horizontal)
+                }
+                HStack(spacing: 10) {
+                    TextField("Write a comment…", text: $draft, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...4)
+                        .accessibilityLabel("Comment text")
+                    Button("Send") { Task { await sendComment() } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.count > 500)
+                }
+                .padding()
+            }
+            .navigationTitle(game.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task { await loadComments() }
+        }
+    }
+
+    private func loadComments() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            comments = try await BackendAPI.shared.fetchComments(gameID: game.id)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func sendComment() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.count <= 500, !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let comment = try await BackendAPI.shared.createComment(gameID: game.id, text: text)
+            comments.append(comment)
+            draft = ""
+            errorMessage = nil
+            onCommentChanged()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
