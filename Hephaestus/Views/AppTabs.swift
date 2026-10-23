@@ -821,8 +821,14 @@ private struct ReportGameSheet: View {
         defer { isSubmitting = false }
         let trimmedDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
         let reason = trimmedDetails.isEmpty ? selectedReason : "\(selectedReason): \(trimmedDetails)"
+        var boundedReason = ""
+        for character in reason {
+            let next = String(character)
+            guard boundedReason.utf8.count + next.utf8.count <= 500 else { break }
+            boundedReason.append(character)
+        }
         do {
-            try await BackendAPI.shared.reportGame(gameID: game.id, reason: String(reason.prefix(500)))
+            try await BackendAPI.shared.reportGame(gameID: game.id, reason: boundedReason)
             submitted = true
             errorMessage = nil
         } catch {
