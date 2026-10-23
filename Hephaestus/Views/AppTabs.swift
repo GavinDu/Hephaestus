@@ -54,6 +54,7 @@ struct DiscoverView: View {
     @State private var isLoadingMore = false
     @State private var commentsGame: FeedGame?
     @State private var profileRequest: CreatorProfileRequest?
+    @State private var isCreatorDiscoveryPresented = false
 
     private var visibleGames: [FeedGame] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -198,6 +199,14 @@ struct DiscoverView: View {
                     }
                     .accessibilityLabel("Tune feed recommendations")
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        isCreatorDiscoveryPresented = true
+                    } label: {
+                        Image(systemName: "person.2")
+                    }
+                    .accessibilityLabel("Discover creators")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await load() }
@@ -221,6 +230,9 @@ struct DiscoverView: View {
             }
             .sheet(item: $profileRequest) { request in
                 CreatorProfileSheet(creatorID: request.id)
+            }
+            .sheet(isPresented: $isCreatorDiscoveryPresented) {
+                CreatorDiscoverySheet()
             }
             .sheet(isPresented: $isFeedPreferencesPresented) {
                 FeedPreferencesSheet(
@@ -583,6 +595,149 @@ private struct GameFeedCard: View {
 
 private struct CreatorProfileRequest: Identifiable {
     let id: String
+}
+
+private struct CreatorDiscoverySheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+    @State private var topicText = ""
+    @State private var creators: [CreatorDiscoveryEntry] = []
+    @State private var nextCursor: String?
+    @State private var profileRequest: CreatorProfileRequest?
+    @State private var errorMessage: String?
+    @State private var isLoading = false
+    @State private var isLoadingMore = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack {
+                        TextField("Filter by topic (optional)", text: $topicText)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .submitLabel(.search)
+                            .onSubmit { Task { await load(reset: true) } }
+                        Button("Apply") { Task { await load(reset: true) } }
+                            .disabled(isLoading)
+                    }
+                } header: {
+                    Text("Topic")
+                } footer: {
+                    Text("Search creators by ID or public game title. Topic filtering is an exact match.")
+                }
+
+                if isLoading && creators.isEmpty {
+                    HStack { Spacer(); ProgressView("Finding creators…"); Spacer() }
+                } else if creators.isEmpty && errorMessage == nil {
+                    ContentUnavailableView(
+                        "No creators found",
+                        systemImage: "person.2",
+                        description: Text("Try another search or topic.")
+                    )
+                } else {
+                    Section("Creators") {
+                        ForEach(creators) { creator in
+                            Button {
+                                profileRequest = CreatorProfileRequest(id: creator.creator_id)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 7) {
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text(creator.creator_id)
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        Text("\(creator.post_count) games")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if !creator.topics.isEmpty {
+                                        Text(creator.topics.prefix(5).map { "#\($0)" }.joined(separator: "  "))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                }
+                                .padding(.vertical, 3)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("View creator \(creator.creator_id), \(creator.post_count) public games")
+                        }
+                    }
+                    if nextCursor != nil {
+                        Section {
+                            Button {
+                                Task { await load(reset: false) }
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    if isLoadingMore { ProgressView() }
+                                    else { Text("Load more creators") }
+                                    Spacer()
+                                }
+                            }
+                            .disabled(isLoadingMore || isLoading)
+                        }
+                    }
+                }
+
+                if let errorMessage {
+                    Section {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                        Button("Try again") { Task { await load(reset: true) } }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Creators")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Search creators or games")
+            .onSubmit(of: .search) { Task { await load(reset: true) } }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .refreshable { await load(reset: true) }
+            .task { await load(reset: true) }
+            .sheet(item: $profileRequest) { request in
+                CreatorProfileSheet(creatorID: request.id)
+            }
+        }
+    }
+
+    private func load(reset: Bool) async {
+        if reset {
+            isLoading = true
+            nextCursor = nil
+        } else {
+            guard nextCursor != nil, !isLoadingMore else { return }
+            isLoadingMore = true
+        }
+        defer {
+            if reset { isLoading = false } else { isLoadingMore = false }
+        }
+        errorMessage = nil
+        do {
+            let response = try await BackendAPI.shared.fetchCreators(
+                query: searchText,
+                topic: topicText,
+                cursor: reset ? nil : nextCursor
+            )
+            if reset {
+                creators = response.creators
+            } else {
+                var seen = Set(creators.map(\.creator_id))
+                creators.append(contentsOf: response.creators.filter { seen.insert($0.creator_id).inserted })
+            }
+            nextCursor = response.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
+        } catch {
+            errorMessage = "Couldn't load creators: \(error.localizedDescription)"
+        }
+    }
 }
 
 private struct CreatorProfileSheet: View {
