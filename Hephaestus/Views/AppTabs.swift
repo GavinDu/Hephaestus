@@ -685,13 +685,13 @@ private struct CreatorDiscoverySheet: View {
             if reset {
                 creators = response.creators
             } else {
-                var seen = Set(creators.map(\\.creator_id))
+                var seen = Set(creators.map(\.creator_id))
                 creators.append(contentsOf: response.creators.filter { seen.insert($0.creator_id).inserted })
             }
             nextCursor = response.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
         } catch {
             guard generation == loadGeneration else { return }
-            errorMessage = "Couldn't load creators: \\(error.localizedDescription)"
+            errorMessage = "Couldn't load creators: \(error.localizedDescription)"
         }
     }
 }
