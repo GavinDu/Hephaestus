@@ -236,6 +236,9 @@ final class BackendAPI: ObservableObject {
     private struct CommentBody: Encodable { var body: String }
     private struct ReportBody: Encodable { var reason: String }
     private struct FeedbackBody: Encodable { var kind: String }
+    private struct TopicPreferencesBody: Encodable { var muted_topics: [String] }
+    private struct TopicPreferencesResponse: Decodable { var muted_topics: [String] }
+    struct FeedPreferences: Decodable { var muted_topics: [String]; var not_interested_game_ids: [String] }
     private struct EventBody: Encodable { var game_id: String; var kind: String; var duration_ms: Int; var expected_duration_ms: Int }
 
     func fetchFeed(scope: SocialFeedScope = .forYou, cursor: String? = nil) async throws -> FeedResponse {
@@ -287,8 +290,9 @@ final class BackendAPI: ObservableObject {
         return try await send(CommentsResponse.self, req).comments
     }
 
-    func addComment(gameID: String, body: String) async throws -> SocialComment {
-        let req = try makeRequest("v1/games/\(gameID)/comments", method: "POST", body: CommentBody(body: body))
+    func addComment(gameID: String, body: String, idempotencyKey: String) async throws -> SocialComment {
+        var req = try makeRequest("v1/games/\(gameID)/comments", method: "POST", body: CommentBody(body: body))
+        req.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
         return try await send(CommentResponse.self, req).comment
     }
 
@@ -305,6 +309,22 @@ final class BackendAPI: ObservableObject {
 
     func markNotInterested(gameID: String) async throws {
         let req = try makeRequest("v1/games/\(gameID)/feedback", method: "POST", body: FeedbackBody(kind: "not_interested"))
+        let _: ActionResponse = try await send(ActionResponse.self, req)
+    }
+
+    func fetchFeedPreferences() async throws -> FeedPreferences {
+        let req = try makeRequest("v1/users/me/preferences")
+        return try await send(FeedPreferences.self, req)
+    }
+
+    func setMutedTopics(_ topics: [String]) async throws {
+        let req = try makeRequest("v1/users/me/preferences/topics", method: "PUT",
+                                  body: TopicPreferencesBody(muted_topics: topics))
+        let _: TopicPreferencesResponse = try await send(TopicPreferencesResponse.self, req)
+    }
+
+    func resetFeedPreferences() async throws {
+        let req = try makeRequest("v1/users/me/preferences", method: "DELETE")
         let _: ActionResponse = try await send(ActionResponse.self, req)
     }
 
