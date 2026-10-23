@@ -86,6 +86,10 @@ struct DiscoverView: View {
                     }
                     .pickerStyle(.segmented)
                     .accessibilityLabel("Social feed")
+                    .onChange(of: selectedFeed) { _, _ in
+                        games = []
+                        Task { await load() }
+                    }
 
                     VStack(alignment: .leading, spacing: 8) {
                         Label("PLAYABLE STORIES", systemImage: "sparkles")
@@ -103,13 +107,7 @@ struct DiscoverView: View {
                     .padding(.vertical, 6)
                     .accessibilityElement(children: .combine)
 
-                    if selectedFeed != .forYou {
-                        SocialFeedUnavailableView(scope: selectedFeed) {
-                            selectedFeed = .forYou
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 44)
-                    } else if isLoading && games.isEmpty {
+                    if isLoading && games.isEmpty {
                         VStack(spacing: 12) {
                             ProgressView()
                             Text("Finding something fun…")

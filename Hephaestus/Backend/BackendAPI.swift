@@ -11,8 +11,9 @@ struct Element: Codable {
 struct FeedGame: Codable, Identifiable {
     var id: String
     var title: String
+    var ownerID: String?
 
-    enum CodingKeys: String, CodingKey { case id, game_id, title }
+    enum CodingKeys: String, CodingKey { case id, game_id, title, owner_id }
 
     // The backend has used both "id" and "game_id" for games; accept either.
     init(from decoder: Decoder) throws {
@@ -23,12 +24,14 @@ struct FeedGame: Codable, Identifiable {
             id = try c.decode(String.self, forKey: .game_id)
         }
         title = (try? c.decode(String.self, forKey: .title)) ?? "Untitled Game"
+        ownerID = try? c.decode(String.self, forKey: .owner_id)
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .game_id)
         try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(ownerID, forKey: .owner_id)
     }
 }
 
@@ -153,9 +156,34 @@ final class BackendAPI: ObservableObject {
         }
     }
 
-    func fetchFeed() async throws -> [FeedGame] {
-        let req = try makeRequest("v1/feed")
+    enum FeedScope: String {
+        case forYou = "for_you"
+        case following
+        case friends
+    }
+
+    func fetchFeed(scope: FeedScope = .forYou) async throws -> [FeedGame] {
+        let req = try makeRequest("v1/feed?scope=\(scope.rawValue)")
         return try await send(FeedResponse.self, req).games
+    }
+
+    private struct FollowingResponse: Decodable {
+        var creator_ids: [String]
+    }
+
+    func fetchFollowingCreatorIDs() async throws -> Set<String> {
+        let req = try makeRequest("v1/users/me/following")
+        return Set(try await send(FollowingResponse.self, req).creator_ids)
+    }
+
+    private struct FollowResponse: Decodable {
+        var following: Bool
+    }
+
+    func setFollowing(_ creatorID: String, follow: Bool) async throws {
+        let method = follow ? "POST" : "DELETE"
+        let req = try makeRequest("v1/users/\(creatorID)/follow", method: method, body: EmptyBody())
+        let _: FollowResponse = try await send(FollowResponse.self, req)
     }
 
     // MARK: - Player telemetry + incidents (detect-and-fix flow)
