@@ -34,8 +34,8 @@ enum RecentGames {
 
 // MARK: - Discover
 
-/// The three feed destinations are visible now; social feeds stay honest until
-/// authenticated account and relationship endpoints are available.
+/// Backend-backed social feeds use the current development identity. Follow
+/// edges are intentionally ephemeral and X-User-ID is not production authentication.
 struct DiscoverView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedFeed: SocialFeedScope = .forYou
@@ -46,6 +46,8 @@ struct DiscoverView: View {
     @State private var searchText = ""
     @State private var savedGameIDs = Set<String>()
     @State private var followedCreatorIDs = Set<String>()
+    @State private var mutedTopics = Set<String>()
+    @State private var isFeedPreferencesPresented = false
     @State private var likedGameIDs = Set<String>()
     @State private var loadGeneration = 0
     @State private var nextCursor: String?
@@ -59,6 +61,10 @@ struct DiscoverView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return games }
         return games.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var availableTopics: [String] {
+        Array(Set(games.flatMap { $0.topics ?? [] }.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty } + Array(mutedTopics))).sorted()
     }
 
     private var feedGridColumns: [GridItem] {
@@ -188,6 +194,14 @@ struct DiscoverView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
+                        isFeedPreferencesPresented = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .accessibilityLabel("Tune feed recommendations")
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
                         isCreatorDiscoveryPresented = true
                     } label: {
                         Image(systemName: "person.2")
@@ -224,6 +238,14 @@ struct DiscoverView: View {
             .sheet(isPresented: $isCreatorDiscoveryPresented) {
                 CreatorDiscoverySheet()
             }
+            .sheet(isPresented: $isFeedPreferencesPresented) {
+                FeedPreferencesSheet(
+                    availableTopics: availableTopics,
+                    selectedTopics: mutedTopics,
+                    onSave: { topics in saveMutedTopics(topics) },
+                    onReset: { resetFeedPreferences() }
+                )
+            }
         }
     }
 
@@ -235,15 +257,20 @@ struct DiscoverView: View {
     private func loadMore() async {
         guard let cursor = nextCursor, !isLoadingMore else { return }
         let requestedScope = selectedFeed
+        let requestedGeneration = loadGeneration
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
             let page = try await BackendAPI.shared.fetchFeed(scope: requestedScope, cursor: cursor)
-            guard requestedScope == selectedFeed else { return }
+            guard requestedScope == selectedFeed, requestedGeneration == loadGeneration else { return }
             var seen = Set(games.map(\.id))
             games.append(contentsOf: page.games.filter { seen.insert($0.id).inserted })
             nextCursor = page.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
-        } catch { errorMessage = "Couldn't load more games: \(error.localizedDescription)" }
+        } catch {
+            if requestedGeneration == loadGeneration {
+                errorMessage = "Couldn't load more games: \(error.localizedDescription)"
+            }
+        }
     }
 
     private func toggleSaved(_ game: FeedGame) {
@@ -273,7 +300,9 @@ struct DiscoverView: View {
         do {
             try await BackendAPI.shared.setFollowing(creatorID, following: shouldFollow)
             if shouldFollow { followedCreatorIDs.insert(creatorID) } else { followedCreatorIDs.remove(creatorID) }
-            await BackendAPI.shared.trackSocialEvent(gameID: games.first(where: { $0.ownerID == creatorID })?.id ?? "", kind: "follow")
+            if let gameID = games.first(where: { $0.ownerID == creatorID })?.id {
+                await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "follow")
+            }
             await load()
         } catch { errorMessage = "Couldn't update follow: \(error.localizedDescription)" }
     }
@@ -290,6 +319,30 @@ struct DiscoverView: View {
             try await BackendAPI.shared.markNotInterested(gameID: game.id)
             games.removeAll { $0.id == game.id }
         } catch { errorMessage = "Couldn't save feedback: \(error.localizedDescription)" }
+    }
+
+    private func saveMutedTopics(_ topics: [String]) {
+        Task {
+            do {
+                try await BackendAPI.shared.setMutedTopics(topics)
+                mutedTopics = Set(topics.map { $0.lowercased() })
+                await load()
+            } catch {
+                errorMessage = "Couldn't update feed preferences: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func resetFeedPreferences() {
+        Task {
+            do {
+                try await BackendAPI.shared.resetFeedPreferences()
+                mutedTopics.removeAll()
+                await load()
+            } catch {
+                errorMessage = "Couldn't reset feed preferences: \(error.localizedDescription)"
+            }
+        }
     }
 
     private func load() async {
@@ -309,6 +362,9 @@ struct DiscoverView: View {
             if let ids = try? await BackendAPI.shared.fetchSavedGameIDs(), generation == loadGeneration {
                 savedGameIDs = ids
                 UserDefaults.standard.set(ids.sorted(), forKey: "hephaestus.savedGames")
+            }
+            if let preferences = try? await BackendAPI.shared.fetchFeedPreferences(), generation == loadGeneration {
+                mutedTopics = Set(preferences.muted_topics.map { $0.lowercased() })
             }
         } catch {
             if generation == loadGeneration { errorMessage = error.localizedDescription }
@@ -845,6 +901,9 @@ private struct CommentsSheet: View {
     @State private var errorMessage: String?
     @State private var isLoading = true
     @State private var isSubmitting = false
+    @State private var pendingIdempotencyKey: String?
+    @State private var pendingBody: String?
+    @State private var deletingCommentIDs = Set<String>()
 
     var body: some View {
         NavigationStack {
@@ -854,6 +913,16 @@ private struct CommentsSheet: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(comment.user_id).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         Text(comment.body)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if comment.user_id == BackendConfig.userID {
+                            Button(role: .destructive) {
+                                Task { await delete(comment) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .disabled(deletingCommentIDs.contains(comment.id))
+                        }
                     }
                 }
                 if let errorMessage { Text(errorMessage).font(.caption).foregroundStyle(.red).padding(.horizontal) }
@@ -883,11 +952,35 @@ private struct CommentsSheet: View {
         guard !body.isEmpty else { return }
         isSubmitting = true
         defer { isSubmitting = false }
+        if pendingBody != body {
+            pendingIdempotencyKey = UUID().uuidString
+            pendingBody = body
+        }
+        let key = pendingIdempotencyKey ?? UUID().uuidString
+        pendingIdempotencyKey = key
         do {
-            let comment = try await BackendAPI.shared.addComment(gameID: game.id, body: body)
-            comments.append(comment)
+            let comment = try await BackendAPI.shared.addComment(gameID: game.id, body: body, idempotencyKey: key)
+            if !comments.contains(where: { $0.id == comment.id }) {
+                comments.append(comment)
+            }
             draft = ""
+            pendingIdempotencyKey = nil
+            pendingBody = nil
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func delete(_ comment: SocialComment) async {
+        guard comment.user_id == BackendConfig.userID,
+              !deletingCommentIDs.contains(comment.id) else { return }
+        deletingCommentIDs.insert(comment.id)
+        defer { deletingCommentIDs.remove(comment.id) }
+        do {
+            try await BackendAPI.shared.deleteComment(gameID: game.id, commentID: comment.id)
+            comments.removeAll { $0.id == comment.id }
+            errorMessage = nil
+        } catch {
+            errorMessage = "Couldn't delete comment: \(error.localizedDescription)"
+        }
     }
 }
 
@@ -1387,6 +1480,57 @@ struct ProfileView: View {
         } catch {
             incidentsError = "Couldn't load incidents: \(error.localizedDescription)"
             incidentsLoaded = true
+        }
+    }
+}
+
+
+private struct FeedPreferencesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let availableTopics: [String]
+    let selectedTopics: Set<String>
+    let onSave: ([String]) -> Void
+    let onReset: () -> Void
+    @State private var selected = Set<String>()
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Hide topics") {
+                    if availableTopics.isEmpty {
+                        Text("Topics will appear here as games with topics enter your feed.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(availableTopics, id: \.self) { topic in
+                        Toggle(topic, isOn: Binding(
+                            get: { selected.contains(topic) },
+                            set: { isMuted in
+                                if isMuted { selected.insert(topic) }
+                                else { selected.remove(topic) }
+                            }
+                        ))
+                    }
+                }
+                Section {
+                    Button("Save preferences") {
+                        onSave(selected.sorted())
+                        dismiss()
+                    }
+                    Button("Reset recommendations", role: .destructive) {
+                        selected.removeAll()
+                        onReset()
+                        dismiss()
+                    }
+                }
+            }
+            .navigationTitle("Tune your feed")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .onAppear { selected = selectedTopics }
         }
     }
 }
