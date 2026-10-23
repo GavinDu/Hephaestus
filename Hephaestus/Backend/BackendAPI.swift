@@ -296,11 +296,6 @@ final class BackendAPI: ObservableObject {
         return try await send(CommentResponse.self, req).comment
     }
 
-    func deleteComment(gameID: String, commentID: String) async throws {
-        let req = try makeRequest("v1/games/\(gameID)/comments/\(commentID)", method: "DELETE")
-        let _: ActionResponse = try await send(ActionResponse.self, req)
-    }
-
     func reportGame(gameID: String, reason: String) async throws {
         let req = try makeRequest("v1/games/\(gameID)/report", method: "POST", body: ReportBody(reason: reason))
         let _: ActionResponse = try await send(ActionResponse.self, req)
