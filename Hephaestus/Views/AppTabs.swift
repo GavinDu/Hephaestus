@@ -51,6 +51,7 @@ struct DiscoverView: View {
     @State private var nextCursor: String?
     @State private var isLoadingMore = false
     @State private var commentsGame: FeedGame?
+    @State private var reportingGame: FeedGame?
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
 
@@ -149,7 +150,7 @@ struct DiscoverView: View {
                                     onToggleFollow: { if let id = game.ownerID { Task { await toggleFollow(id) } } },
                                     onOpenComments: { commentsGame = game },
                                     onOpenCreator: { if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) } },
-                                    onReport: { Task { await report(game) } },
+                                    onReport: { reportingGame = game },
                                     onBlockCreator: { if let id = game.ownerID { Task { await blockCreator(id) } } },
                                     onNotInterested: { Task { await markNotInterested(game) } },
                                     onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } }
@@ -214,6 +215,9 @@ struct DiscoverView: View {
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
             }
+            .sheet(item: $reportingGame) { game in
+                ReportGameSheet(game: game)
+            }
             .sheet(item: $profileRequest) { request in
                 CreatorProfileSheet(creatorID: request.id)
             }
@@ -272,11 +276,6 @@ struct DiscoverView: View {
             await BackendAPI.shared.trackSocialEvent(gameID: games.first(where: { $0.ownerID == creatorID })?.id ?? "", kind: "follow")
             await load()
         } catch { errorMessage = "Couldn't update follow: \(error.localizedDescription)" }
-    }
-
-    private func report(_ game: FeedGame) async {
-        do { try await BackendAPI.shared.reportGame(gameID: game.id, reason: "Reported from feed")
-        } catch { errorMessage = "Couldn't submit report: \(error.localizedDescription)" }
     }
 
     private func blockCreator(_ creatorID: String) async {
@@ -752,6 +751,83 @@ private struct CreatorProfileSheet: View {
             try await BackendAPI.shared.setFollowing(creatorID, following: !currentlyFollowing)
             await load()
         } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+private struct ReportGameSheet: View {
+    let game: FeedGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedReason = "Unsafe or inappropriate content"
+    @State private var details = ""
+    @State private var errorMessage: String?
+    @State private var isSubmitting = false
+    @State private var submitted = false
+
+    private let reasons = [
+        "Unsafe or inappropriate content",
+        "Harassment or bullying",
+        "Personal information",
+        "Broken or misleading game",
+        "Other"
+    ]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Report") {
+                    Text(game.title).font(.headline)
+                    Picker("Reason", selection: $selectedReason) {
+                        ForEach(reasons, id: \.self) { reason in
+                            Text(reason).tag(reason)
+                        }
+                    }
+                    TextField("Additional details (optional)", text: $details, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+                Section {
+                    Text("Reports are reviewed by moderators. Only include information needed to explain the concern.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage).foregroundStyle(.red)
+                    }
+                }
+                if submitted {
+                    Section {
+                        Label("Report submitted", systemImage: "checkmark.circle")
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
+            .navigationTitle("Report game")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Submit") { Task { await submit() } }
+                        .disabled(isSubmitting || submitted)
+                }
+            }
+        }
+    }
+
+    private func submit() async {
+        guard !isSubmitting, !submitted else { return }
+        isSubmitting = true
+        defer { isSubmitting = false }
+        let trimmedDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reason = trimmedDetails.isEmpty ? selectedReason : "\(selectedReason): \(trimmedDetails)"
+        do {
+            try await BackendAPI.shared.reportGame(gameID: game.id, reason: String(reason.prefix(500)))
+            submitted = true
+            errorMessage = nil
+        } catch {
+            errorMessage = "Couldn't submit report: \(error.localizedDescription)"
+        }
     }
 }
 
