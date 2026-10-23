@@ -50,9 +50,6 @@ struct DiscoverView: View {
     @State private var loadGeneration = 0
     @State private var nextCursor: String?
     @State private var isLoadingMore = false
-    @State private var loadGeneration = 0
-    @State private var appliedSearchText = ""
-    @State private var appliedTopicText = ""
     @State private var commentsGame: FeedGame?
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
@@ -554,6 +551,9 @@ private struct CreatorDiscoverySheet: View {
     @State private var errorMessage: String?
     @State private var isLoading = false
     @State private var isLoadingMore = false
+    @State private var loadGeneration = 0
+    @State private var appliedSearchText = ""
+    @State private var appliedTopicText = ""
 
     var body: some View {
         NavigationStack {
