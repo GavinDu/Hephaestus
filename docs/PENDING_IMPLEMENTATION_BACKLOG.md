@@ -5,11 +5,11 @@ Last reconciled: 2026-10-23. This is a status ledger, not a claim that every ite
 ## Security and account boundaries
 
 - [ ] **#10 — Authenticated identity (deferred by product decision).** The app and backend still use the development `X-User-ID` identity. Do not treat it as authorization. Complete Sign in with Apple/session validation and cross-user authorization before public launch or storing meaningful personal data.
-- [ ] **#11 — Durable follow graph (deferred by product decision).** Follow edges remain process-local. This is acceptable only for the current development stage; add durable/shared storage and migration before multi-instance deployment or when users rely on relationships.
+- [ ] **#11 — Durable follow graph (deferred by product decision).** Follow edges are written to the backend's local JSON snapshot, but there is no shared database, transactional guarantee, schema migration, or multi-instance consistency. Add shared durable storage and migration before multi-instance deployment or when users rely on relationships.
 
 ## Social product
 
-- [x] **#12 — Feed scopes and follow controls.** The iOS client requests For You/Following/Friends, refreshes follow state from the backend, has loading/error/empty states, and guards feed requests against stale responses. Follow edges are still ephemeral and demo identity remains spoofable.
+- [x] **#12 — Feed scopes and follow controls.** The iOS client requests For You/Following/Friends, refreshes follow state from the backend, has loading/error/empty states, and guards feed requests against stale responses. Follow edges use local-file persistence only; demo identity remains spoofable.
 - [ ] **#13 — Immutable published posts.** Publishing marks a game version and rejects republishing the same record. Still verify that later edits to game/package/assets cannot mutate an already-shared artifact; a dedicated immutable publication snapshot and regression test remain required.
 - [ ] **#14 — Reactions, comments, saves, and sharing.** Core reactions/comments/saves/report/share-related APIs exist and local snapshot persistence is available. Backend PR #11 adds optional idempotent comment creation; it must pass CI and merge before considering duplicate-request handling complete. Local files are not shared storage.
 - [ ] **#15 — Creator profiles and discovery.** Creator profile, public post list, counts, and follow state exist. Search/discovery of creators and topics is not yet complete; counts reflect only the current follow store.
