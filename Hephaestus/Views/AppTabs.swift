@@ -226,7 +226,7 @@ struct DiscoverView: View {
             guard requestedScope == selectedFeed else { return }
             var seen = Set(games.map(\.id))
             games.append(contentsOf: page.games.filter { seen.insert($0.id).inserted })
-            nextCursor = page.next_cursor
+            nextCursor = page.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
         } catch { errorMessage = "Couldn't load more games: \(error.localizedDescription)" }
     }
 
@@ -291,7 +291,7 @@ struct DiscoverView: View {
             let loadedGames = try await BackendAPI.shared.fetchFeed(scope: selectedFeed)
             guard generation == loadGeneration else { return }
             games = loadedGames.games
-            nextCursor = loadedGames.next_cursor
+            nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
             if let ids = try? await BackendAPI.shared.fetchFollowingCreatorIDs(), generation == loadGeneration {
                 followedCreatorIDs = ids
             }
