@@ -287,9 +287,17 @@ final class BackendAPI: ObservableObject {
         return try await send(CommentsResponse.self, req).comments
     }
 
-    func addComment(gameID: String, body: String) async throws -> SocialComment {
-        let req = try makeRequest("v1/games/\(gameID)/comments", method: "POST", body: CommentBody(body: body))
+    func addComment(gameID: String, body: String, idempotencyKey: String? = nil) async throws -> SocialComment {
+        var req = try makeRequest("v1/games/\(gameID)/comments", method: "POST", body: CommentBody(body: body))
+        if let idempotencyKey, !idempotencyKey.isEmpty {
+            req.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        }
         return try await send(CommentResponse.self, req).comment
+    }
+
+    func deleteComment(gameID: String, commentID: String) async throws {
+        let req = try makeRequest("v1/games/\(gameID)/comments/\(commentID)", method: "DELETE")
+        let _: ActionResponse = try await send(ActionResponse.self, req)
     }
 
     func reportGame(gameID: String, reason: String) async throws {
