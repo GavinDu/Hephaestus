@@ -382,6 +382,21 @@ private struct GameFeedCard: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
+                if canFollowCreator {
+                    Button(action: onToggleFollow) {
+                        Label(isFollowingCreator ? "Following" : "Follow",
+                              systemImage: isFollowingCreator ? "person.fill.checkmark" : "person.badge.plus")
+                            .font(.caption.weight(.semibold))
+                            .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+
+            HStack(spacing: 10) {
                 Button {
                     Task { await toggleReaction() }
                 } label: {
@@ -409,16 +424,7 @@ private struct GameFeedCard: View {
                         Task { await refreshSocialSummary() }
                     }
                 }
-                if canFollowCreator {
-                    Button(action: onToggleFollow) {
-                        Label(isFollowingCreator ? "Following" : "Follow",
-                              systemImage: isFollowingCreator ? "person.fill.checkmark" : "person.badge.plus")
-                            .font(.caption.weight(.semibold))
-                            .frame(minHeight: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
-                }
+                Spacer(minLength: 4)
                 Button(action: onToggleSaved) {
                     Label(isSaved ? "Saved" : "Save",
                           systemImage: isSaved ? "heart.fill" : "heart")
@@ -438,7 +444,7 @@ private struct GameFeedCard: View {
                 .accessibilityLabel("Share game")
             }
             .padding(.horizontal, 14)
-            .padding(.top, 8)
+            .padding(.bottom, 8)
 
             Button(action: onPlay) {
                 HStack(spacing: 8) {
