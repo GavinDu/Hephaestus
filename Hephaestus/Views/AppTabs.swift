@@ -821,7 +821,6 @@ private struct CommentsSheet: View {
     @State private var isSubmitting = false
     @State private var pendingIdempotencyKey: String?
     @State private var pendingBody: String?
-    @State private var deletingCommentIDs = Set<String>()
 
     var body: some View {
         NavigationStack {
@@ -831,16 +830,6 @@ private struct CommentsSheet: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(comment.user_id).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         Text(comment.body)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if comment.user_id == BackendConfig.userID {
-                            Button(role: .destructive) {
-                                Task { await delete(comment) }
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                            .disabled(deletingCommentIDs.contains(comment.id))
-                        }
                     }
                 }
                 if let errorMessage { Text(errorMessage).font(.caption).foregroundStyle(.red).padding(.horizontal) }
@@ -885,20 +874,6 @@ private struct CommentsSheet: View {
             pendingIdempotencyKey = nil
             pendingBody = nil
         } catch { errorMessage = error.localizedDescription }
-    }
-
-    private func delete(_ comment: SocialComment) async {
-        guard comment.user_id == BackendConfig.userID,
-              !deletingCommentIDs.contains(comment.id) else { return }
-        deletingCommentIDs.insert(comment.id)
-        defer { deletingCommentIDs.remove(comment.id) }
-        do {
-            try await BackendAPI.shared.deleteComment(gameID: game.id, commentID: comment.id)
-            comments.removeAll { $0.id == comment.id }
-            errorMessage = nil
-        } catch {
-            errorMessage = "Couldn't delete comment: \(error.localizedDescription)"
-        }
     }
 }
 
