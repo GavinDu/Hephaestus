@@ -11,8 +11,18 @@ struct Element: Codable {
 struct FeedGame: Codable, Identifiable {
     var id: String
     var title: String
+    var ownerID: String?
+    var caption: String?
+    var topics: [String]?
+    var publishedAt: String?
+    var publishedVersion: Int?
+    var remixParentID: String?
+    var moderationStatus: String?
+    var createdAt: String?
 
-    enum CodingKeys: String, CodingKey { case id, game_id, title }
+    enum CodingKeys: String, CodingKey {
+        case id, game_id, title, owner_id, caption, topics, published_at, published_version, remix_parent_id, moderation_status, created_at
+    }
 
     // The backend has used both "id" and "game_id" for games; accept either.
     init(from decoder: Decoder) throws {
@@ -23,17 +33,62 @@ struct FeedGame: Codable, Identifiable {
             id = try c.decode(String.self, forKey: .game_id)
         }
         title = (try? c.decode(String.self, forKey: .title)) ?? "Untitled Game"
+        ownerID = try? c.decode(String.self, forKey: .owner_id)
+        caption = try? c.decode(String.self, forKey: .caption)
+        topics = try? c.decode([String].self, forKey: .topics)
+        publishedAt = try? c.decode(String.self, forKey: .published_at)
+        publishedVersion = try? c.decode(Int.self, forKey: .published_version)
+        remixParentID = try? c.decode(String.self, forKey: .remix_parent_id)
+        moderationStatus = try? c.decode(String.self, forKey: .moderation_status)
+        createdAt = try? c.decode(String.self, forKey: .created_at)
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .game_id)
         try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(ownerID, forKey: .owner_id)
+        try c.encodeIfPresent(caption, forKey: .caption)
+        try c.encodeIfPresent(topics, forKey: .topics)
+        try c.encodeIfPresent(publishedAt, forKey: .published_at)
+        try c.encodeIfPresent(publishedVersion, forKey: .published_version)
+        try c.encodeIfPresent(remixParentID, forKey: .remix_parent_id)
+        try c.encodeIfPresent(moderationStatus, forKey: .moderation_status)
+        try c.encodeIfPresent(createdAt, forKey: .created_at)
     }
 }
 
 struct FeedResponse: Codable {
     var games: [FeedGame]
+    var next_cursor: String?
+}
+
+enum SocialFeedScope: String, CaseIterable, Identifiable {
+    case forYou = "for_you"
+    case following
+    case friends
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .forYou: "For You"; case .following: "Following"; case .friends: "Friends" }
+    }
+}
+
+struct SocialComment: Decodable, Identifiable {
+    var id: String
+    var game_id: String
+    var user_id: String
+    var body: String
+    var created_at: String
+}
+
+struct CreatorProfile: Decodable {
+    var creator_id: String
+    var posts: [FeedGame]
+    var post_count: Int
+    var follower_count: Int
+    var following_count: Int
+    var is_following: Bool
+    var is_friend: Bool
 }
 
 struct IngestResult: Codable {
@@ -153,9 +208,109 @@ final class BackendAPI: ObservableObject {
         }
     }
 
-    func fetchFeed() async throws -> [FeedGame] {
-        let req = try makeRequest("v1/feed")
+    private struct ActionResponse: Decodable {
+        var following: Bool?
+        var saved: Bool?
+        var accepted: Bool?
+        var report_id: String?
+        var status: String?
+    }
+    private struct FollowingResponse: Decodable { var creator_ids: [String] }
+    private struct CommentsResponse: Decodable { var comments: [SocialComment] }
+    private struct CommentResponse: Decodable { var comment: SocialComment }
+    private struct PostResponse: Decodable { var post: FeedGame }
+    private struct PublishBody: Encodable { var caption: String; var topics: [String]; var remix_parent_id: String? }
+    private struct ReactionBody: Encodable { var reaction: String }
+    private struct CommentBody: Encodable { var body: String }
+    private struct ReportBody: Encodable { var reason: String }
+    private struct FeedbackBody: Encodable { var kind: String }
+    private struct EventBody: Encodable { var game_id: String; var kind: String; var duration_ms: Int; var expected_duration_ms: Int }
+
+    func fetchFeed(scope: SocialFeedScope = .forYou, cursor: String? = nil) async throws -> FeedResponse {
+        var path = "v1/feed?scope=\(scope.rawValue)&limit=20"
+        if let cursor, !cursor.isEmpty { path += "&cursor=\(cursor)" }
+        let req = try makeRequest(path)
+        return try await send(FeedResponse.self, req)
+    }
+
+    func fetchFollowingCreatorIDs() async throws -> Set<String> {
+        let req = try makeRequest("v1/users/me/following")
+        return Set(try await send(FollowingResponse.self, req).creator_ids)
+    }
+
+    func setFollowing(_ creatorID: String, following: Bool) async throws {
+        let method = following ? "POST" : "DELETE"
+        let req = try makeRequest("v1/users/\(creatorID)/follow", method: method)
+        let _: ActionResponse = try await send(ActionResponse.self, req)
+    }
+
+    func fetchSavedGames() async throws -> [FeedGame] {
+        let req = try makeRequest("v1/users/me/saved")
         return try await send(FeedResponse.self, req).games
+    }
+
+    func fetchSavedGameIDs() async throws -> Set<String> {
+        let games = try await fetchSavedGames()
+        return Set(games.map(\.id))
+    }
+
+    func setSaved(_ gameID: String, saved: Bool) async throws {
+        let method = saved ? "POST" : "DELETE"
+        let req = try makeRequest("v1/games/\(gameID)/save", method: method)
+        let _: ActionResponse = try await send(ActionResponse.self, req)
+    }
+
+    func setReaction(_ gameID: String, reaction: String?) async throws {
+        let req: URLRequest
+        if let reaction {
+            req = try makeRequest("v1/games/\(gameID)/reactions", method: "POST", body: ReactionBody(reaction: reaction))
+        } else {
+            req = try makeRequest("v1/games/\(gameID)/reactions", method: "DELETE")
+        }
+        let _: ActionResponse = try await send(ActionResponse.self, req)
+    }
+
+    func fetchComments(gameID: String) async throws -> [SocialComment] {
+        let req = try makeRequest("v1/games/\(gameID)/comments")
+        return try await send(CommentsResponse.self, req).comments
+    }
+
+    func addComment(gameID: String, body: String) async throws -> SocialComment {
+        let req = try makeRequest("v1/games/\(gameID)/comments", method: "POST", body: CommentBody(body: body))
+        return try await send(CommentResponse.self, req).comment
+    }
+
+    func reportGame(gameID: String, reason: String) async throws {
+        let req = try makeRequest("v1/games/\(gameID)/report", method: "POST", body: ReportBody(reason: reason))
+        let _: ActionResponse = try await send(ActionResponse.self, req)
+    }
+
+    func blockCreator(_ creatorID: String, blocked: Bool) async throws {
+        let method = blocked ? "POST" : "DELETE"
+        let req = try makeRequest("v1/users/\(creatorID)/block", method: method)
+        let _: ActionResponse = try await send(ActionResponse.self, req)
+    }
+
+    func markNotInterested(gameID: String) async throws {
+        let req = try makeRequest("v1/games/\(gameID)/feedback", method: "POST", body: FeedbackBody(kind: "not_interested"))
+        let _: ActionResponse = try await send(ActionResponse.self, req)
+    }
+
+    func trackSocialEvent(gameID: String, kind: String, durationMS: Int = 0, expectedMS: Int = 0) async {
+        guard let req = try? makeRequest("v1/telemetry/social-event", method: "POST",
+                                         body: EventBody(game_id: gameID, kind: kind, duration_ms: durationMS, expected_duration_ms: expectedMS)) else { return }
+        _ = try? await session.data(for: req)
+    }
+
+    func fetchCreatorProfile(id: String) async throws -> CreatorProfile {
+        let req = try makeRequest("v1/users/\(id)")
+        return try await send(CreatorProfile.self, req)
+    }
+
+    func publishPost(gameID: String, caption: String, topics: [String], remixParentID: String? = nil) async throws -> FeedGame {
+        let body = PublishBody(caption: caption, topics: topics, remix_parent_id: remixParentID)
+        let req = try makeRequest("v1/games/\(gameID)/publish", method: "POST", body: body)
+        return try await send(PostResponse.self, req).post
     }
 
     // MARK: - Player telemetry + incidents (detect-and-fix flow)

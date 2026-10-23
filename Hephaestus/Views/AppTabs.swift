@@ -36,22 +36,6 @@ enum RecentGames {
 
 /// The three feed destinations are visible now; social feeds stay honest until
 /// authenticated account and relationship endpoints are available.
-enum SocialFeedScope: String, CaseIterable, Identifiable {
-    case forYou
-    case following
-    case friends
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .forYou: "For You"
-        case .following: "Following"
-        case .friends: "Friends"
-        }
-    }
-}
-
 struct DiscoverView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedFeed: SocialFeedScope = .forYou
@@ -61,6 +45,13 @@ struct DiscoverView: View {
     @State private var isLoading = false
     @State private var searchText = ""
     @State private var savedGameIDs = Set<String>()
+    @State private var followedCreatorIDs = Set<String>()
+    @State private var likedGameIDs = Set<String>()
+    @State private var loadGeneration = 0
+    @State private var nextCursor: String?
+    @State private var isLoadingMore = false
+    @State private var commentsGame: FeedGame?
+    @State private var profileRequest: CreatorProfileRequest?
 
     private var visibleGames: [FeedGame] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -86,6 +77,7 @@ struct DiscoverView: View {
                     }
                     .pickerStyle(.segmented)
                     .accessibilityLabel("Social feed")
+                    .onChange(of: selectedFeed) { _, _ in Task { await load() } }
 
                     VStack(alignment: .leading, spacing: 8) {
                         Label("PLAYABLE STORIES", systemImage: "sparkles")
@@ -103,13 +95,7 @@ struct DiscoverView: View {
                     .padding(.vertical, 6)
                     .accessibilityElement(children: .combine)
 
-                    if selectedFeed != .forYou {
-                        SocialFeedUnavailableView(scope: selectedFeed) {
-                            selectedFeed = .forYou
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 44)
-                    } else if isLoading && games.isEmpty {
+                    if isLoading && games.isEmpty {
                         VStack(spacing: 12) {
                             ProgressView()
                             Text("Finding something fun…")
@@ -153,12 +139,34 @@ struct DiscoverView: View {
                                 GameFeedCard(
                                     game: game,
                                     isSaved: savedGameIDs.contains(game.id),
+                                    isLiked: likedGameIDs.contains(game.id),
+                                    isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
+                                    canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.userID,
                                     onPlay: { play(game) },
-                                    onToggleSaved: { toggleSaved(game) }
+                                    onToggleSaved: { toggleSaved(game) },
+                                    onToggleLike: { toggleLike(game) },
+                                    onToggleFollow: { if let id = game.ownerID { Task { await toggleFollow(id) } } },
+                                    onOpenComments: { commentsGame = game },
+                                    onOpenCreator: { if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) } },
+                                    onReport: { Task { await report(game) } },
+                                    onBlockCreator: { if let id = game.ownerID { Task { await blockCreator(id) } } },
+                                    onNotInterested: { Task { await markNotInterested(game) } },
+                                    onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } }
                                 )
                             }
                         }
                         .frame(maxWidth: 1120)
+                        if nextCursor != nil && searchText.isEmpty {
+                            Button {
+                                Task { await loadMore() }
+                            } label: {
+                                if isLoadingMore { ProgressView() }
+                                else { Text("Load more games") }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .buttonStyle(.bordered)
+                            .disabled(isLoadingMore || isLoading)
+                        }
                     }
 
                     if let errorMessage, !games.isEmpty {
@@ -194,6 +202,12 @@ struct DiscoverView: View {
             .fullScreenCover(item: $playerRequest) { request in
                 PixiPlayerSheet(gameID: request.gameID, title: request.title)
             }
+            .sheet(item: $commentsGame) { game in
+                CommentsSheet(game: game)
+            }
+            .sheet(item: $profileRequest) { request in
+                CreatorProfileSheet(creatorID: request.id)
+            }
         }
     }
 
@@ -202,24 +216,91 @@ struct DiscoverView: View {
         playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
     }
 
+    private func loadMore() async {
+        guard let cursor = nextCursor, !isLoadingMore else { return }
+        let requestedScope = selectedFeed
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let page = try await BackendAPI.shared.fetchFeed(scope: requestedScope, cursor: cursor)
+            guard requestedScope == selectedFeed else { return }
+            var seen = Set(games.map(\.id))
+            games.append(contentsOf: page.games.filter { seen.insert($0.id).inserted })
+            nextCursor = page.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
+        } catch { errorMessage = "Couldn't load more games: \(error.localizedDescription)" }
+    }
+
     private func toggleSaved(_ game: FeedGame) {
-        if savedGameIDs.contains(game.id) {
-            savedGameIDs.remove(game.id)
-        } else {
-            savedGameIDs.insert(game.id)
+        let shouldSave = !savedGameIDs.contains(game.id)
+        Task {
+            do {
+                try await BackendAPI.shared.setSaved(game.id, saved: shouldSave)
+                if shouldSave { savedGameIDs.insert(game.id) } else { savedGameIDs.remove(game.id) }
+                UserDefaults.standard.set(savedGameIDs.sorted(), forKey: "hephaestus.savedGames")
+                if shouldSave { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "save") }
+            } catch { errorMessage = "Couldn't update saved games: \(error.localizedDescription)" }
         }
-        UserDefaults.standard.set(savedGameIDs.sorted(), forKey: "hephaestus.savedGames")
+    }
+
+    private func toggleLike(_ game: FeedGame) {
+        let shouldLike = !likedGameIDs.contains(game.id)
+        Task {
+            do {
+                try await BackendAPI.shared.setReaction(game.id, reaction: shouldLike ? "like" : nil)
+                if shouldLike { likedGameIDs.insert(game.id) } else { likedGameIDs.remove(game.id) }
+            } catch { errorMessage = "Couldn't update reaction: \(error.localizedDescription)" }
+        }
+    }
+
+    private func toggleFollow(_ creatorID: String) async {
+        let shouldFollow = !followedCreatorIDs.contains(creatorID)
+        do {
+            try await BackendAPI.shared.setFollowing(creatorID, following: shouldFollow)
+            if shouldFollow { followedCreatorIDs.insert(creatorID) } else { followedCreatorIDs.remove(creatorID) }
+            await BackendAPI.shared.trackSocialEvent(gameID: games.first(where: { $0.ownerID == creatorID })?.id ?? "", kind: "follow")
+            await load()
+        } catch { errorMessage = "Couldn't update follow: \(error.localizedDescription)" }
+    }
+
+    private func report(_ game: FeedGame) async {
+        do { try await BackendAPI.shared.reportGame(gameID: game.id, reason: "Reported from feed")
+        } catch { errorMessage = "Couldn't submit report: \(error.localizedDescription)" }
+    }
+
+    private func blockCreator(_ creatorID: String) async {
+        do {
+            try await BackendAPI.shared.blockCreator(creatorID, blocked: true)
+            games.removeAll { $0.ownerID == creatorID }
+        } catch { errorMessage = "Couldn't block creator: \(error.localizedDescription)" }
+    }
+
+    private func markNotInterested(_ game: FeedGame) async {
+        do {
+            try await BackendAPI.shared.markNotInterested(gameID: game.id)
+            games.removeAll { $0.id == game.id }
+        } catch { errorMessage = "Couldn't save feedback: \(error.localizedDescription)" }
     }
 
     private func load() async {
-        guard !isLoading else { return }
+        loadGeneration += 1
+        let generation = loadGeneration
         isLoading = true
-        defer { isLoading = false }
+        defer { if generation == loadGeneration { isLoading = false } }
         errorMessage = nil
         do {
-            games = try await BackendAPI.shared.fetchFeed()
+            let loadedGames = try await BackendAPI.shared.fetchFeed(scope: selectedFeed)
+            guard generation == loadGeneration else { return }
+            games = loadedGames.games
+            nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
+            if let ids = try? await BackendAPI.shared.fetchFollowingCreatorIDs(), generation == loadGeneration {
+                followedCreatorIDs = ids
+            }
+            if let ids = try? await BackendAPI.shared.fetchSavedGameIDs(), generation == loadGeneration {
+                savedGameIDs = ids
+                UserDefaults.standard.set(ids.sorted(), forKey: "hephaestus.savedGames")
+            }
         } catch {
-            errorMessage = error.localizedDescription
+            if generation == loadGeneration { errorMessage = error.localizedDescription }
         }
     }
 }
@@ -278,8 +359,25 @@ private struct SocialFeedUnavailableView: View {
 private struct GameFeedCard: View {
     let game: FeedGame
     let isSaved: Bool
+    let isLiked: Bool
+    let isFollowingCreator: Bool
+    let canFollowCreator: Bool
     let onPlay: () -> Void
     let onToggleSaved: () -> Void
+    let onToggleLike: () -> Void
+    let onToggleFollow: () -> Void
+    let onOpenComments: () -> Void
+    let onOpenCreator: () -> Void
+    let onReport: () -> Void
+    let onBlockCreator: () -> Void
+    let onNotInterested: () -> Void
+    let onImpression: () -> Void
+
+    private var shareURL: URL {
+        var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "game", value: game.id)]
+        return components.url ?? BackendConfig.baseURL
+    }
 
     private var palette: [Color] {
         let palettes: [[Color]] = [
@@ -320,6 +418,9 @@ private struct GameFeedCard: View {
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+                    if let caption = game.caption, !caption.isEmpty {
+                        Text(caption).font(.subheadline).foregroundStyle(.white.opacity(0.94)).lineLimit(3)
+                    }
                 }
                 .padding(18)
             }
@@ -327,10 +428,47 @@ private struct GameFeedCard: View {
             .clipped()
 
             HStack(spacing: 10) {
-                Label("Mini game", systemImage: "sparkles")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                if let creator = game.ownerID, !creator.isEmpty {
+                    Button(action: onOpenCreator) {
+                        Label(creator, systemImage: "person.crop.circle")
+                            .font(.caption.weight(.medium)).lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("View creator profile")
+                } else {
+                    Label("Mini game", systemImage: "sparkles").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                }
                 Spacer(minLength: 4)
+                if canFollowCreator {
+                    Button(action: onToggleFollow) {
+                        Label(isFollowingCreator ? "Following" : "Follow", systemImage: isFollowingCreator ? "person.fill.checkmark" : "person.badge.plus")
+                            .font(.caption.weight(.semibold)).frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
+                }
+                Button(action: onToggleLike) {
+                    Image(systemName: isLiked ? "heart.fill" : "heart")
+                        .foregroundStyle(isLiked ? Color.pink : Color.primary)
+                        .frame(width: 36, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isLiked ? "Unlike game" : "Like game")
+                Button(action: onOpenComments) {
+                    Image(systemName: "bubble.right").frame(width: 36, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("View comments")
+                Menu {
+                    Button("Not interested", systemImage: "hand.thumbsdown", action: onNotInterested)
+                    if canFollowCreator {
+                        Button("Block creator", systemImage: "person.crop.circle.badge.xmark", role: .destructive, action: onBlockCreator)
+                    }
+                    Button("Report game", systemImage: "flag", role: .destructive, action: onReport)
+                } label: {
+                    Image(systemName: "ellipsis").frame(width: 36, height: 44)
+                }
+                .accessibilityLabel("More game options")
                 Button(action: onToggleSaved) {
                     Label(isSaved ? "Saved" : "Save",
                           systemImage: isSaved ? "heart.fill" : "heart")
@@ -340,13 +478,16 @@ private struct GameFeedCard: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isSaved ? "Remove saved game" : "Save game")
-                ShareLink(item: "Play “\(game.title)” in Hephaestus (game ID: \(game.id))") {
+                ShareLink(item: shareURL) {
                     Image(systemName: "square.and.arrow.up")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
                         .frame(width: 44, height: 44)
                         .background(Color(uiColor: .tertiarySystemGroupedBackground), in: Circle())
                 }
+                .simultaneousGesture(TapGesture().onEnded {
+                    Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
+                })
                 .accessibilityLabel("Share game")
             }
             .padding(.horizontal, 14)
@@ -380,6 +521,124 @@ private struct GameFeedCard: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 5)
+        .onAppear(perform: onImpression)
+    }
+}
+
+private struct CreatorProfileRequest: Identifiable {
+    let id: String
+}
+
+private struct CreatorProfileSheet: View {
+    let creatorID: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var profile: CreatorProfile?
+    @State private var errorMessage: String?
+    @State private var isLoading = true
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading { ProgressView("Loading creator…") }
+                else if let profile {
+                    List {
+                        Section("Creator") {
+                            LabeledContent("Creator ID", value: profile.creator_id)
+                            LabeledContent("Published games", value: "\(profile.post_count)")
+                            LabeledContent("Followers", value: "\(profile.follower_count)")
+                            LabeledContent("Following", value: "\(profile.following_count)")
+                            Button(profile.is_following ? "Unfollow" : "Follow") {
+                                Task { await toggleFollow(profile.is_following) }
+                            }
+                            .disabled(profile.creator_id == BackendConfig.userID)
+                        }
+                        Section("Public games") {
+                            if profile.posts.isEmpty { Text("No public games yet.").foregroundStyle(.secondary) }
+                            ForEach(profile.posts) { game in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(game.title).font(.headline)
+                                    if let caption = game.caption, !caption.isEmpty { Text(caption).font(.subheadline).foregroundStyle(.secondary) }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    ContentUnavailableView("Couldn't load creator", systemImage: "person.crop.circle.badge.exclamationmark", description: Text(errorMessage ?? "Please try again."))
+                }
+            }
+            .navigationTitle("Creator")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do { profile = try await BackendAPI.shared.fetchCreatorProfile(id: creatorID); errorMessage = nil }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    private func toggleFollow(_ currentlyFollowing: Bool) async {
+        do {
+            try await BackendAPI.shared.setFollowing(creatorID, following: !currentlyFollowing)
+            await load()
+        } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+private struct CommentsSheet: View {
+    let game: FeedGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var comments: [SocialComment] = []
+    @State private var draft = ""
+    @State private var errorMessage: String?
+    @State private var isLoading = true
+    @State private var isSubmitting = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if isLoading { ProgressView().padding() }
+                List(comments) { comment in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(comment.user_id).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(comment.body)
+                    }
+                }
+                if let errorMessage { Text(errorMessage).font(.caption).foregroundStyle(.red).padding(.horizontal) }
+                HStack {
+                    TextField("Add a comment…", text: $draft, axis: .vertical).textFieldStyle(.roundedBorder)
+                    Button("Send") { Task { await submit() } }
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSubmitting)
+                }
+                .padding()
+            }
+            .navigationTitle("Comments")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do { comments = try await BackendAPI.shared.fetchComments(gameID: game.id); errorMessage = nil }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    private func submit() async {
+        let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+        isSubmitting = true
+        defer { isSubmitting = false }
+        do {
+            let comment = try await BackendAPI.shared.addComment(gameID: game.id, body: body)
+            comments.append(comment)
+            draft = ""
+        } catch { errorMessage = error.localizedDescription }
     }
 }
 
@@ -403,6 +662,10 @@ struct CreateView: View {
     @State private var previewImage: UIImage?
     @State private var keywordsText = ""
     @State private var intentText = ""
+    @State private var publishCaption = ""
+    @State private var publishTopics = ""
+    @State private var publishMessage: String?
+    @State private var isPublishing = false
     @State private var playerRequest: PixiPlayerRequest?
 
     var body: some View {
@@ -544,7 +807,7 @@ struct CreateView: View {
     }
 
     private func doneView(gameID: String) -> some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 18) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 64))
                 .foregroundStyle(.green)
@@ -553,9 +816,43 @@ struct CreateView: View {
                 playerRequest = PixiPlayerRequest(gameID: gameID, title: "Your game")
             }
             .buttonStyle(.borderedProminent)
+            Divider()
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Share it with the community").font(.headline)
+                TextField("Add a caption", text: $publishCaption, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Topics, separated by commas", text: $publishTopics)
+                    .textFieldStyle(.roundedBorder)
+                Text("Published games enter moderation before appearing in public feeds.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let publishMessage {
+                    Text(publishMessage).font(.footnote).foregroundStyle(.secondary)
+                }
+                Button {
+                    Task { await publish(gameID: gameID) }
+                } label: {
+                    if isPublishing { ProgressView() }
+                    else { Label("Publish game", systemImage: "paperplane.fill") }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isPublishing)
+            }
+            .frame(maxWidth: 420)
             Button("Make another") { reset() }
         }
         .padding()
+    }
+
+    private func publish(gameID: String) async {
+        isPublishing = true
+        defer { isPublishing = false }
+        let topics = publishTopics.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        do {
+            _ = try await BackendAPI.shared.publishPost(gameID: gameID, caption: publishCaption, topics: topics)
+            publishMessage = "Submitted for moderation. The post appears in feeds after approval."
+        } catch {
+            publishMessage = "Couldn't publish: \(error.localizedDescription)"
+        }
     }
 
     private func reset() {
@@ -565,6 +862,9 @@ struct CreateView: View {
         previewImage = nil
         keywordsText = ""
         intentText = ""
+        publishCaption = ""
+        publishTopics = ""
+        publishMessage = nil
     }
 
     private func analyze() async {
@@ -640,14 +940,37 @@ struct CreateView: View {
 /// Recently played games.
 struct LibraryView: View {
     @State private var recent: [RecentGame] = []
+    @State private var saved: [FeedGame] = []
     @State private var errorMessage: String?
+    @State private var playerRequest: PixiPlayerRequest?
 
     var body: some View {
         NavigationStack {
             List {
                 if let errorMessage {
-                    Section {
-                        Text(errorMessage).foregroundStyle(.red)
+                    Section { Text(errorMessage).foregroundStyle(.red) }
+                }
+                Section("Saved games") {
+                    if saved.isEmpty {
+                        Text("Save a game from Discover to keep it here.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(saved) { game in
+                        Button {
+                            playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(game.title).foregroundStyle(.primary)
+                                if let caption = game.caption, !caption.isEmpty {
+                                    Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                            }
+                        }
+                        .contextMenu {
+                            Button("Remove from saved", systemImage: "bookmark.slash", role: .destructive) {
+                                Task { await removeSaved(game) }
+                            }
+                        }
                     }
                 }
                 Section("Recently played") {
@@ -656,21 +979,39 @@ struct LibraryView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(recent) { game in
-                        Text(game.title)
+                        Button(game.title) {
+                            playerRequest = PixiPlayerRequest(gameID: game.gameID, title: game.title)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
             .navigationTitle("Library")
             .refreshable { await load() }
-            .task {
-                await load()
+            .task { await load() }
+            .fullScreenCover(item: $playerRequest) { request in
+                PixiPlayerSheet(gameID: request.gameID, title: request.title)
             }
-            .onAppear { recent = RecentGames.load() }
         }
     }
 
     private func load() async {
         recent = RecentGames.load()
+        do {
+            saved = try await BackendAPI.shared.fetchSavedGames()
+            errorMessage = nil
+        } catch {
+            errorMessage = "Couldn't load saved games: \(error.localizedDescription)"
+        }
+    }
+
+    private func removeSaved(_ game: FeedGame) async {
+        do {
+            try await BackendAPI.shared.setSaved(game.id, saved: false)
+            saved.removeAll { $0.id == game.id }
+        } catch {
+            errorMessage = "Couldn't remove saved game: \(error.localizedDescription)"
+        }
     }
 }
 
