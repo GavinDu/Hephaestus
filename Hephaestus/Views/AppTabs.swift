@@ -730,7 +730,7 @@ private struct CommentsSheet: View {
             comments.removeAll { $0.id == comment.id }
             errorMessage = nil
         } catch {
-            errorMessage = "Couldn't delete comment: \\(error.localizedDescription)"
+            errorMessage = "Couldn't delete comment: \(error.localizedDescription)"
         }
     }
 }
