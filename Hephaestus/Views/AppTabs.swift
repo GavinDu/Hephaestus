@@ -34,50 +34,142 @@ enum RecentGames {
 
 // MARK: - Discover
 
-/// Public games feed. HTML5 games open the bundled player.
+/// A scroll-first feed where a game is the post, and play is the primary action.
 struct DiscoverView: View {
     @State private var games: [FeedGame] = []
     @State private var playerRequest: PixiPlayerRequest?
     @State private var errorMessage: String?
     @State private var isLoading = false
+    @State private var searchText = ""
+    @State private var savedGameIDs = Set<String>()
+
+    private var visibleGames: [FeedGame] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return games }
+        return games.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
 
     var body: some View {
         NavigationStack {
-            List {
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage).foregroundStyle(.red)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("PLAYABLE STORIES", systemImage: "sparkles")
+                            .font(.caption.weight(.bold))
+                            .tracking(1.2)
+                            .foregroundStyle(.purple)
+                        Text("A little world, made by someone.")
+                            .font(.system(size: 27, weight: .bold, design: .rounded))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Discover tiny games, play a round, and save the ones you want to revisit.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                }
-                Section("Games") {
-                    ForEach(games) { game in
-                        HStack {
-                            Text(game.title)
-                            Spacer()
-                            Button("Play") {
-                                RecentGames.record(gameID: game.id, title: game.title)
-                                playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
-                            }
-                            .buttonStyle(.borderedProminent)
+                    .padding(.vertical, 6)
+                    .accessibilityElement(children: .combine)
+
+                    if isLoading && games.isEmpty {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text("Finding something fun…")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 64)
+                    } else if let errorMessage, games.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "wifi.exclamationmark")
+                                .font(.largeTitle)
+                                .foregroundStyle(.secondary)
+                            Text("Couldn't load the feed")
+                                .font(.headline)
+                            Text(errorMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                            Button("Try again") { Task { await load() } }
+                                .buttonStyle(.borderedProminent)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 44)
+                    } else if visibleGames.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.largeTitle)
+                                .foregroundStyle(.secondary)
+                            Text("No games found")
+                                .font(.headline)
+                            Text("Try a different title.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 44)
+                    } else {
+                        ForEach(visibleGames) { game in
+                            GameFeedCard(
+                                game: game,
+                                isSaved: savedGameIDs.contains(game.id),
+                                onPlay: { play(game) },
+                                onToggleSaved: { toggleSaved(game) }
+                            )
                         }
                     }
+
+                    if let errorMessage, !games.isEmpty {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 28)
             }
+            .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Discover")
-            .refreshable { await load() }
-            .task { await load() }
-            .fullScreenCover(item: $playerRequest) { req in
-                PixiPlayerSheet(gameID: req.gameID, title: req.title)
-            }
-            .overlay {
-                if isLoading && games.isEmpty {
-                    ProgressView("Loading games…")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Find a game")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task { await load() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .accessibilityLabel("Refresh games")
+                    .disabled(isLoading)
                 }
+            }
+            .refreshable { await load() }
+            .task {
+                savedGameIDs = Set(UserDefaults.standard.stringArray(forKey: "hephaestus.savedGames") ?? [])
+                await load()
+            }
+            .fullScreenCover(item: $playerRequest) { request in
+                PixiPlayerSheet(gameID: request.gameID, title: request.title)
             }
         }
     }
 
+    private func play(_ game: FeedGame) {
+        RecentGames.record(gameID: game.id, title: game.title)
+        playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
+    }
+
+    private func toggleSaved(_ game: FeedGame) {
+        if savedGameIDs.contains(game.id) {
+            savedGameIDs.remove(game.id)
+        } else {
+            savedGameIDs.insert(game.id)
+        }
+        UserDefaults.standard.set(savedGameIDs.sorted(), forKey: "hephaestus.savedGames")
+    }
+
     private func load() async {
+        guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         errorMessage = nil
@@ -86,6 +178,115 @@ struct DiscoverView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+/// A game-first social card. Until the API returns real preview assets and creator
+/// metadata, the cover is a branded visual rather than fabricated artwork.
+private struct GameFeedCard: View {
+    let game: FeedGame
+    let isSaved: Bool
+    let onPlay: () -> Void
+    let onToggleSaved: () -> Void
+
+    private var palette: [Color] {
+        let palettes: [[Color]] = [
+            [Color(red: 0.31, green: 0.20, blue: 0.67), Color(red: 0.10, green: 0.55, blue: 0.69)],
+            [Color(red: 0.86, green: 0.29, blue: 0.48), Color(red: 0.98, green: 0.57, blue: 0.31)],
+            [Color(red: 0.10, green: 0.48, blue: 0.39), Color(red: 0.55, green: 0.69, blue: 0.30)],
+            [Color(red: 0.16, green: 0.33, blue: 0.68), Color(red: 0.39, green: 0.63, blue: 0.92)],
+            [Color(red: 0.49, green: 0.24, blue: 0.59), Color(red: 0.82, green: 0.40, blue: 0.63)]
+        ]
+        let seed = game.id.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return palettes[seed % palettes.count]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .bottomLeading) {
+                LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
+                Circle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 180, height: 180)
+                    .offset(x: 210, y: -80)
+                Circle()
+                    .stroke(.white.opacity(0.18), lineWidth: 1)
+                    .frame(width: 220, height: 220)
+                    .offset(x: 180, y: -20)
+                Image(systemName: "gamecontroller.fill")
+                    .font(.system(size: 64, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("COMMUNITY GAME")
+                        .font(.caption2.weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(.white.opacity(0.82))
+                    Text(game.title)
+                        .font(.system(size: 25, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+                }
+                .padding(18)
+            }
+            .frame(height: 220)
+            .clipped()
+
+            HStack(spacing: 10) {
+                Label("Mini game", systemImage: "sparkles")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                Button(action: onToggleSaved) {
+                    Label(isSaved ? "Saved" : "Save",
+                          systemImage: isSaved ? "heart.fill" : "heart")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isSaved ? Color.pink : Color.primary)
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isSaved ? "Remove saved game" : "Save game")
+                ShareLink(item: "Play “\(game.title)” in Hephaestus (game ID: \(game.id))") {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 44, height: 44)
+                        .background(Color(uiColor: .tertiarySystemGroupedBackground), in: Circle())
+                }
+                .accessibilityLabel("Share game")
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+
+            Button(action: onPlay) {
+                HStack(spacing: 8) {
+                    Image(systemName: "play.fill")
+                    Text("Play now")
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption.weight(.bold))
+                }
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .frame(height: 48)
+                .background(
+                    LinearGradient(colors: palette, startPoint: .leading, endPoint: .trailing),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+            }
+            .buttonStyle(.plain)
+            .padding(14)
+        }
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 5)
     }
 }
 
