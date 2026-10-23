@@ -59,6 +59,9 @@ struct DiscoverView: View {
     @State private var playerRequest: PixiPlayerRequest?
     @State private var errorMessage: String?
     @State private var isLoading = false
+    @State private var feedLoadGeneration = 0
+    @State private var followedCreatorIDs = Set<String>()
+    @State private var isUpdatingFollow = false
     @State private var searchText = ""
     @State private var savedGameIDs = Set<String>()
 
@@ -86,10 +89,6 @@ struct DiscoverView: View {
                     }
                     .pickerStyle(.segmented)
                     .accessibilityLabel("Social feed")
-                    .onChange(of: selectedFeed) { _, _ in
-                        games = []
-                        Task { await load() }
-                    }
 
                     VStack(alignment: .leading, spacing: 8) {
                         Label("PLAYABLE STORIES", systemImage: "sparkles")
@@ -151,8 +150,15 @@ struct DiscoverView: View {
                                 GameFeedCard(
                                     game: game,
                                     isSaved: savedGameIDs.contains(game.id),
+                                    isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
+                                    canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.userID,
                                     onPlay: { play(game) },
-                                    onToggleSaved: { toggleSaved(game) }
+                                    onToggleSaved: { toggleSaved(game) },
+                                    onToggleFollow: {
+                                        if let ownerID = game.ownerID {
+                                            Task { await toggleFollow(ownerID) }
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -185,8 +191,9 @@ struct DiscoverView: View {
                 }
             }
             .refreshable { await load() }
-            .task {
+            .task(id: selectedFeed) {
                 savedGameIDs = Set(UserDefaults.standard.stringArray(forKey: "hephaestus.savedGames") ?? [])
+                await refreshFollowing()
                 await load()
             }
             .fullScreenCover(item: $playerRequest) { request in
@@ -209,14 +216,54 @@ struct DiscoverView: View {
         UserDefaults.standard.set(savedGameIDs.sorted(), forKey: "hephaestus.savedGames")
     }
 
-    private func load() async {
-        guard !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
-        errorMessage = nil
+    private func refreshFollowing() async {
         do {
-            games = try await BackendAPI.shared.fetchFeed()
+            followedCreatorIDs = try await BackendAPI.shared.fetchFollowingCreatorIDs()
         } catch {
+            DevLog.warn(.api, "following list unavailable: \\(error.localizedDescription)")
+        }
+    }
+
+    private func toggleFollow(_ creatorID: String) async {
+        guard !isUpdatingFollow else { return }
+        isUpdatingFollow = true
+        defer { isUpdatingFollow = false }
+        let shouldFollow = !followedCreatorIDs.contains(creatorID)
+        do {
+            try await BackendAPI.shared.setFollowing(creatorID, follow: shouldFollow)
+            if shouldFollow {
+                followedCreatorIDs.insert(creatorID)
+            } else {
+                followedCreatorIDs.remove(creatorID)
+            }
+            await load()
+        } catch {
+            errorMessage = "Couldn't update follow: \\(error.localizedDescription)"
+        }
+    }
+
+    private func load() async {
+        feedLoadGeneration += 1
+        let generation = feedLoadGeneration
+        isLoading = true
+        defer {
+            if generation == feedLoadGeneration {
+                isLoading = false
+            }
+        }
+        errorMessage = nil
+        let scope: BackendAPI.FeedScope
+        switch selectedFeed {
+        case .forYou: scope = .forYou
+        case .following: scope = .following
+        case .friends: scope = .friends
+        }
+        do {
+            let result = try await BackendAPI.shared.fetchFeed(scope: scope)
+            guard generation == feedLoadGeneration else { return }
+            games = result
+        } catch {
+            guard generation == feedLoadGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -276,8 +323,11 @@ private struct SocialFeedUnavailableView: View {
 private struct GameFeedCard: View {
     let game: FeedGame
     let isSaved: Bool
+    let isFollowingCreator: Bool
+    let canFollowCreator: Bool
     let onPlay: () -> Void
     let onToggleSaved: () -> Void
+    let onToggleFollow: () -> Void
 
     private var palette: [Color] {
         let palettes: [[Color]] = [
@@ -329,6 +379,16 @@ private struct GameFeedCard: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
+                if canFollowCreator {
+                    Button(action: onToggleFollow) {
+                        Label(isFollowingCreator ? "Following" : "Follow",
+                              systemImage: isFollowingCreator ? "person.fill.checkmark" : "person.badge.plus")
+                            .font(.caption.weight(.semibold))
+                            .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
+                }
                 Button(action: onToggleSaved) {
                     Label(isSaved ? "Saved" : "Save",
                           systemImage: isSaved ? "heart.fill" : "heart")
