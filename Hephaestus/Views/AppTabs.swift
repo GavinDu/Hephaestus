@@ -1367,6 +1367,7 @@ struct ProfileView: View {
     @State private var incidentsLoaded = false
     @State private var incidentsError: String?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
+    @State private var isModerationAppealPresented = false
 
     var body: some View {
         NavigationStack {
@@ -1379,6 +1380,16 @@ struct ProfileView: View {
                             .foregroundStyle(.secondary)
                     }
                     Text("Parent-owned account — sign-in with Apple coming soon.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Safety & moderation") {
+                    Button {
+                        isModerationAppealPresented = true
+                    } label: {
+                        Label("Appeal a moderation decision", systemImage: "exclamationmark.bubble")
+                    }
+                    Text("Use this if one of your games was rejected or quarantined. Appeals are reviewed by a moderator and do not automatically restore publication.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1461,6 +1472,108 @@ struct ProfileView: View {
                     }
                 }
             }
+            .sheet(isPresented: $isModerationAppealPresented) {
+                ModerationAppealSheet()
+            }
+
+private struct ModerationAppealSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var gameID = ""
+    @State private var reason = ""
+    @State private var contact: BackendAPI.ModerationContactResponse?
+    @State private var isSubmitting = false
+    @State private var message: String?
+    @State private var didSubmit = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Game") {
+                    TextField("Game ID", text: $gameID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                Section("Why should this decision be reviewed?") {
+                    TextEditor(text: $reason)
+                        .frame(minHeight: 120)
+                    Text("\(reason.trimmingCharacters(in: .whitespacesAndNewlines).count)/1000 characters")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section {
+                    Text("Only the creator can appeal a rejected or quarantined game. Submitting an appeal adds it to the moderator queue; it does not republish the game.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if let contact {
+                    Section("Moderation contact") {
+                        if !contact.contact_email.isEmpty {
+                            LabeledContent("Email", value: contact.contact_email)
+                                .textSelection(.enabled)
+                        }
+                        if !contact.contact_url.isEmpty, let url = URL(string: contact.contact_url) {
+                            Link("Open moderation contact", destination: url)
+                        }
+                        if !contact.external_contact_configured {
+                            Text("No external contact channel is configured. You can still submit an in-app appeal.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if let message {
+                    Section {
+                        Text(message)
+                            .foregroundStyle(didSubmit ? .green : .secondary)
+                    }
+                }
+                Section {
+                    Button {
+                        Task { await submit() }
+                    } label: {
+                        if isSubmitting {
+                            ProgressView()
+                        } else {
+                            Label("Submit appeal", systemImage: "paperplane")
+                        }
+                    }
+                    .disabled(isSubmitting || gameID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                              reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                              reason.trimmingCharacters(in: .whitespacesAndNewlines).count > 1000 || didSubmit)
+                }
+            }
+            .navigationTitle("Moderation appeal")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task { await loadContact() }
+        }
+    }
+
+    private func loadContact() async {
+        do { contact = try await BackendAPI.shared.fetchModerationContact() }
+        catch { /* Contact configuration is optional; appeal submission remains available. */ }
+    }
+
+    private func submit() async {
+        isSubmitting = true
+        defer { isSubmitting = false }
+        do {
+            let result = try await BackendAPI.shared.submitModerationAppeal(
+                gameID: gameID.trimmingCharacters(in: .whitespacesAndNewlines),
+                reason: reason
+            )
+            didSubmit = true
+            message = "Appeal submitted (\(result.appeal_id)). Status: \(result.status)."
+        } catch {
+            message = "Couldn't submit appeal: \(error.localizedDescription)"
+        }
+    }
+}
+
             .navigationTitle("Profile")
             .onAppear { logEntries = DevLog.shared.count }
             .task {
