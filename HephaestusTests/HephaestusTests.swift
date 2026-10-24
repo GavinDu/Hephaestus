@@ -14,6 +14,22 @@ struct HephaestusTests {
         #expect(SocialFeedScope.allCases.map(\.title) == ["For You", "Following", "Friends"])
     }
 
+    @Test func moderationAppealAndContactResponsesDecode() throws {
+        let appealJSON = """
+        {"appeal_id":"appeal-1","status":"open","message":"queued for moderator review"}
+        """.data(using: .utf8)!
+        let appeal = try JSONDecoder().decode(BackendAPI.ModerationAppealResponse.self, from: appealJSON)
+        #expect(appeal.appeal_id == "appeal-1")
+        #expect(appeal.status == "open")
+
+        let contactJSON = """
+        {"contact_url":"https://example.test/moderation","contact_email":"safety@example.test","appeals_endpoint":"POST /v1/games/{id}/moderation-appeals","external_contact_configured":true}
+        """.data(using: .utf8)!
+        let contact = try JSONDecoder().decode(BackendAPI.ModerationContactResponse.self, from: contactJSON)
+        #expect(contact.external_contact_configured)
+        #expect(contact.contact_email == "safety@example.test")
+    }
+
     @Test func backendConfigIsSane() {
         #expect(BackendConfig.baseURL.scheme == "https")
         #expect(!BackendConfig.userID.isEmpty)
