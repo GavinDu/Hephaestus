@@ -1363,10 +1363,8 @@ struct ProfileView: View {
     @State private var backendOK = false
     @State private var checked = false
     @State private var logEntries = DevLog.shared.count
-    @State private var incidents: [BackendAPI.IncidentSummary] = []
-    @State private var incidentsLoaded = false
-    @State private var incidentsError: String?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
+    @State private var isModerationAppealPresented = false
 
     var body: some View {
         NavigationStack {
@@ -1379,6 +1377,16 @@ struct ProfileView: View {
                             .foregroundStyle(.secondary)
                     }
                     Text("Parent-owned account — sign-in with Apple coming soon.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Safety & moderation") {
+                    Button {
+                        isModerationAppealPresented = true
+                    } label: {
+                        Label("Appeal a moderation decision", systemImage: "exclamationmark.bubble")
+                    }
+                    Text("Use this if one of your games was rejected or quarantined. Appeals are reviewed by a moderator and do not automatically restore publication.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1436,53 +1444,126 @@ struct ProfileView: View {
                         Text("\(qualityRaw) → \(PlayerQuality.effective(preference: PlayerQuality(rawValue: qualityRaw) ?? .auto))")
                             .foregroundStyle(.secondary)
                     }
-                    if let incidentsError {
-                        Text(incidentsError)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else if incidentsLoaded && incidents.isEmpty {
-                        Text("No incidents reported — players are healthy.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(incidents.prefix(5)) { inc in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("×\(inc.count) \(inc.sampleName)\(inc.runtimeScope ? " · runtime-wide" : "")")
-                                    .font(.subheadline)
-                                Text(inc.games.joined(separator: ", "))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-                    Button("Refresh player health") {
-                        Task { await loadIncidents() }
-                    }
+                    Text("Server-wide incident aggregates are restricted to operators and are not fetched by the app. If you encounter a player issue, copy or share the session log above only after removing private information.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
+            .sheet(isPresented: $isModerationAppealPresented) {
+                ModerationAppealSheet()
+            }
+
             .navigationTitle("Profile")
             .onAppear { logEntries = DevLog.shared.count }
             .task {
                 await BackendAPI.shared.checkHealth()
                 backendOK = BackendAPI.shared.isHealthy
                 checked = true
-                await loadIncidents()
             }
         }
     }
 
-    private func loadIncidents() async {
+}
+
+
+private struct ModerationAppealSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var gameID = ""
+    @State private var reason = ""
+    @State private var contact: BackendAPI.ModerationContactResponse?
+    @State private var isSubmitting = false
+    @State private var message: String?
+    @State private var didSubmit = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Game") {
+                    TextField("Game ID", text: $gameID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                Section("Why should this decision be reviewed?") {
+                    TextEditor(text: $reason)
+                        .frame(minHeight: 120)
+                    Text("\(reason.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count)/1000 Unicode characters")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section {
+                    Text("Only the creator can appeal a rejected or quarantined game. Submitting an appeal adds it to the moderator queue; it does not republish the game.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if let contact {
+                    Section("Moderation contact") {
+                        if !contact.contact_email.isEmpty {
+                            LabeledContent("Email", value: contact.contact_email)
+                                .textSelection(.enabled)
+                        }
+                        if !contact.contact_url.isEmpty, let url = URL(string: contact.contact_url) {
+                            Link("Open moderation contact", destination: url)
+                        }
+                        if !contact.external_contact_configured {
+                            Text("No external contact channel is configured. You can still submit an in-app appeal.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if let message {
+                    Section {
+                        Text(message)
+                            .foregroundStyle(didSubmit ? .green : .secondary)
+                    }
+                }
+                Section {
+                    Button {
+                        Task { await submit() }
+                    } label: {
+                        if isSubmitting {
+                            ProgressView()
+                        } else {
+                            Label("Submit appeal", systemImage: "paperplane")
+                        }
+                    }
+                    .disabled(isSubmitting || gameID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                              reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                              reason.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count > 1000 || didSubmit)
+                }
+            }
+            .navigationTitle("Moderation appeal")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task { await loadContact() }
+        }
+    }
+
+    private func loadContact() async {
+        do { contact = try await BackendAPI.shared.fetchModerationContact() }
+        catch { /* Contact configuration is optional; appeal submission remains available. */ }
+    }
+
+    private func submit() async {
+        isSubmitting = true
+        defer { isSubmitting = false }
         do {
-            incidents = try await BackendAPI.shared.fetchIncidents()
-            incidentsError = nil
-            incidentsLoaded = true
+            let result = try await BackendAPI.shared.submitModerationAppeal(
+                gameID: gameID.trimmingCharacters(in: .whitespacesAndNewlines),
+                reason: reason
+            )
+            didSubmit = true
+            message = "Appeal submitted (\(result.appeal_id)). Status: \(result.status)."
         } catch {
-            incidentsError = "Couldn't load incidents: \(error.localizedDescription)"
-            incidentsLoaded = true
+            message = "Couldn't submit appeal: \(error.localizedDescription)"
         }
     }
 }
+
 
 
 private struct FeedPreferencesSheet: View {
