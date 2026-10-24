@@ -1,6 +1,16 @@
 import Combine
 import Foundation
 
+enum BackendAPIError: LocalizedError {
+    case invalidInput(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidInput(let message): message
+        }
+    }
+}
+
 // MARK: - Models (mirror the backend JSON; see docs/API.md)
 
 struct Element: Codable {
