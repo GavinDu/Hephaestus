@@ -25,6 +25,14 @@ struct HephaestusTests {
         #expect(DevLog.shared.count == before + 1)
         #expect(DevLog.shared.exportText().contains("test entry"))
     }
+
+    @Test func gameplayTelemetryQuickExitThresholdIsBounded() {
+        #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 0))
+        #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 4_999))
+        #expect(!GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 5_000))
+        #expect(!GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 12_000))
+        #expect(!GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: -1))
+    }
 }
 
 
