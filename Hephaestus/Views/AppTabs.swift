@@ -1476,6 +1476,30 @@ struct ProfileView: View {
                 ModerationAppealSheet()
             }
 
+            .navigationTitle("Profile")
+            .onAppear { logEntries = DevLog.shared.count }
+            .task {
+                await BackendAPI.shared.checkHealth()
+                backendOK = BackendAPI.shared.isHealthy
+                checked = true
+                await loadIncidents()
+            }
+        }
+    }
+
+    private func loadIncidents() async {
+        do {
+            incidents = try await BackendAPI.shared.fetchIncidents()
+            incidentsError = nil
+            incidentsLoaded = true
+        } catch {
+            incidentsError = "Couldn't load incidents: \(error.localizedDescription)"
+            incidentsLoaded = true
+        }
+    }
+}
+
+
 private struct ModerationAppealSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var gameID = ""
@@ -1574,28 +1598,6 @@ private struct ModerationAppealSheet: View {
     }
 }
 
-            .navigationTitle("Profile")
-            .onAppear { logEntries = DevLog.shared.count }
-            .task {
-                await BackendAPI.shared.checkHealth()
-                backendOK = BackendAPI.shared.isHealthy
-                checked = true
-                await loadIncidents()
-            }
-        }
-    }
-
-    private func loadIncidents() async {
-        do {
-            incidents = try await BackendAPI.shared.fetchIncidents()
-            incidentsError = nil
-            incidentsLoaded = true
-        } catch {
-            incidentsError = "Couldn't load incidents: \(error.localizedDescription)"
-            incidentsLoaded = true
-        }
-    }
-}
 
 
 private struct FeedPreferencesSheet: View {
