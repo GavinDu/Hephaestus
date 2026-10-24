@@ -1,6 +1,16 @@
 import Combine
 import Foundation
 
+enum BackendAPIError: LocalizedError {
+    case invalidInput(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidInput(let message): message
+        }
+    }
+}
+
 // MARK: - Models (mirror the backend JSON; see docs/API.md)
 
 struct Element: Codable {
@@ -239,6 +249,18 @@ final class BackendAPI: ObservableObject {
     private struct TopicPreferencesBody: Encodable { var muted_topics: [String] }
     private struct TopicPreferencesResponse: Decodable { var muted_topics: [String] }
     struct FeedPreferences: Decodable { var muted_topics: [String]; var not_interested_game_ids: [String] }
+    struct ModerationAppealResponse: Decodable {
+        var appeal_id: String
+        var status: String
+        var message: String
+    }
+    struct ModerationContactResponse: Decodable {
+        var contact_url: String
+        var contact_email: String
+        var appeals_endpoint: String
+        var external_contact_configured: Bool
+    }
+    private struct ModerationAppealBody: Encodable { var reason: String }
     private struct EventBody: Encodable { var event_id: String; var game_id: String; var kind: String; var duration_ms: Int; var expected_duration_ms: Int }
 
     func fetchFeed(scope: SocialFeedScope = .forYou, cursor: String? = nil) async throws -> FeedResponse {
@@ -304,6 +326,26 @@ final class BackendAPI: ObservableObject {
     func reportGame(gameID: String, reason: String) async throws {
         let req = try makeRequest("v1/games/\(gameID)/report", method: "POST", body: ReportBody(reason: reason))
         let _: ActionResponse = try await send(ActionResponse.self, req)
+    }
+
+    /// Submit an appeal for a creator-owned game that has been rejected or quarantined.
+    /// The backend queues the appeal for moderator review; this does not restore publication.
+    func submitModerationAppeal(gameID: String, reason: String) async throws -> ModerationAppealResponse {
+        let boundedReason = String(reason.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.prefix(1000))
+        guard !boundedReason.isEmpty else {
+            throw BackendAPIError.invalidInput("Appeal reason is required.")
+        }
+        let req = try makeRequest(
+            "v1/games/\(gameID)/moderation-appeals",
+            method: "POST",
+            body: ModerationAppealBody(reason: boundedReason)
+        )
+        return try await send(ModerationAppealResponse.self, req)
+    }
+
+    func fetchModerationContact() async throws -> ModerationContactResponse {
+        let req = try makeRequest("v1/moderation/contact")
+        return try await send(ModerationContactResponse.self, req)
     }
 
     func blockCreator(_ creatorID: String, blocked: Bool) async throws {
@@ -388,28 +430,6 @@ final class BackendAPI: ObservableObject {
     func postPlayerTelemetry(_ report: PlayerTelemetryReport) async {
         guard let req = try? makeRequest("v1/telemetry/runtime-error", method: "POST", body: report) else { return }
         _ = try? await session.data(for: req)
-    }
-
-    struct IncidentSummary: Decodable, Identifiable {
-        var fingerprint: String
-        var count: Int
-        var games: [String]
-        var sampleName: String
-        var sampleMessage: String
-        var lastSeen: String
-        var runtimeScope: Bool
-        var id: String { fingerprint }
-    }
-
-    private struct IncidentsResponse: Decodable {
-        var incidents: [IncidentSummary]
-    }
-
-    /// Aggregated runtime-error incidents from the backend (web + iOS
-    /// player events in one view), worst first.
-    func fetchIncidents() async throws -> [IncidentSummary] {
-        let req = try makeRequest("v1/telemetry/incidents")
-        return try await send(IncidentsResponse.self, req).incidents
     }
 
     struct IngestBody: Encodable {
