@@ -1444,7 +1444,7 @@ struct ProfileView: View {
                         Text("\(qualityRaw) → \(PlayerQuality.effective(preference: PlayerQuality(rawValue: qualityRaw) ?? .auto))")
                             .foregroundStyle(.secondary)
                     }
-                    Text("Server-wide incident aggregates are restricted to operators and are not fetched by the app. If you encounter a player issue, share the session log above.")
+                    Text("Server-wide incident aggregates are restricted to operators and are not fetched by the app. If you encounter a player issue, share the session log above and remove any private information first.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
