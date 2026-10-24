@@ -58,6 +58,16 @@ enum PlayerQuality: String, CaseIterable {
     }
 }
 
+// Social quick-exit events are emitted only when a loaded game is dismissed
+// within five seconds. Longer sessions are not labeled as quick exits.
+enum GameplayTelemetryPolicy {
+    static let quickExitThresholdMS = 5_000
+
+    static func shouldTrackQuickExit(durationMS: Int) -> Bool {
+        durationMS >= 0 && durationMS < quickExitThresholdMS
+    }
+}
+
 // MARK: - Telemetry (monitoring)
 
 /// Fire-and-forget reports to the backend's telemetry endpoint — the
@@ -121,6 +131,9 @@ struct PixiPlayerSheet: View {
     @State private var autoReloads = 0
     @State private var reportedThermal = false
     @State private var reportedMemoryWarning = false
+    @State private var gameplayStartedAt: Date?
+    @State private var didTrackGameplayStart = false
+    @State private var didTrackReplay = false
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
     @StateObject private var pathMonitor = PlayerPathMonitor()
 
@@ -156,6 +169,19 @@ struct PixiPlayerSheet: View {
                             DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
                             PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
                                                    message: "loaded in \(ms)ms quality=\(effectiveQuality)")
+                            if !didTrackGameplayStart {
+                                let playedKey = "hephaestus.playedGameIDs"
+                                var playedIDs = Set(UserDefaults.standard.stringArray(forKey: playedKey) ?? [])
+                                if playedIDs.contains(gameID), !didTrackReplay {
+                                    Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "replay") }
+                                    didTrackReplay = true
+                                }
+                                playedIDs.insert(gameID)
+                                UserDefaults.standard.set(playedIDs.sorted(), forKey: playedKey)
+                                gameplayStartedAt = Date()
+                                didTrackGameplayStart = true
+                                Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "play_start") }
+                            }
                         },
                         onLoadFail: { message in
                             isLoading = false
@@ -312,6 +338,20 @@ struct PixiPlayerSheet: View {
             .onAppear {
                 loadStartedAt = Date()
                 DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView (quality \(effectiveQuality))")
+            }
+            .onDisappear {
+                guard let startedAt = gameplayStartedAt, didTrackGameplayStart else { return }
+                let durationMS = max(0, Int(Date().timeIntervalSince(startedAt) * 1000))
+                if GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: durationMS) {
+                    Task {
+                        await BackendAPI.shared.trackSocialEvent(
+                            gameID: gameID,
+                            kind: "quick_exit",
+                            durationMS: durationMS
+                        )
+                    }
+                }
+                gameplayStartedAt = nil
             }
         }
     }
