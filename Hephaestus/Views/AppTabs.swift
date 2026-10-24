@@ -1486,7 +1486,7 @@ private struct ModerationAppealSheet: View {
                 Section("Why should this decision be reviewed?") {
                     TextEditor(text: $reason)
                         .frame(minHeight: 120)
-                    Text("\(reason.trimmingCharacters(in: .whitespacesAndNewlines).count)/1000 characters")
+                    Text("\(reason.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count)/1000 Unicode characters")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1529,7 +1529,7 @@ private struct ModerationAppealSheet: View {
                     }
                     .disabled(isSubmitting || gameID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                               reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                              reason.trimmingCharacters(in: .whitespacesAndNewlines).count > 1000 || didSubmit)
+                              reason.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count > 1000 || didSubmit)
                 }
             }
             .navigationTitle("Moderation appeal")
