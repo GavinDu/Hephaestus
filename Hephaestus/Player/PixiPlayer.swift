@@ -133,7 +133,6 @@ struct PixiPlayerSheet: View {
     @State private var reportedMemoryWarning = false
     @State private var gameplayStartedAt: Date?
     @State private var didTrackGameplayStart = false
-    @State private var didTrackReplay = false
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
     @StateObject private var pathMonitor = PlayerPathMonitor()
 
@@ -169,18 +168,12 @@ struct PixiPlayerSheet: View {
                             DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
                             PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
                                                    message: "loaded in \(ms)ms quality=\(effectiveQuality)")
+                            // The backend derives play_start/replay/completion from
+                            // runtime session_start/run_end events. Only track the
+                            // sheet lifecycle here to avoid double-counting starts.
                             if !didTrackGameplayStart {
-                                let playedKey = "hephaestus.playedGameIDs"
-                                var playedIDs = Set(UserDefaults.standard.stringArray(forKey: playedKey) ?? [])
-                                if playedIDs.contains(gameID), !didTrackReplay {
-                                    Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "replay") }
-                                    didTrackReplay = true
-                                }
-                                playedIDs.insert(gameID)
-                                UserDefaults.standard.set(playedIDs.sorted(), forKey: playedKey)
                                 gameplayStartedAt = Date()
                                 didTrackGameplayStart = true
-                                Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "play_start") }
                             }
                         },
                         onLoadFail: { message in
