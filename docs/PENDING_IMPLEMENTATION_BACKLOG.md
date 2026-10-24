@@ -37,7 +37,7 @@ The iOS player executes data-defined Game IR through the PixiJS + Rapier runtime
 - Hephaestus PR #27 is merged and adds structured report reasons and optional details; it does not complete the full moderation roadmap.
 - Hephaestus PR #8 is superseded by this reconciled ledger after its unique priority/trigger guidance has been retained here.
 - Backend PR #13 is merged. A subsequent Go validation run on PR #18 completed successfully for Go tests/race/static analysis, Chromium, WebKit, and Playability Kit.
-- Backend PR #16 (stabilize CI by serializing browser validation) is still open. Its earlier recorded workflow run failed; a retry has been requested, but do not declare the CI configuration PR validated until a new run for its head reports actual step results.
+- Backend PR #16 (stabilize CI by serializing browser validation) was squash-merged after a fresh run passed all four jobs (Go tests/race/static analysis, Chromium, WebKit, Playability Kit). The merged main pipeline was separately validated in an isolated temporary checkout.
 - Keep #10 and #11 open until explicitly authorized to revisit them.
 
 ## Definition of done
