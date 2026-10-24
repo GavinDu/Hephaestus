@@ -40,6 +40,15 @@ POST /v1/ingest → POST /v1/games → (job runs) → POST /v1/games/{id}/confir
 | GET | `/v1/games/{id}/bundle/sprites/{sprite}` | sprite PNG |
 | GET | `/v1/games/{id}/bundle/audio/theme.wav` | music |
 
+## Publishing moderation and appeals
+
+| Method | Path | Body → Response |
+|---|---|---|
+| POST | `/v1/games/{id}/moderation-appeals` | `{reason}` → `{appeal_id, status, message}`; creator-only for rejected/quarantined games, one open appeal at a time |
+| GET | `/v1/moderation/contact` | → configured `contact_url` / `contact_email` and whether an external channel is configured |
+
+Appeals enter the moderator report queue and do not automatically restore distribution. The text screen is high-confidence triage only; it does not scan binary media or replace human moderation. The current `X-User-ID` remains a development identity, not verified authentication.
+
 ## Feed, groups, leaderboard
 
 | Method | Path | Body → Response |
