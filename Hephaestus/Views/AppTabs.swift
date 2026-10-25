@@ -52,6 +52,7 @@ struct DiscoverView: View {
     @State private var loadGeneration = 0
     @State private var nextCursor: String?
     @State private var isLoadingMore = false
+    @State private var loadMoreError: String?
     @State private var commentsGame: FeedGame?
     @State private var reportingGame: FeedGame?
     @State private var profileRequest: CreatorProfileRequest?
@@ -165,15 +166,31 @@ struct DiscoverView: View {
                         }
                         .frame(maxWidth: 1120)
                         if nextCursor != nil && searchText.isEmpty {
-                            Button {
-                                Task { await loadMore() }
-                            } label: {
-                                if isLoadingMore { ProgressView() }
-                                else { Text("Load more games") }
+                            if let loadMoreError {
+                                VStack(spacing: 8) {
+                                    Label(loadMoreError, systemImage: "wifi.exclamationmark")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.center)
+                                    Button("Retry loading games") {
+                                        Task { await loadMore() }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(isLoadingMore || isLoading)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 4)
+                            } else {
+                                Button {
+                                    Task { await loadMore() }
+                                } label: {
+                                    if isLoadingMore { ProgressView("Loading more games…") }
+                                    else { Text("Load more games") }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .buttonStyle(.bordered)
+                                .disabled(isLoadingMore || isLoading)
                             }
-                            .frame(maxWidth: .infinity)
-                            .buttonStyle(.bordered)
-                            .disabled(isLoadingMore || isLoading)
                         }
                     }
 
@@ -259,6 +276,7 @@ struct DiscoverView: View {
         let requestedScope = selectedFeed
         let requestedGeneration = loadGeneration
         isLoadingMore = true
+        loadMoreError = nil
         defer { isLoadingMore = false }
         do {
             let page = try await BackendAPI.shared.fetchFeed(scope: requestedScope, cursor: cursor)
