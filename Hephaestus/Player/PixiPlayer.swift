@@ -134,6 +134,7 @@ struct PixiPlayerSheet: View {
     @State private var progress: Double = 0
     @State private var showSlowHint = false
     @State private var loadStartedAt = Date()
+    @State private var activeQuality = PlayerQuality.effective(preference: .auto)
     @State private var autoReloads = 0
     @State private var reportedThermal = false
     @State private var reportedMemoryWarning = false
@@ -155,7 +156,7 @@ struct PixiPlayerSheet: View {
         components?.path = "/player"
         components?.queryItems = [
             URLQueryItem(name: "game", value: gameID),
-            URLQueryItem(name: "quality", value: effectiveQuality),
+            URLQueryItem(name: "quality", value: activeQuality),
         ]
         return components?.url
     }
@@ -172,9 +173,9 @@ struct PixiPlayerSheet: View {
                             loadError = nil
                             showSlowHint = false
                             let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
-                            DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
+                            DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(activeQuality))")
                             PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
-                                                   message: "loaded in \(ms)ms quality=\(effectiveQuality)")
+                                                   message: "loaded in \(ms)ms quality=\(activeQuality)")
                             // The backend derives play_start/replay/completion from
                             // runtime session_start/run_end events. Only track the
                             // sheet lifecycle here to avoid double-counting starts.
@@ -303,15 +304,10 @@ struct PixiPlayerSheet: View {
                 }
             }
             .onChange(of: qualityRaw) { _, _ in
-                // A new quality takes effect by reloading the player
-                // with the new URL parameter — no script channel.
-                DevLog.info(.player, "quality preference -> \(qualityRaw) (effective \(effectiveQuality))")
-                loadError = nil
-                isLoading = true
-                progress = 0
-                showSlowHint = false
-                loadStartedAt = Date()
-                attempt += 1
+                // Do not restart an active game when a preference changes:
+                // that discards the current session and may lose progress.
+                // The selected quality is applied the next time a game opens.
+                DevLog.info(.player, "quality preference saved for next game -> \(qualityRaw) (effective \(effectiveQuality))")
             }
             .onChange(of: pathMonitor.isOffline) { _, offline in
                 if !offline, loadError != nil {
@@ -349,7 +345,8 @@ struct PixiPlayerSheet: View {
             }
             .onAppear {
                 loadStartedAt = Date()
-                DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView (quality \(effectiveQuality))")
+                activeQuality = effectiveQuality
+                DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView (quality \(activeQuality))")
             }
             .onDisappear {
                 guard let startedAt = gameplayStartedAt, didTrackGameplayStart else { return }
