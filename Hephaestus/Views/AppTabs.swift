@@ -136,15 +136,18 @@ private final class FeedPreviewPlayback: ObservableObject {
     }
 
     func stop(gameID: String? = nil) {
-        if let gameID, pendingGameID == gameID {
+        if let gameID {
+            if pendingGameID == gameID {
+                pendingTask?.cancel()
+                pendingTask = nil
+                pendingGameID = nil
+            }
+            guard activeGameID == gameID else { return }
+        } else {
             pendingTask?.cancel()
             pendingTask = nil
             pendingGameID = nil
         }
-        guard gameID == nil || activeGameID == gameID else { return }
-        pendingTask?.cancel()
-        pendingTask = nil
-        pendingGameID = nil
         player.pause()
         player.removeAllItems()
         looper = nil
