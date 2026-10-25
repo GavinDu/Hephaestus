@@ -74,6 +74,14 @@ enum PlayerLoadingPolicy {
         isOffline && isLoading && !hasError
     }
 }
+/// A foreground transition should only restart a failed load when connectivity
+/// is available. Loaded gameplay is never reloaded just because the app resumed.
+enum PlayerLifecyclePolicy {
+    static func shouldRetryAfterForeground(wasBackgrounded: Bool, isOffline: Bool, hasError: Bool) -> Bool {
+        wasBackgrounded && !isOffline && hasError
+    }
+}
+
 // MARK: - Telemetry (monitoring)
 
 /// Fire-and-forget reports to the backend's telemetry endpoint — the
@@ -128,6 +136,8 @@ struct PixiPlayerSheet: View {
     let gameID: String
     let title: String
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var wasBackgrounded = false
     @State private var isLoading = true
     @State private var loadError: String?
     @State private var attempt = 0
@@ -168,6 +178,7 @@ struct PixiPlayerSheet: View {
         return components?.url ?? BackendConfig.baseURL
     }
 
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -180,9 +191,9 @@ struct PixiPlayerSheet: View {
                             loadError = nil
                             showSlowHint = false
                             let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
-                            DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(activeQuality ?? effectiveQuality))")
+                            DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
                             PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
-                                                   message: "loaded in \(ms)ms quality=\(activeQuality ?? effectiveQuality)")
+                                                   message: "loaded in \(ms)ms quality=\(effectiveQuality)")
                             // The backend derives play_start/replay/completion from
                             // runtime session_start/run_end events. Only track the
                             // sheet lifecycle here to avoid double-counting starts.
@@ -319,9 +330,8 @@ struct PixiPlayerSheet: View {
                 }
             }
             .onChange(of: qualityRaw) { _, _ in
-                // Do not restart an active game when a preference changes:
-                // that discards the current session and may lose progress.
-                // The selected quality is applied the next time a game opens.
+                // Apply the saved quality on the next game launch, not during
+                // an active session: reloading would discard progress.
                 DevLog.info(.player, "quality preference saved for next game -> \(qualityRaw) (effective \(effectiveQuality))")
             }
             .onChange(of: pathMonitor.isOffline) { _, offline in
@@ -333,6 +343,39 @@ struct PixiPlayerSheet: View {
                     showSlowHint = false
                     loadStartedAt = Date()
                     attempt += 1
+                }
+            }
+            .onChange(of: scenePhase) { phase in
+                switch phase {
+                case .background:
+                    guard !wasBackgrounded else { return }
+                    wasBackgrounded = true
+                    DevLog.info(.player, "app backgrounded while player sheet is open for \(gameID)")
+                    PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerBackground",
+                                           message: "app entered background; player lifecycle suspended")
+                case .active:
+                    guard wasBackgrounded else { return }
+                    wasBackgrounded = false
+                    DevLog.info(.player, "app foregrounded with player sheet open for \(gameID)")
+                    PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerForeground",
+                                           message: "app returned to foreground; player lifecycle resumed")
+                    // Retry only a failed load, and only when connectivity is back.
+                    // A successfully loaded game stays on screen; foregrounding does
+                    // not trigger a disruptive reload or reset current gameplay.
+                    if PlayerLifecyclePolicy.shouldRetryAfterForeground(
+                        wasBackgrounded: true, isOffline: pathMonitor.isOffline, hasError: loadError != nil
+                    ) {
+                        loadError = nil
+                        isLoading = true
+                        progress = 0
+                        showSlowHint = false
+                        loadStartedAt = Date()
+                        attempt += 1
+                    }
+                case .inactive:
+                    break
+                @unknown default:
+                    break
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
