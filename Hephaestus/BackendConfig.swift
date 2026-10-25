@@ -20,6 +20,26 @@ enum BackendConfig {
     /// Explicit opt-in for local development only. Keep false in shipped builds.
     static let usesDevelopmentIdentity = false
 
+    /// Best-effort local subject decoding for UI affordances only. The server
+    /// remains the authority and verifies the token signature and expiry.
+    static var currentUserID: String {
+        guard let token = loadSessionToken(),
+              let encodedPayload = token.split(separator: ".", omittingEmptySubsequences: false).first else {
+            return usesDevelopmentIdentity ? userID : ""
+        }
+        var payload = String(encodedPayload)
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while payload.count % 4 != 0 { payload.append("=") }
+        guard let data = Data(base64Encoded: payload),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let subject = object["sub"] as? String,
+              !subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return usesDevelopmentIdentity ? userID : ""
+        }
+        return subject
+    }
+
     private static let tokenService = Bundle.main.bundleIdentifier ?? "Hephaestus"
     private static let tokenAccount = "backend-bearer-token"
 
