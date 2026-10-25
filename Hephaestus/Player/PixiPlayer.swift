@@ -144,6 +144,7 @@ struct PixiPlayerSheet: View {
     @State private var progress: Double = 0
     @State private var showSlowHint = false
     @State private var loadStartedAt = Date()
+    @State private var activeQuality: String?
     @State private var autoReloads = 0
     @State private var reportedThermal = false
     @State private var reportedMemoryWarning = false
@@ -165,10 +166,18 @@ struct PixiPlayerSheet: View {
         components?.path = "/player"
         components?.queryItems = [
             URLQueryItem(name: "game", value: gameID),
-            URLQueryItem(name: "quality", value: effectiveQuality),
+            URLQueryItem(name: "quality", value: activeQuality ?? effectiveQuality),
         ]
         return components?.url
     }
+
+    private var shareURL: URL {
+        var components = URLComponents(url: BackendConfig.baseURL, resolvingAgainstBaseURL: false)
+        components?.path = "/player"
+        components?.queryItems = [URLQueryItem(name: "game", value: gameID)]
+        return components?.url ?? BackendConfig.baseURL
+    }
+
 
     var body: some View {
         NavigationStack {
@@ -310,7 +319,15 @@ struct PixiPlayerSheet: View {
                     Button("Done") { dismiss() }
                         .frame(minHeight: HephaestusDesign.minimumActionHeight)
                 }
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    ShareLink(item: shareURL) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .accessibilityLabel("Share game")
+                    .simultaneousGesture(TapGesture().onEnded {
+                        Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "share") }
+                    })
+
                     Menu {
                         Picker("Player quality", selection: $qualityRaw) {
                             ForEach(PlayerQuality.allCases, id: \.rawValue) { q in
@@ -327,15 +344,9 @@ struct PixiPlayerSheet: View {
                 }
             }
             .onChange(of: qualityRaw) { _, _ in
-                // A new quality takes effect by reloading the player
-                // with the new URL parameter — no script channel.
-                DevLog.info(.player, "quality preference -> \(qualityRaw) (effective \(effectiveQuality))")
-                loadError = nil
-                isLoading = true
-                progress = 0
-                showSlowHint = false
-                loadStartedAt = Date()
-                attempt += 1
+                // Apply the saved quality on the next game launch, not during
+                // an active session: reloading would discard progress.
+                DevLog.info(.player, "quality preference saved for next game -> \(qualityRaw) (effective \(effectiveQuality))")
             }
             .onChange(of: pathMonitor.isOffline) { _, offline in
                 if !offline, loadError != nil {
@@ -406,7 +417,8 @@ struct PixiPlayerSheet: View {
             }
             .onAppear {
                 loadStartedAt = Date()
-                DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView (quality \(effectiveQuality))")
+                activeQuality = effectiveQuality
+                DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView (quality \(activeQuality ?? effectiveQuality))")
             }
             .onDisappear {
                 guard let startedAt = gameplayStartedAt, didTrackGameplayStart else { return }
