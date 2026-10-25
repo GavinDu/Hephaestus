@@ -244,6 +244,9 @@ struct PixiPlayerSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    .padding(24)
+                    .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous).strokeBorder(HephaestusDesign.subtleBorder, lineWidth: 1))
                 }
 
                 if PlayerLoadingPolicy.shouldShowOfflineOverlay(
@@ -261,8 +264,11 @@ struct PixiPlayerSheet: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
                     }
+                    .padding(24)
+                    .frame(maxWidth: 360)
+                    .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous).strokeBorder(HephaestusDesign.subtleBorder, lineWidth: 1))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.background)
                 }
@@ -289,7 +295,12 @@ struct PixiPlayerSheet: View {
                             attempt += 1
                         }
                         .buttonStyle(.borderedProminent)
+                        .frame(minHeight: HephaestusDesign.minimumActionHeight)
                     }
+                    .padding(24)
+                    .frame(maxWidth: 360)
+                    .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous).strokeBorder(HephaestusDesign.subtleBorder, lineWidth: 1))
                 }
             }
             .navigationTitle(title)
@@ -297,6 +308,7 @@ struct PixiPlayerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                        .frame(minHeight: HephaestusDesign.minimumActionHeight)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
@@ -308,6 +320,7 @@ struct PixiPlayerSheet: View {
                         }
                     } label: {
                         Image(systemName: "gauge.with.dots.needle.67percent")
+                            .frame(minWidth: HephaestusDesign.minimumActionHeight, minHeight: HephaestusDesign.minimumActionHeight)
                     }
                     .accessibilityLabel("Player quality")
                 }
