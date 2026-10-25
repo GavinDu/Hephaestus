@@ -126,7 +126,7 @@ private final class FeedPreviewPlayback: ObservableObject {
         player.play()
         Task {
             await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "preview_dwell",
-                                                     durationMS: 700, expectedMS: 700)
+                                                     durationMS: 700, expectedMS: 700, previewDwellMS: 700)
         }
         pendingTask = nil
         pendingGameID = nil
