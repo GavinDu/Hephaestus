@@ -32,6 +32,37 @@ enum RecentGames {
     }
 }
 
+// Loading placeholders keep the feed layout stable while requests complete.
+/// Static placeholders intentionally avoid shimmer animations for reduced-motion
+/// accessibility and to keep loading cheap on older devices.
+private struct FeedLoadingSkeleton: View {
+    var body: some View {
+        VStack(spacing: 14) {
+            ForEach(0..<3, id: \.self) { index in
+                VStack(alignment: .leading, spacing: 12) {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.secondary.opacity(0.12))
+                        .frame(height: index == 0 ? 168 : 144)
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.secondary.opacity(0.16))
+                        .frame(width: 190, height: 16)
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.secondary.opacity(0.10))
+                        .frame(width: 260, height: 11)
+                    HStack(spacing: 8) {
+                        Capsule().fill(Color.secondary.opacity(0.12)).frame(width: 76, height: 28)
+                        Capsule().fill(Color.secondary.opacity(0.12)).frame(width: 76, height: 28)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Discover
 
 /// Backend-backed social feeds use the verified bearer session when present.
@@ -104,14 +135,16 @@ struct DiscoverView: View {
                     .accessibilityElement(children: .combine)
 
                     if isLoading && games.isEmpty {
-                        VStack(spacing: 12) {
-                            ProgressView()
+                        VStack(alignment: .leading, spacing: 12) {
                             Text("Finding something fun…")
-                                .font(.subheadline)
+                                .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.secondary)
+                            FeedLoadingSkeleton()
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 64)
+                        .padding(.vertical, 8)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Loading games")
                     } else if let errorMessage, games.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "wifi.exclamationmark")
