@@ -161,6 +161,13 @@ struct PixiPlayerSheet: View {
         return components?.url
     }
 
+    private var shareURL: URL {
+        var components = URLComponents(url: BackendConfig.baseURL, resolvingAgainstBaseURL: false)
+        components?.path = "/player"
+        components?.queryItems = [URLQueryItem(name: "game", value: gameID)]
+        return components?.url ?? BackendConfig.baseURL
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -289,7 +296,15 @@ struct PixiPlayerSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    ShareLink(item: shareURL) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .accessibilityLabel("Share game")
+                    .simultaneousGesture(TapGesture().onEnded {
+                        Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "share") }
+                    })
+
                     Menu {
                         Picker("Quality", selection: $qualityRaw) {
                             ForEach(PlayerQuality.allCases, id: \.rawValue) { q in
