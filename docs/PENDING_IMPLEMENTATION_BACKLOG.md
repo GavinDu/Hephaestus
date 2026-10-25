@@ -44,7 +44,7 @@ The iOS player executes data-defined Game IR through the PixiJS + Rapier runtime
 ## Player UI and platform experience
 
 - [~] **Web player/discovery UX.** Backend PR #67 improves mobile safe areas, landscape layout, focus visibility, and reduced-motion behavior; PR #80 adds playable discovery cards and loading/empty/error states. Browser playtests passed for PR #80. Physical iPhone/iPad visual verification remains required.
-- [~] **iOS player lifecycle and accessibility.** Hephaestus PR #43 adds foreground recovery for failed loads and lifecycle metrics; PR #44 improves Dynamic Type and contextual accessibility labels on game cards. PR #43 still requires its current player-smoke check to pass.
+- [~] **iOS player lifecycle and accessibility.** Hephaestus PR #43 adds foreground recovery for failed loads and lifecycle metrics; PR #44 improves Dynamic Type and contextual accessibility labels on game cards. Both PRs are merged with Xcode tests and player smoke passing. Continue immersive-play work in [Hephaestus #52](https://github.com/GavinDu/Hephaestus/issues/52) and runtime failure UX in [Hephaestus #53](https://github.com/GavinDu/Hephaestus/issues/53).
 - [x] **Runtime documentation reconciliation.** Hephaestus PR #49 documents the current PixiJS + Rapier runtime in a bridgeless WKWebView and removes stale Defold/native-interpreter instructions; merge only after the latest CI finishes.
 
 ## Definition of done
