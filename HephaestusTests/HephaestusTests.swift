@@ -30,6 +30,16 @@ struct HephaestusTests {
         #expect(contact.contact_email == "safety@example.test")
     }
 
+    @Test func productionRequestsDoNotTrustCallerSuppliedIdentity() {
+        var request = URLRequest(url: URL(string: "https://example.test/v1/users/me")!)
+        BackendConfig.applyAuthentication(to: &request)
+        #expect(request.value(forHTTPHeaderField: "X-User-ID") == nil)
+        if let token = BackendConfig.loadSessionToken() {
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer " + token)
+        } else {
+            #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+        }
+    }
     @Test func backendConfigIsSane() {
         #expect(BackendConfig.baseURL.scheme == "https")
         #expect(!BackendConfig.userID.isEmpty)
