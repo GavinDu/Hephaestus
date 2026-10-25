@@ -120,3 +120,11 @@ struct HephaestusTests {
         #expect(response.creators.isEmpty)
         #expect(response.next_cursor == "")
     }
+
+
+@Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
+    #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
+    #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
+    #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: false))
+    #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: false, isOffline: false, hasError: true))
+}
