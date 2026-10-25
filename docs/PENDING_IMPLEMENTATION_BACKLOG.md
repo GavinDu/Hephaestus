@@ -7,8 +7,8 @@ Last reconciled: 2026-10-24. This is a status ledger, not a claim that every ite
 
 ## P0 — Before broad public launch or meaningful personal data
 
-- [ ] **#10 — Authenticated identity (deferred by product decision).** The app/backend still use caller-controlled `X-User-ID`; it is a development identity, not authorization. Add Sign in with Apple/session validation and derive actor identity from verified claims. Test cross-user authorization for feeds, follows, publishing, editing, deletion, and moderation.
-- [ ] **#11 — Shared durable social graph (deferred by product decision).** Follow edges and social state use local JSON snapshot/event files. They can survive a single process restart but are not transactional shared storage and do not provide multi-instance consistency. Add shared storage, schema migrations, uniqueness guarantees, and a backup/restore drill before multi-instance deployment.
+- [~] **#10 — Authenticated identity and session issuance.** The user has authorized implementation. The backend signed-bearer verifier and iOS Keychain bearer-token handling are merged; the iOS app no longer sends caller-controlled `X-User-ID` by default, and private-package spoofing regression coverage is merged. Still missing: trusted identity-provider integration/token issuance (including Sign in with Apple if selected), expiry/revocation policy, and end-to-end cross-user authorization coverage for every protected action. Keep open until those gaps are implemented and validated.
+- [~] **#11 — Shared durable social graph.** The user has authorized implementation. PostgreSQL-backed follows, blocks, and saved games plus checksummed backup/restore are merged. PostgreSQL comments and idempotency records are in backend PR #82, including backup coverage. Remaining: move reactions, reports/resolutions, moderation/audit state, and user feed preferences out of single-instance JSON/JSONL storage; validate restart and cross-instance behavior; then update the backup inventory.
 
 ## P1 — Core social product
 
@@ -23,8 +23,8 @@ Last reconciled: 2026-10-24. This is a status ledger, not a claim that every ite
 
 ## P2/P3 — Driven by observed usage and operational need
 
-- [ ] **#20 — Multi-instance operation and recovery.** Current JSON snapshot/JSONL event persistence is single-instance only. Before scaling, add shared durable storage, migration/rollback, measured load tests, and a verified backup/restore procedure.
-- [ ] **#21 — Media/package delivery.** Package/version endpoints and asset validation/size gates exist. Measure package sizes, request bytes, latency, errors, and cache behavior before choosing object storage/CDN. Verify immutable cache keys, removed-content behavior, and unsafe asset URLs at both publish and load boundaries.
+- [~] **#20 — Multi-instance operation and recovery.** Checksummed backups exist for the file-backed game store and the PostgreSQL social graph. The graph backup now includes comments in backend PR #82. Still required: include all moderation/audit/telemetry sources in the recovery inventory, define coordinated backup consistency across the game store and PostgreSQL, automate retention/alerts, and complete a staging restore drill.
+- [~] **#21 — Media/package delivery.** Package/IR compatibility checks, asset-hash verification, and private/no-store handling are implemented; public package/asset responses require revalidation, and error responses are being hardened in backend PR #81. Remaining: measure package sizes/latency/errors/cache behavior, validate unsafe asset references at both publish and load boundaries, and make a measured object-storage/CDN decision.
 
 ## Runtime architecture guardrail
 
@@ -38,7 +38,14 @@ The iOS player executes data-defined Game IR through the PixiJS + Rapier runtime
 - Hephaestus PR #8 is superseded by this reconciled ledger after its unique priority/trigger guidance has been retained here.
 - Backend PR #13 is merged. A subsequent Go validation run on PR #18 completed successfully for Go tests/race/static analysis, Chromium, WebKit, and Playability Kit.
 - Backend PR #16 (stabilize CI by serializing browser validation) was squash-merged after a fresh run passed all four jobs (Go tests/race/static analysis, Chromium, WebKit, Playability Kit). The merged main pipeline was separately validated in an isolated temporary checkout.
-- Keep #10 and #11 open until explicitly authorized to revisit them.
+- #10 and #11 are authorized workstreams now; keep them open until identity-provider issuance and the remaining shared social/moderation persistence gaps pass CI and integration validation.
+
+
+## Player UI and platform experience
+
+- [~] **Web player/discovery UX.** Backend PR #67 improves mobile safe areas, landscape layout, focus visibility, and reduced-motion behavior; PR #80 adds playable discovery cards and loading/empty/error states. Browser playtests passed for PR #80. Physical iPhone/iPad visual verification remains required.
+- [~] **iOS player lifecycle and accessibility.** Hephaestus PR #43 adds foreground recovery for failed loads and lifecycle metrics; PR #44 improves Dynamic Type and contextual accessibility labels on game cards. Both PRs are merged with Xcode tests and player smoke passing. Continue immersive-play work in [Hephaestus #52](https://github.com/GavinDu/Hephaestus/issues/52) and runtime failure UX in [Hephaestus #53](https://github.com/GavinDu/Hephaestus/issues/53).
+- [x] **Runtime documentation reconciliation.** Hephaestus PR #49 documents the current PixiJS + Rapier runtime in a bridgeless WKWebView and removes stale Defold/native-interpreter instructions; merge only after the latest CI finishes.
 
 ## Definition of done
 

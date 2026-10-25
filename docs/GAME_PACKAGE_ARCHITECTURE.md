@@ -2,46 +2,48 @@
 
 ## Product model
 
-Hephaestus is the social app; the Game Inventory service is the creation and publishing system. The social content object is a **versioned playable game**, not a standalone application or only a URL.
+Hephaestus is the social app; Game Inventory is the creation and publishing system. The social content object is a **versioned playable game**, not a standalone application or only a URL.
 
 - Inventory service: creator inputs, AI pipeline, asset provenance, GameSpec, Game IR, validation, immutable versions, moderation, visibility and package delivery.
 - Hephaestus: capture/import UI, creator flow, feed, profiles, play, share, remix, reporting/blocking, permissions and native application lifecycle.
-- Runtime: one preinstalled interpreter/renderer with a fixed capability surface. It never receives arbitrary native libraries or unrestricted device APIs from a game package.
+- Runtime: the current PixiJS + Rapier interpreter/renderer served by the backend and hosted in a bridgeless iOS `WKWebView`. It exposes no native API bridge to game content.
 
 Backend: https://github.com/GavinDu/html5-game-generator  
 Contract: [Game Package / Game IR v1](https://github.com/GavinDu/html5-game-generator/blob/main/docs/game-package-ir-v1.md).  
-Current delivery contract: `GET /v1/games/{id}/package` returns package version `2.0` with canonical `ir` plus asset descriptors; assets resolve by ID through `GET /v1/games/{id}/assets/{assetId}`. `POST /v1/game-ir/validate` is the server validation gate.
+Current delivery contract: `GET /v1/games/{id}/package` returns package format `2.0`, `minRuntimeVersion`, canonical `ir`, asset descriptors and an IR hash; assets resolve by ID through `GET /v1/games/{id}/assets/{assetId}`. `POST /v1/game-ir/validate` is the server validation gate.
 
-## Engine decision
+## Runtime decision
 
-Evaluate **Defold as the primary native iOS/iPadOS runtime** for declarative Game IR. The current HTML5/GameShim player is temporary test/reference infrastructure only, not a permanent fallback.
+The shipped player uses **PixiJS + Rapier** in a backend-served page hosted in `WKWebView`. The app and backend share a versioned, engine-independent Game IR / Game Package contract. The previous native Swift interpreter and Defold target were retired during the single-runtime consolidation; do not restore either as a second runtime without an explicit architecture decision and a conformance plan.
 
-The canonical format is engine-independent Game IR, not Defold project files or generated HTML/JavaScript. Defold Live Update mounts compatible resources; it does not compile arbitrary JSON into scenes or make downloaded Lua scripts safe/App-Review-approved.
+The Game IR is declarative data, not arbitrary downloaded JavaScript, Lua, native libraries, or unrestricted imports. The app owns device permissions and native services. The WebView remains bridgeless: no `WKScriptMessageHandler`, user scripts, or `evaluateJavaScript` control channel. Runtime quality is selected through a URL parameter, and native telemetry leaves through ordinary HTTPS requests.
 
 ## Runtime boundary
 
-The app ships the engine and approved gameplay capabilities. A game package contains a versioned manifest and Game IR, bounded media assets with hashes/provenance, scenes, entities, components, input mappings, allowlisted event/action rules and creator/remix lineage. It must not contain native binaries, dynamic libraries, arbitrary imports or unrestricted native API calls. The native app owns camera/photo permissions and passes only media the user has authorized.
+A game package contains a versioned manifest and Game IR, bounded media assets with hashes/provenance, scenes, entities, components, input mappings, allowlisted event/action rules, and creator/remix lineage. The runtime must fail closed on unsupported package/IR versions, unsupported actions, invalid asset references, integrity failures, or resource-budget violations. It must not execute downloaded scripts or expose unrestricted native APIs.
+
+Private/restricted package and asset delivery must authorize the request before returning bytes or a conditional `304`; responses are `private, no-store`. Public package/asset responses require revalidation. Asset bytes are checked against declared hashes before delivery.
 
 ## Refactor policy
 
-Prefer a coherent architecture over backward compatibility. Make breaking changes to backend models, API endpoints and Swift models together when needed. Avoid long-lived dual paths, compatibility shims, legacy runtime fallbacks and deprecated abstractions unless a concrete requirement demonstrates their value.
+Prefer a coherent architecture over backward compatibility. Make breaking changes to backend models, API endpoints, runtime behavior, and Swift models together when needed. Avoid long-lived dual paths, compatibility shims, and deprecated abstractions unless a concrete requirement demonstrates their value.
 
-The HTML5 player may serve as a temporary golden oracle. After Defold passes the Game IR acceptance suite, remove GameShim, the remote HTML player and obsolete Godot experiments. If old published content needs preservation, perform a one-time migration and explicitly report items that cannot be migrated.
+The HTML/GameShim legacy endpoints are transitional and are not a long-term fallback promise. Remove obsolete paths after the versioned Game Package/IR path passes its contract suite. If old published content needs preservation, use a one-time migration and report items that cannot be converted; do not keep parallel runtimes merely to avoid refactoring.
 
-## Rollout gates
+## Rollout and validation gates
 
-1. **Contract:** schema, semantic validator, negative fixtures and resource budgets.
-2. **Backend:** generate and persist canonical Game Package + IR; replace legacy GameShim generation/API as a coordinated breaking change.
-3. **Defold interpreter:** load a local fixture and implement rendering, input, collision, score and end-game rules.
-4. **iOS proof:** verify orientation, safe areas, memory/performance, lifecycle, offline behavior and asset cleanup on real devices.
-5. **Distribution:** fetch versioned packages, verify integrity/compatibility, cache, play and return to the feed.
-6. **Removal:** delete old runtime/API paths after the new path passes tests; do not keep parallel implementations by default.
+1. **Contract:** schema, semantic validator, negative fixtures, package integrity, and resource budgets.
+2. **Backend:** generate and persist canonical Game Package + IR; ensure immutable content identity and authorization-aware delivery.
+3. **Runtime:** execute local golden fixtures for rendering, input, collision, score, and end-game rules in PixiJS + Rapier.
+4. **iOS proof:** verify orientation, safe areas, memory/performance, lifecycle, offline behavior, and asset cleanup on real devices.
+5. **Distribution:** fetch versioned packages, verify integrity/compatibility, revalidate cache, play, and return to the feed.
+6. **Removal:** delete legacy GameShim/API paths after the canonical path passes tests; do not keep parallel implementations by default.
 7. **Review:** document downloaded-content behavior and UGC controls for App Review. No engine choice guarantees approval.
 
 ## Social game object
 
-A published game version has a stable identity and immutable content version. Social metrics and moderation state are server-side, not part of the content hash. Remix creates a child version with an explicit parent reference and asset/rule provenance. Players can play, share, save and remix without installing another app.
+A published game version has a stable identity and immutable content version. Social metrics and moderation state are server-side, not part of the content hash. Remix creates a child version with an explicit parent reference and asset/rule provenance. Players can play, share, save, and remix without installing another app.
 
-## First vertical slice
+## Golden fixture
 
-Use Bobo's Rainbow: validate its IR, implement it in Defold, and test movement, collection, scoring and completion on physical devices. Use HTML5 only as a temporary test oracle if useful; do not delay the new runtime to maintain compatibility with legacy implementation details.
+Use Bobo's Rainbow as the shared fixture: validate its IR, exercise movement, collection, scoring and completion, and compare supported browser/iOS-hosted runtime behavior. Run browser playability tests in GitHub Actions and validate touch feel, orientation, memory, and frame pacing on physical iPhone/iPad devices.

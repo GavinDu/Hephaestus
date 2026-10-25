@@ -1,55 +1,48 @@
-# Player architecture and breaking runtime migration
+# Player architecture and runtime contract
 
-## Target: Defold interpreter for Game IR
+## Current runtime: PixiJS + Rapier in a bridgeless WKWebView
 
-Hephaestus should ship one primary game runtime: a Defold-based iOS/iPadOS interpreter for the versioned, engine-independent Game IR defined by the Game Inventory backend.
+The iOS app hosts the backend-served player page at `/player?game={id}&quality={auto|high|low}` in a `WKWebView`. PixiJS renders the scene and Rapier provides physics. The backend serves the canonical Game Package and assets; the runtime interprets Game IR as declarative data.
 
-- Backend contract: [Game IR v1](https://github.com/GavinDu/html5-game-generator/blob/main/docs/game-package-ir-v1.md), [schema](https://github.com/GavinDu/html5-game-generator/blob/main/schemas/game-ir-v1.schema.json), and [Bobo's Rainbow fixture](https://github.com/GavinDu/html5-game-generator/blob/main/examples/game-ir-v1/bobos-rainbow.json). The current package API is version 2.0 and returns canonical `ir` plus asset descriptors.
-- The canonical package must not contain Defold project files, HTML/JavaScript source, arbitrary downloaded Lua, native libraries or unrestricted native API calls.
-- The Defold runtime interprets an allowlisted set of scenes, entities, components, input bindings, events and actions. Unknown IR versions and unsupported capabilities fail closed.
-- Defold Live Update is resource delivery/mounting, not a scene compiler; the runtime still implements Game IR semantics.
-- The app owns device permissions and native services. Game packages receive only explicitly authorized assets through the bounded runtime interface.
+The iOS shell intentionally exposes no JavaScript-to-native bridge:
+- No `WKScriptMessageHandler`, user scripts, or `evaluateJavaScript` control channel.
+- Quality selection is passed only through a URL parameter.
+- Native telemetry is sent through normal HTTPS requests and contains no bearer token, account identifier, or user-generated content.
+- The app owns native permissions and services; the game package does not get arbitrary native APIs.
 
-## Breaking migration policy
+Do not restore the retired native Swift Game IR interpreter or introduce Defold as a second runtime without an explicit architecture decision and a cross-runtime conformance plan. The current shipped runtime and backend contract are authoritative; old Defold/native-interpreter text in historical commits is not the current implementation.
 
-Do not preserve the existing player/API shape merely for compatibility. Change backend package models, API contracts and Swift models together when the new contract is ready. Prefer deleting obsolete branches over maintaining two permanent runtimes.
+## Package contract
 
-The existing HTML5/GameShim player may be used temporarily as a test oracle, but it is not a long-term fallback promise. After Defold passes the contract suite:
-1. Remove bundled GameShim JavaScript and related Swift package models/state.
-2. Remove legacy remote HTML player and obsolete Godot paths/selection branches.
-3. Replace the old package endpoint/model with the canonical versioned Game Package API.
-4. If published legacy games matter, use a one-time conversion job and report games that cannot be converted; do not retain an old runtime without a demonstrated requirement.
+The backend serves `GET /v1/games/{id}/package` with package format v2.0, `minRuntimeVersion`, canonical `ir`, asset descriptors, and an IR hash. Asset URLs are backend-owned paths, not arbitrary remote URLs.
 
-Manage Xcode target membership and resource removal in Xcode or project tooling; do not hand-edit `pbxproj` blindly.
+- Reject unsupported `packageFormatVersion`, `irVersion`, runtime requirements, and unsupported actions.
+- Validate Game IR before execution and validate asset references/hashes before rendering.
+- Do not evaluate arbitrary downloaded JavaScript, Lua, native libraries, or scripts.
+- Check access before package/asset delivery, including conditional requests. Private/restricted responses use `private, no-store`; public responses require revalidation.
+- If a package is invalid, unsupported, missing assets, or fails integrity validation, show a recoverable error and a safe way to exit.
+
+Contract fixtures: [Game IR schema](https://github.com/GavinDu/html5-game-generator/blob/main/schemas/game-ir-v1.schema.json), [Bobo's Rainbow](https://github.com/GavinDu/html5-game-generator/blob/main/examples/game-ir-v1/bobos-rainbow.json), and [backend contract notes](https://github.com/GavinDu/html5-game-generator/blob/main/docs/game-package-ir-v1.md).
+
+## iOS player lifecycle and UX
+
+- Show loading progress, slow-load guidance, and explicit offline/load-failure states rather than an indefinite spinner.
+- Preserve loaded gameplay during transient connectivity loss.
+- Retry a failed load after connectivity returns or after foregrounding if the device is online; do not reload a successfully loaded game solely because the app was backgrounded.
+- Recover from a terminated WebContent process with bounded automatic reload attempts, then show a retry/exit path.
+- Respect Low Power Mode and serious/critical thermal pressure through the existing quality preference.
+- Track player load latency, load failures, WebContent termination, memory warnings, and thermal pressure without sending account IDs, tokens, or content.
+- Keep controls reachable, safe-area aware, accessible, and usable with Dynamic Type and reduced-motion preferences.
 
 ## Acceptance gates
 
-1. **Contract:** schema + semantic validation, negative fixtures, resource budgets and package integrity checks.
-2. **Interpreter:** local fixture executes movement, collision, collection, score, state changes and end-game rules.
-3. **Determinism:** same fixture and input trace produce the same gameplay state transitions.
-4. **iOS:** orientation, safe areas, memory, performance, lifecycle interruption/resume and asset cleanup pass on physical iPhone and iPad.
-5. **Network/cache:** package integrity, offline cache, interrupted download and corrupt-package rejection work.
-6. **Security/review:** no arbitrary script/native code execution; required moderation/report/block/takedown flows exist. No engine choice guarantees App Review approval.
+1. **Contract:** valid, malformed, unsupported-version, unsupported-action, missing-asset, bad-hash, private-access-denied, and resource-budget fixtures.
+2. **Cross-client behavior:** browser runtime and iOS-hosted player agree on package versioning and error categories.
+3. **Lifecycle:** cold launch, load retry, offline/online transition, background/foreground, memory pressure, WebContent termination, and safe exit.
+4. **UX/accessibility:** iPhone/iPad portrait and landscape, safe areas, large text, VoiceOver labels, focus, and reduced motion.
+5. **Performance:** time-to-first-frame, memory, frame pacing, asset latency/failures, and representative game sizes.
+6. **Security/moderation:** package authorization, cache revalidation, report/block/takedown distribution, and no arbitrary downloaded code execution.
 
-## First vertical slice
+## Validation
 
-Implement Bobo's Rainbow from a local Game IR fixture in Defold. Draw background/sprites, move the player by touch/drag, detect collection, update score and end the game at the target score. Add remote delivery only after the local interpreter and contract tests pass.
-
-
-## Native Game IR player implementation
-
-Hephaestus now decodes package version `2.0` (`gameId`, canonical `ir`, asset descriptors) and runs a native SwiftUI interpreter for Game IR `1.0`. The first playable subset renders entities and downloaded image assets, supports drag movement, detects player/pickup overlap, applies `add_score` and `destroy_entity`, displays score/status, and supports `end_game`/restart. Unsupported actions fail closed rather than executing downloaded code. The Xcode unit tests cover package decoding, collection/actions, and unsupported IR versions. Run the `Hephaestus` and `HephaestusTests` schemes locally to verify on the target simulator/device; no Xcode toolchain is available in this editing session.
-
-
-### Current runtime behavior
-
-- Package v2.0 is fetched from `GET /v1/games/{id}/package`; image assets are fetched through the returned asset descriptors.
-- Game IR 1.0 is interpreted as declarative data only. The iOS runtime does not evaluate downloaded scripts.
-- The entry scene's background image is rendered when available; `game_start` rules run when a new runtime is created.
-- The initial supported gameplay subset is drag movement, overlap collection, score updates, entity removal, status text, health, and end/restart. Scene changes, spawning, and audio are not implemented yet and must not be assumed playable.
-- Run the `Hephaestus` scheme and `HephaestusTests` in Xcode on a simulator/device. This repository-editing environment cannot execute Xcode builds.
-
-
-## Local Xcode verification
-
-Open `Hephaestus.xcodeproj`, select the `Hephaestus` scheme and an iOS Simulator, then choose **Product → Test**. The GitHub Actions workflow builds for iOS Simulator and runs the Game IR unit tests. Simulator/device validation remains necessary for touch handling and layout.
+GitHub Actions builds the Xcode project, runs unit tests, and runs a Discover → Play smoke test against the configured backend. Simulator tests do not replace physical-device validation for touch handling, orientation, memory pressure, and frame pacing.
