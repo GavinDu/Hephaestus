@@ -29,9 +29,30 @@ struct FeedGame: Codable, Identifiable {
     var remixParentID: String?
     var moderationStatus: String?
     var createdAt: String?
+    var creatorDisplayName: String?
+    var creatorAvatarURL: String?
+    var previewPosterURL: String?
+    var previewClipURL: String?
+    var previewAspect: Double?
+    var previewDurationMS: Int?
+    var previewDominantColor: String?
+    var previewStatus: String?
+    var likeCount: Int?
+    var playStarts: Int?
+    var completions: Int?
+    var replays: Int?
+    var shares: Int?
+    var viewerLiked: Bool?
+    var viewerSaved: Bool?
+    var viewerFollowing: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id, game_id, title, owner_id, caption, topics, published_at, published_version, remix_parent_id, moderation_status, created_at
+        case creatorDisplayName = "creator_display_name", creatorAvatarURL = "creator_avatar_url"
+        case previewPosterURL = "preview_poster_url", previewClipURL = "preview_clip_url", previewAspect = "preview_aspect"
+        case previewDurationMS = "preview_duration_ms", previewDominantColor = "preview_dominant_color", previewStatus = "preview_status"
+        case likeCount = "like_count", playStarts = "play_starts", completions, replays, shares
+        case viewerLiked = "viewer_liked", viewerSaved = "viewer_saved", viewerFollowing = "viewer_following"
     }
 
     // The backend has used both "id" and "game_id" for games; accept either.
@@ -51,6 +72,44 @@ struct FeedGame: Codable, Identifiable {
         remixParentID = try? c.decode(String.self, forKey: .remix_parent_id)
         moderationStatus = try? c.decode(String.self, forKey: .moderation_status)
         createdAt = try? c.decode(String.self, forKey: .created_at)
+        creatorDisplayName = try? c.decode(String.self, forKey: .creatorDisplayName)
+        creatorAvatarURL = try? c.decode(String.self, forKey: .creatorAvatarURL)
+        previewPosterURL = try? c.decode(String.self, forKey: .previewPosterURL)
+        previewClipURL = try? c.decode(String.self, forKey: .previewClipURL)
+        previewAspect = try? c.decode(Double.self, forKey: .previewAspect)
+        previewDurationMS = try? c.decode(Int.self, forKey: .previewDurationMS)
+        previewDominantColor = try? c.decode(String.self, forKey: .previewDominantColor)
+        previewStatus = try? c.decode(String.self, forKey: .previewStatus)
+        likeCount = try? c.decode(Int.self, forKey: .likeCount)
+        playStarts = try? c.decode(Int.self, forKey: .playStarts)
+        completions = try? c.decode(Int.self, forKey: .completions)
+        replays = try? c.decode(Int.self, forKey: .replays)
+        shares = try? c.decode(Int.self, forKey: .shares)
+        viewerLiked = try? c.decode(Bool.self, forKey: .viewerLiked)
+        viewerSaved = try? c.decode(Bool.self, forKey: .viewerSaved)
+        viewerFollowing = try? c.decode(Bool.self, forKey: .viewerFollowing)
+    }
+
+    mutating func apply(card: FeedCard) {
+        ownerID = card.creator.id.isEmpty ? ownerID : card.creator.id
+        caption = card.caption ?? caption
+        topics = card.topics ?? topics
+        creatorDisplayName = card.creator.display_name
+        creatorAvatarURL = card.creator.avatar_url
+        previewPosterURL = card.preview.poster_url
+        previewClipURL = card.preview.clip_url
+        previewAspect = card.preview.aspect
+        previewDurationMS = card.preview.duration_ms
+        previewDominantColor = card.preview.dominant_color
+        previewStatus = card.preview.status
+        likeCount = card.stats?.likes
+        playStarts = card.stats?.play_starts
+        completions = card.stats?.completions
+        replays = card.stats?.replays
+        shares = card.stats?.shares
+        viewerLiked = card.viewer.liked
+        viewerSaved = card.viewer.saved
+        viewerFollowing = card.viewer.following
     }
 
     func encode(to encoder: Encoder) throws {
@@ -65,12 +124,66 @@ struct FeedGame: Codable, Identifiable {
         try c.encodeIfPresent(remixParentID, forKey: .remix_parent_id)
         try c.encodeIfPresent(moderationStatus, forKey: .moderation_status)
         try c.encodeIfPresent(createdAt, forKey: .created_at)
+        try c.encodeIfPresent(creatorDisplayName, forKey: .creatorDisplayName)
+        try c.encodeIfPresent(creatorAvatarURL, forKey: .creatorAvatarURL)
+        try c.encodeIfPresent(previewPosterURL, forKey: .previewPosterURL)
+        try c.encodeIfPresent(previewClipURL, forKey: .previewClipURL)
+        try c.encodeIfPresent(previewAspect, forKey: .previewAspect)
+        try c.encodeIfPresent(previewDurationMS, forKey: .previewDurationMS)
+        try c.encodeIfPresent(previewDominantColor, forKey: .previewDominantColor)
+        try c.encodeIfPresent(previewStatus, forKey: .previewStatus)
+        try c.encodeIfPresent(likeCount, forKey: .likeCount)
+        try c.encodeIfPresent(playStarts, forKey: .playStarts)
+        try c.encodeIfPresent(completions, forKey: .completions)
+        try c.encodeIfPresent(replays, forKey: .replays)
+        try c.encodeIfPresent(shares, forKey: .shares)
+        try c.encodeIfPresent(viewerLiked, forKey: .viewerLiked)
+        try c.encodeIfPresent(viewerSaved, forKey: .viewerSaved)
+        try c.encodeIfPresent(viewerFollowing, forKey: .viewerFollowing)
     }
+}
+
+struct FeedCard: Decodable {
+    struct Creator: Decodable { var id: String; var display_name: String?; var avatar_url: String? }
+    struct Preview: Decodable {
+        var poster_url: String?; var clip_url: String?; var aspect: Double?; var duration_ms: Int?
+        var dominant_color: String?; var status: String?
+    }
+    struct Stats: Decodable { var likes: Int?; var play_starts: Int?; var completions: Int?; var replays: Int?; var shares: Int? }
+    struct Viewer: Decodable { var liked: Bool; var saved: Bool; var following: Bool }
+    var game_id: String
+    var title: String
+    var caption: String?
+    var topics: [String]?
+    var creator: Creator
+    var preview: Preview
+    var stats: Stats?
+    var viewer: Viewer
 }
 
 struct FeedResponse: Codable {
     var games: [FeedGame]
     var next_cursor: String?
+
+    enum CodingKeys: String, CodingKey { case games, cards, next_cursor }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        var loaded = try c.decodeIfPresent([FeedGame].self, forKey: .games) ?? []
+        let cards = (try? c.decode([FeedCard].self, forKey: .cards)) ?? []
+        let byID = Dictionary(cards.map { ($0.game_id, $0) }, uniquingKeysWith: { first, _ in first })
+        for index in loaded.indices {
+            if let card = byID[loaded[index].id] { loaded[index].apply(card: card) }
+        }
+        games = loaded
+        next_cursor = try? c.decode(String.self, forKey: .next_cursor)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(games, forKey: .games)
+        try c.encodeIfPresent(next_cursor, forKey: .next_cursor)
+    }
 }
 
 enum SocialFeedScope: String, CaseIterable, Identifiable {
