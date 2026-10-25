@@ -74,6 +74,14 @@ enum PlayerLoadingPolicy {
         isOffline && isLoading && !hasError
     }
 }
+/// A foreground transition should only restart a failed load when connectivity
+/// is available. Loaded gameplay is never reloaded just because the app resumed.
+enum PlayerLifecyclePolicy {
+    static func shouldRetryAfterForeground(wasBackgrounded: Bool, isOffline: Bool, hasError: Bool) -> Bool {
+        wasBackgrounded && !isOffline && hasError
+    }
+}
+
 // MARK: - Telemetry (monitoring)
 
 /// Fire-and-forget reports to the backend's telemetry endpoint — the
@@ -343,7 +351,7 @@ struct PixiPlayerSheet: View {
                     // Retry only a failed load, and only when connectivity is back.
                     // A successfully loaded game stays on screen; foregrounding does
                     // not trigger a disruptive reload or reset current gameplay.
-                    if !pathMonitor.isOffline, loadError != nil {
+                    if PlayerLifecyclePolicy.shouldRetryAfterForeground(\n                        wasBackgrounded: true, isOffline: pathMonitor.isOffline, hasError: loadError != nil\n                    ) {
                         loadError = nil
                         isLoading = true
                         progress = 0
