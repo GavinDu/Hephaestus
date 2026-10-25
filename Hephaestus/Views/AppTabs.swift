@@ -402,12 +402,23 @@ struct DiscoverView: View {
             guard generation == loadGeneration else { return }
             games = loadedGames.games
             nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
-            if let ids = try? await BackendAPI.shared.fetchFollowingCreatorIDs(), generation == loadGeneration {
-                followedCreatorIDs = ids
+            let hasServerViewerState = loadedGames.games.contains {
+                $0.viewerLiked != nil || $0.viewerSaved != nil || $0.viewerFollowing != nil
             }
-            if let ids = try? await BackendAPI.shared.fetchSavedGameIDs(), generation == loadGeneration {
-                savedGameIDs = ids
-                UserDefaults.standard.set(ids.sorted(), forKey: "hephaestus.savedGames")
+            if hasServerViewerState {
+                followedCreatorIDs = Set(loadedGames.games.filter { $0.viewerFollowing == true }.compactMap(\.ownerID))
+                savedGameIDs = Set(loadedGames.games.filter { $0.viewerSaved == true }.map(\.id))
+                likedGameIDs = Set(loadedGames.games.filter { $0.viewerLiked == true }.map(\.id))
+                UserDefaults.standard.set(savedGameIDs.sorted(), forKey: "hephaestus.savedGames")
+            } else {
+                // Keep legacy lookups for servers that predate the additive cards payload.
+                if let ids = try? await BackendAPI.shared.fetchFollowingCreatorIDs(), generation == loadGeneration {
+                    followedCreatorIDs = ids
+                }
+                if let ids = try? await BackendAPI.shared.fetchSavedGameIDs(), generation == loadGeneration {
+                    savedGameIDs = ids
+                    UserDefaults.standard.set(ids.sorted(), forKey: "hephaestus.savedGames")
+                }
             }
             if let preferences = try? await BackendAPI.shared.fetchFeedPreferences(), generation == loadGeneration {
                 mutedTopics = Set(preferences.muted_topics.map { $0.lowercased() })
@@ -582,6 +593,15 @@ private struct GameFeedCard: View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .bottomLeading) {
                 LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
+                if let poster = game.previewPosterURL, let url = URL(string: poster) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image { image.resizable().scaledToFill() }
+                        else { LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing) }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .accessibilityHidden(true)
+                }
                 Circle()
                     .fill(.white.opacity(0.12))
                     .frame(width: 180, height: 180)
@@ -617,11 +637,24 @@ private struct GameFeedCard: View {
             HStack(spacing: 10) {
                 if let creator = game.ownerID, !creator.isEmpty {
                     Button(action: onOpenCreator) {
-                        Label(creator, systemImage: "person.crop.circle")
-                            .font(.caption.weight(.medium)).lineLimit(1)
+                        HStack(spacing: 6) {
+                            if let avatar = game.creatorAvatarURL, let url = URL(string: avatar) {
+                                AsyncImage(url: url) { phase in
+                                    if let image = phase.image { image.resizable().scaledToFill() }
+                                    else { Image(systemName: "person.crop.circle.fill").resizable().scaledToFit() }
+                                }
+                                .frame(width: 22, height: 22)
+                                .clipShape(Circle())
+                                .accessibilityHidden(true)
+                            } else {
+                                Image(systemName: "person.crop.circle")
+                            }
+                            Text(game.creatorDisplayName?.isEmpty == false ? game.creatorDisplayName! : creator)
+                                .font(.caption.weight(.medium)).lineLimit(1)
+                        }
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("View profile for \(creator)")
+                    .accessibilityLabel("View profile for \(game.creatorDisplayName?.isEmpty == false ? game.creatorDisplayName! : creator)")
                 } else {
                     Label("Mini game", systemImage: "sparkles").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 }
