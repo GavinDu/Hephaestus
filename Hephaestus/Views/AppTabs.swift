@@ -85,7 +85,10 @@ private final class FeedPreviewPlayback: ObservableObject {
         player.isMuted = true
         player.actionAtItemEnd = .none
         networkMonitor.pathUpdateHandler = { [weak self] path in
-            Task { @MainActor in self?.isConstrained = path.isConstrained }
+            Task { @MainActor in
+                self?.isConstrained = path.isConstrained
+                if path.isConstrained { self?.stop() }
+            }
         }
         networkMonitor.start(queue: networkQueue)
     }
@@ -848,6 +851,20 @@ private struct GameFeedCard: View {
         }
         .onDisappear {
             FeedPreviewPlayback.shared.stop(gameID: game.id)
+        }
+        .onChange(of: reduceMotion) { _, shouldReduceMotion in
+            if shouldReduceMotion {
+                FeedPreviewPlayback.shared.stop(gameID: game.id)
+            } else {
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.powerStateDidChangeNotification)) { _ in
+            if ProcessInfo.processInfo.isLowPowerModeEnabled {
+                FeedPreviewPlayback.shared.stop(gameID: game.id)
+            } else if !reduceMotion {
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
+            }
         }
     }
 }
