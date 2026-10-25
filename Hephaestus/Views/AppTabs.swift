@@ -104,14 +104,24 @@ struct DiscoverView: View {
                     .accessibilityElement(children: .combine)
 
                     if isLoading && games.isEmpty {
-                        VStack(spacing: 12) {
-                            ProgressView()
-                            Text("Finding something fun…")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Finding something fun…")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                            LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: 18) {
+                                ForEach(0..<4, id: \\.self) { _ in
+                                    GameFeedCardSkeleton()
+                                }
+                            }
+                            .accessibilityHidden(true)
                         }
+                        .frame(maxWidth: 1120)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 64)
+                        .padding(.vertical, 8)
                     } else if let errorMessage, games.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "wifi.exclamationmark")
@@ -418,6 +428,50 @@ private struct SocialFeedUnavailableView: View {
         .frame(maxWidth: .infinity)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// Static, reduced-motion-friendly placeholders that preserve the feed's card rhythm
+/// while network data is loading. Hidden from VoiceOver because they are not content.
+private struct GameFeedCardSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            RoundedRectangle(cornerRadius: 0)
+                .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                .frame(height: 220)
+                .overlay(alignment: .center) {
+                    Image(systemName: "gamecontroller")
+                        .font(.system(size: 34, weight: .light))
+                        .foregroundStyle(.tertiary)
+                }
+            VStack(alignment: .leading, spacing: 12) {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .frame(width: 92, height: 10)
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 18)
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color(uiColor: .tertiarySystemFill))
+                    .frame(width: 142, height: 12)
+                HStack(spacing: 10) {
+                    Capsule().fill(Color(uiColor: .tertiarySystemFill)).frame(width: 88, height: 34)
+                    Spacer()
+                    Circle().fill(Color(uiColor: .tertiarySystemFill)).frame(width: 34, height: 34)
+                    Circle().fill(Color(uiColor: .tertiarySystemFill)).frame(width: 34, height: 34)
+                }
+                .padding(.top, 4)
+            }
+            .padding(16)
+        }
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        }
+        .accessibilityHidden(true)
     }
 }
 
