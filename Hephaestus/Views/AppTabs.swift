@@ -132,14 +132,25 @@ struct DiscoverView: View {
                     .accessibilityElement(children: .combine)
 
                     if isLoading && games.isEmpty {
-                        LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: HephaestusDesign.sectionSpacing) {
-                            ForEach(0..<(horizontalSizeClass == .regular ? 4 : 2), id: \.self) { _ in
-                                GameFeedCardSkeleton()
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Finding something fun…")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Loading games")
+
+                            LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: HephaestusDesign.sectionSpacing) {
+                                ForEach(0..<(horizontalSizeClass == .regular ? 4 : 2), id: \.self) { _ in
+                                    GameFeedCardSkeleton()
+                                }
                             }
                         }
                         .frame(maxWidth: 1120)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Loading games")
+                        .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                     } else if let errorMessage, games.isEmpty {
                         VStack(spacing: 12) {
