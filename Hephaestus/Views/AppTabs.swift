@@ -34,8 +34,8 @@ enum RecentGames {
 
 // MARK: - Discover
 
-/// Backend-backed social feeds use the current development identity. Follow
-/// edges are intentionally ephemeral and X-User-ID is not production authentication.
+/// Backend-backed social feeds use the verified bearer session when present.
+/// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedFeed: SocialFeedScope = .forYou
@@ -149,7 +149,7 @@ struct DiscoverView: View {
                                     isSaved: savedGameIDs.contains(game.id),
                                     isLiked: likedGameIDs.contains(game.id),
                                     isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
-                                    canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.userID,
+                                    canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.currentUserID,
                                     onPlay: { play(game) },
                                     onToggleSaved: { toggleSaved(game) },
                                     onToggleLike: { toggleLike(game) },
@@ -538,7 +538,7 @@ private struct GameFeedCard: View {
                 .accessibilityLabel("More game options")
                 Button(action: onToggleSaved) {
                     Label(isSaved ? "Saved" : "Save",
-                          systemImage: isSaved ? "heart.fill" : "heart")
+                          systemImage: isSaved ? "bookmark.fill" : "bookmark")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(isSaved ? Color.pink : Color.primary)
                         .frame(minHeight: 44)
@@ -772,7 +772,7 @@ private struct CreatorProfileSheet: View {
                             Button(profile.is_following ? "Unfollow" : "Follow") {
                                 Task { await toggleFollow(profile.is_following) }
                             }
-                            .disabled(profile.creator_id == BackendConfig.userID)
+                            .disabled(profile.creator_id == BackendConfig.currentUserID)
                         }
                         Section("Public games") {
                             if profile.posts.isEmpty { Text("No public games yet.").foregroundStyle(.secondary) }
@@ -915,7 +915,7 @@ private struct CommentsSheet: View {
                         Text(comment.body)
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if comment.user_id == BackendConfig.userID {
+                        if comment.user_id == BackendConfig.currentUserID {
                             Button(role: .destructive) {
                                 Task { await delete(comment) }
                             } label: {
@@ -1373,10 +1373,12 @@ struct ProfileView: View {
             List {
                 Section("Account") {
                     HStack {
-                        Text("User ID")
+                        Text("Session")
                         Spacer()
-                        Text(BackendConfig.userID)
-                            .foregroundStyle(.secondary)
+                        Label(BackendConfig.currentUserID.isEmpty ? "Not connected" : "Connected",
+                              systemImage: BackendConfig.currentUserID.isEmpty ? "person.crop.circle.badge.xmark" : "checkmark.shield.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(BackendConfig.currentUserID.isEmpty ? .secondary : .green)
                     }
                     SecureField("Short-lived bearer session token", text: $tokenDraft)
                         .textInputAutocapitalization(.never)
