@@ -364,8 +364,8 @@ struct DiscoverView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { FeedPreviewPlayback.shared.stop() }
             }
-            .onChange(of: playerRequest) { _, request in
-                if request != nil { FeedPreviewPlayback.shared.stop() }
+            .onChange(of: playerRequest?.gameID) { _, gameID in
+                if gameID != nil { FeedPreviewPlayback.shared.stop() }
             }
             .task {
                 savedGameIDs = Set(UserDefaults.standard.stringArray(forKey: "hephaestus.savedGames") ?? [])
