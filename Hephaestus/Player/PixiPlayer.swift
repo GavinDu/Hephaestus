@@ -361,7 +361,7 @@ struct PixiPlayerSheet: View {
                         loadStartedAt = Date()
                         attempt += 1
                     }
-                case .inactive, .unknown:
+                case .inactive:
                     break
                 @unknown default:
                     break
