@@ -424,6 +424,7 @@ private struct SocialFeedUnavailableView: View {
 /// A game-first social card. Until the API returns real preview assets and creator
 /// metadata, the cover is a branded visual rather than fabricated artwork.
 private struct GameFeedCard: View {
+    @ScaledMetric(relativeTo: .largeTitle) private var coverHeight: CGFloat = 220
     let game: FeedGame
     let isSaved: Bool
     let isLiked: Bool
@@ -481,7 +482,7 @@ private struct GameFeedCard: View {
                         .tracking(1.2)
                         .foregroundStyle(.white.opacity(0.82))
                     Text(game.title)
-                        .font(.system(size: 25, weight: .bold, design: .rounded))
+                        .font(.system(.title2, design: .rounded).weight(.bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
@@ -491,7 +492,7 @@ private struct GameFeedCard: View {
                 }
                 .padding(18)
             }
-            .frame(height: 220)
+            .frame(height: coverHeight)
             .clipped()
 
             HStack(spacing: 10) {
@@ -501,7 +502,7 @@ private struct GameFeedCard: View {
                             .font(.caption.weight(.medium)).lineLimit(1)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("View creator profile")
+                    .accessibilityLabel("View profile for \\(creator)")
                 } else {
                     Label("Mini game", systemImage: "sparkles").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 }
@@ -555,7 +556,7 @@ private struct GameFeedCard: View {
                 .simultaneousGesture(TapGesture().onEnded {
                     Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
                 })
-                .accessibilityLabel("Share game")
+                .accessibilityLabel("Share \\(game.title)")
             }
             .padding(.horizontal, 14)
             .padding(.top, 8)
@@ -579,6 +580,7 @@ private struct GameFeedCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("game.play")
+            .accessibilityHint("Opens this game in the player")
             .padding(14)
         }
         .background(Color(uiColor: .secondarySystemGroupedBackground))
