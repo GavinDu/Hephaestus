@@ -502,7 +502,7 @@ private struct GameFeedCard: View {
                             .font(.caption.weight(.medium)).lineLimit(1)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("View profile for \\(creator)")
+                    .accessibilityLabel("View profile for \(creator)")
                 } else {
                     Label("Mini game", systemImage: "sparkles").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 }
@@ -556,7 +556,7 @@ private struct GameFeedCard: View {
                 .simultaneousGesture(TapGesture().onEnded {
                     Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
                 })
-                .accessibilityLabel("Share \\(game.title)")
+                .accessibilityLabel("Share \(game.title)")
             }
             .padding(.horizontal, 14)
             .padding(.top, 8)
