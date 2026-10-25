@@ -351,7 +351,9 @@ struct PixiPlayerSheet: View {
                     // Retry only a failed load, and only when connectivity is back.
                     // A successfully loaded game stays on screen; foregrounding does
                     // not trigger a disruptive reload or reset current gameplay.
-                    if PlayerLifecyclePolicy.shouldRetryAfterForeground(\n                        wasBackgrounded: true, isOffline: pathMonitor.isOffline, hasError: loadError != nil\n                    ) {
+                    if PlayerLifecyclePolicy.shouldRetryAfterForeground(
+                        wasBackgrounded: true, isOffline: pathMonitor.isOffline, hasError: loadError != nil
+                    ) {
                         loadError = nil
                         isLoading = true
                         progress = 0
