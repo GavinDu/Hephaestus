@@ -131,14 +131,15 @@ struct DiscoverView: View {
                     .accessibilityElement(children: .combine)
 
                     if isLoading && games.isEmpty {
-                        VStack(spacing: 12) {
-                            ProgressView()
-                            Text("Finding something fun…")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                        LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: HephaestusDesign.sectionSpacing) {
+                            ForEach(0..<(horizontalSizeClass == .regular ? 4 : 2), id: \.self) { _ in
+                                GameFeedCardSkeleton()
+                            }
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 64)
+                        .frame(maxWidth: 1120)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Loading games")
+                        .padding(.vertical, 8)
                     } else if let errorMessage, games.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "wifi.exclamationmark")
@@ -450,6 +451,35 @@ private struct SocialFeedUnavailableView: View {
 
 /// A game-first social card. Until the API returns real preview assets and creator
 /// metadata, the cover is a branded visual rather than fabricated artwork.
+private struct GameFeedCardSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                .frame(height: 168)
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                .frame(width: 176, height: 18)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                .frame(width: 112, height: 13)
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                    .frame(width: 100, height: HephaestusDesign.minimumActionHeight)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                    .frame(width: 86, height: HephaestusDesign.minimumActionHeight)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.cardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: HephaestusDesign.cardRadius, style: .continuous).strokeBorder(HephaestusDesign.subtleBorder, lineWidth: 1))
+        .accessibilityHidden(true)
+    }
+}
+
 private struct GameFeedCard: View {
     @ScaledMetric(relativeTo: .largeTitle) private var coverHeight: CGFloat = 220
     let game: FeedGame
