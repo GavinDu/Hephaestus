@@ -134,7 +134,7 @@ struct PixiPlayerSheet: View {
     @State private var progress: Double = 0
     @State private var showSlowHint = false
     @State private var loadStartedAt = Date()
-    @State private var activeQuality = PlayerQuality.effective(preference: .auto)
+    @State private var activeQuality: String?
     @State private var autoReloads = 0
     @State private var reportedThermal = false
     @State private var reportedMemoryWarning = false
@@ -156,7 +156,7 @@ struct PixiPlayerSheet: View {
         components?.path = "/player"
         components?.queryItems = [
             URLQueryItem(name: "game", value: gameID),
-            URLQueryItem(name: "quality", value: activeQuality),
+            URLQueryItem(name: "quality", value: activeQuality ?? effectiveQuality),
         ]
         return components?.url
     }
@@ -173,7 +173,7 @@ struct PixiPlayerSheet: View {
                             loadError = nil
                             showSlowHint = false
                             let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
-                            DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(activeQuality))")
+                            DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(activeQuality ?? effectiveQuality))")
                             PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
                                                    message: "loaded in \(ms)ms quality=\(activeQuality)")
                             // The backend derives play_start/replay/completion from
@@ -346,7 +346,7 @@ struct PixiPlayerSheet: View {
             .onAppear {
                 loadStartedAt = Date()
                 activeQuality = effectiveQuality
-                DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView (quality \(activeQuality))")
+                DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView (quality \(activeQuality ?? effectiveQuality))")
             }
             .onDisappear {
                 guard let startedAt = gameplayStartedAt, didTrackGameplayStart else { return }
