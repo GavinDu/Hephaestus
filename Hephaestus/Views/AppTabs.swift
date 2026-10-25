@@ -1,4 +1,5 @@
 import AVFoundation
+import Network
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -70,22 +71,36 @@ private final class FeedPreviewPlayback: ObservableObject {
     private var looper: AVPlayerLooper?
     private var pendingTask: Task<Void, Never>?
     private var pendingGameID: String?
+    private let networkMonitor = NWPathMonitor()
+    private let networkQueue = DispatchQueue(label: "hephaestus.feed-preview.network")
+    private(set) var isConstrained = false
 
     private init() {
         player.isMuted = true
         player.actionAtItemEnd = .none
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in self?.isConstrained = path.isConstrained }
+        }
+        networkMonitor.start(queue: networkQueue)
+    }
+
+    deinit {
+        networkMonitor.cancel()
+        pendingTask?.cancel()
     }
 
     func schedule(gameID: String, urlString: String?) {
         guard let urlString, let url = URL(string: urlString),
               url.scheme == "https" || url.scheme == "http",
-              !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+              !ProcessInfo.processInfo.isLowPowerModeEnabled,
+              !isConstrained else { return }
         pendingTask?.cancel()
         pendingGameID = gameID
         pendingTask = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
             guard !Task.isCancelled, let self,
-                  !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+                  !ProcessInfo.processInfo.isLowPowerModeEnabled,
+                  !self.isConstrained else { return }
             self.start(gameID: gameID, url: url)
         }
     }
@@ -99,6 +114,10 @@ private final class FeedPreviewPlayback: ObservableObject {
         looper = AVPlayerLooper(player: player, templateItem: item)
         player.isMuted = true
         player.play()
+        Task {
+            await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "preview_dwell",
+                                                     durationMS: 700, expectedMS: 700)
+        }
         pendingTask = nil
         pendingGameID = nil
     }
