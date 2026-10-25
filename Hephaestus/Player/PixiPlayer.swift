@@ -312,9 +312,9 @@ struct PixiPlayerSheet: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Picker("Quality", selection: $qualityRaw) {
+                        Picker("Player quality", selection: $qualityRaw) {
                             ForEach(PlayerQuality.allCases, id: \.rawValue) { q in
-                                Text(q == .auto ? "Auto" : (q == .high ? "High" : "Low"))
+                                Text(q == .auto ? "Auto · recommended" : (q == .high ? "High quality" : "Low power"))
                                     .tag(q.rawValue)
                             }
                         }
@@ -322,7 +322,8 @@ struct PixiPlayerSheet: View {
                         Image(systemName: "gauge.with.dots.needle.67percent")
                             .frame(minWidth: HephaestusDesign.minimumActionHeight, minHeight: HephaestusDesign.minimumActionHeight)
                     }
-                    .accessibilityLabel("Player quality")
+                    .accessibilityLabel("Player quality settings")
+                    .accessibilityHint("Changing quality reloads the game.")
                 }
             }
             .onChange(of: qualityRaw) { _, _ in
