@@ -62,6 +62,12 @@ enum RecentGames {
 }
 
 // A single shared queue/player keeps feed scrolling from starting multiple decoders.
+enum FeedPreviewPolicy {
+    static func shouldAutoplay(hasClip: Bool, reduceMotion: Bool, lowPowerMode: Bool, constrainedNetwork: Bool) -> Bool {
+        hasClip && !reduceMotion && !lowPowerMode && !constrainedNetwork
+    }
+}
+
 @MainActor
 private final class FeedPreviewPlayback: ObservableObject {
     static let shared = FeedPreviewPlayback()
@@ -92,8 +98,12 @@ private final class FeedPreviewPlayback: ObservableObject {
     func schedule(gameID: String, urlString: String?) {
         guard let urlString, let url = URL(string: urlString),
               url.scheme == "https" || url.scheme == "http",
-              !ProcessInfo.processInfo.isLowPowerModeEnabled,
-              !isConstrained else { return }
+              FeedPreviewPolicy.shouldAutoplay(
+                hasClip: true,
+                reduceMotion: false,
+                lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
+                constrainedNetwork: isConstrained
+              ) else { return }
         pendingTask?.cancel()
         pendingGameID = gameID
         pendingTask = Task { [weak self] in
