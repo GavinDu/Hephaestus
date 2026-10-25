@@ -128,3 +128,38 @@ struct HephaestusTests {
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: false))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: false, isOffline: false, hasError: true))
 }
+
+@Test func feedResponseMergesVersionedCardsAndKeepsLegacyCompatibility() throws {
+    let cardJSON = """
+    {
+      "games": [{"game_id":"game-1","title":"Orbit Garden","owner_id":"creator-1","caption":"Legacy caption"}],
+      "cards": [{
+        "game_id":"game-1","version":"7","title":"Orbit Garden","caption":"A cozy universe","topics":["space"],
+        "creator":{"id":"creator-1","display_name":"Star Maker","avatar_url":"https://cdn.example.test/avatar.png"},
+        "preview":{"poster_url":"https://cdn.example.test/poster.webp","clip_url":"https://cdn.example.test/clip.mp4","aspect":1.5,"duration_ms":6000,"dominant_color":"#334455","status":"ready"},
+        "stats":{"likes":12,"play_starts":30,"completions":18},
+        "viewer":{"liked":true,"saved":false,"following":true},
+        "package":{"url":"/v1/games/game-1/package","min_runtime_version":"2026.10.23.2"}
+      }],
+      "next_cursor":"next"
+    }
+    """.data(using: .utf8)!
+    let response = try JSONDecoder().decode(FeedResponse.self, from: cardJSON)
+    #expect(response.games.count == 1)
+    #expect(response.games[0].creatorDisplayName == "Star Maker")
+    #expect(response.games[0].creatorAvatarURL == "https://cdn.example.test/avatar.png")
+    #expect(response.games[0].previewPosterURL == "https://cdn.example.test/poster.webp")
+    #expect(response.games[0].previewStatus == "ready")
+    #expect(response.games[0].likeCount == 12)
+    #expect(response.games[0].viewerLiked == true)
+    #expect(response.games[0].viewerFollowing == true)
+    #expect(response.next_cursor == "next")
+
+    let legacyJSON = """
+    {"games":[{"game_id":"old-game","title":"Old client payload"}]}
+    """.data(using: .utf8)!
+    let legacy = try JSONDecoder().decode(FeedResponse.self, from: legacyJSON)
+    #expect(legacy.games.first?.id == "old-game")
+    #expect(legacy.games.first?.previewPosterURL == nil)
+    #expect(legacy.games.first?.viewerSaved == nil)
+}
