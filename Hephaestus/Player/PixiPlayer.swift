@@ -334,7 +334,7 @@ struct PixiPlayerSheet: View {
                     attempt += 1
                 }
             }
-            .onChange(of: scenePhase) { _, phase in
+            .onChange(of: scenePhase) { phase in
                 switch phase {
                 case .background:
                     guard !wasBackgrounded else { return }
