@@ -163,8 +163,9 @@ enum APIError: Error, LocalizedError {
     }
 }
 
-/// Thin async client for the DoodleQuest backend. One shared instance;
-/// the user id goes out as the X-User-ID header (stub for Sign in with Apple).
+/// Thin async client for the DoodleQuest backend. One shared instance.
+/// Identity is derived from a Keychain-backed bearer token. The legacy
+/// X-User-ID header is disabled unless a developer explicitly opts in.
 @MainActor
 final class BackendAPI: ObservableObject {
     static let shared = BackendAPI()
@@ -180,7 +181,7 @@ final class BackendAPI: ObservableObject {
     private func makeRequest(_ path: String, method: String = "GET", body: Encodable? = nil) throws -> URLRequest {
         var req = URLRequest(url: url(path))
         req.httpMethod = method
-        req.setValue(BackendConfig.userID, forHTTPHeaderField: "X-User-ID")
+        BackendConfig.applyAuthentication(to: &req)
         if let body = body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONEncoder().encode(body)
@@ -401,7 +402,7 @@ final class BackendAPI: ObservableObject {
         guard let requestURL = requestComponents.url else { throw APIError.badStatus(-1) }
         var request = URLRequest(url: requestURL)
         request.httpMethod = "GET"
-        request.setValue(BackendConfig.userID, forHTTPHeaderField: "X-User-ID")
+        BackendConfig.applyAuthentication(to: &request)
         return try await send(CreatorDiscoveryResponse.self, request)
     }
 
