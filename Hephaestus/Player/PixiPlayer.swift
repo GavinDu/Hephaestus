@@ -175,7 +175,7 @@ struct PixiPlayerSheet: View {
                             let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
                             DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(activeQuality ?? effectiveQuality))")
                             PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
-                                                   message: "loaded in \(ms)ms quality=\(activeQuality)")
+                                                   message: "loaded in \(ms)ms quality=\(activeQuality ?? effectiveQuality)")
                             // The backend derives play_start/replay/completion from
                             // runtime session_start/run_end events. Only track the
                             // sheet lifecycle here to avoid double-counting starts.
