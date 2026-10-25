@@ -113,7 +113,7 @@ struct DiscoverView: View {
                                     .foregroundStyle(.secondary)
                             }
                             LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: 18) {
-                                ForEach(0..<4, id: \\.self) { _ in
+                                ForEach(0..<4, id: \.self) { _ in
                                     GameFeedCardSkeleton()
                                 }
                             }
