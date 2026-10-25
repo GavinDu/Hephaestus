@@ -1378,7 +1378,7 @@ struct ProfileView: View {
                         Label(BackendConfig.currentUserID.isEmpty ? "Not connected" : "Connected",
                               systemImage: BackendConfig.currentUserID.isEmpty ? "person.crop.circle.badge.xmark" : "checkmark.shield.fill")
                             .font(.subheadline)
-                            .foregroundStyle(BackendConfig.currentUserID.isEmpty ? .secondary : .green)
+                            .foregroundStyle(BackendConfig.currentUserID.isEmpty ? Color.secondary : Color.green)
                     }
                     SecureField("Short-lived bearer session token", text: $tokenDraft)
                         .textInputAutocapitalization(.never)
