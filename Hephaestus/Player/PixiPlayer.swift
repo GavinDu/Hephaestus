@@ -128,6 +128,8 @@ struct PixiPlayerSheet: View {
     let gameID: String
     let title: String
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var wasBackgrounded = false
     @State private var isLoading = true
     @State private var loadError: String?
     @State private var attempt = 0
@@ -322,6 +324,37 @@ struct PixiPlayerSheet: View {
                     showSlowHint = false
                     loadStartedAt = Date()
                     attempt += 1
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .background:
+                    guard !wasBackgrounded else { return }
+                    wasBackgrounded = true
+                    DevLog.info(.player, "app backgrounded while player sheet is open for \(gameID)")
+                    PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerBackground",
+                                           message: "app entered background; player lifecycle suspended")
+                case .active:
+                    guard wasBackgrounded else { return }
+                    wasBackgrounded = false
+                    DevLog.info(.player, "app foregrounded with player sheet open for \(gameID)")
+                    PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerForeground",
+                                           message: "app returned to foreground; player lifecycle resumed")
+                    // Retry only a failed load, and only when connectivity is back.
+                    // A successfully loaded game stays on screen; foregrounding does
+                    // not trigger a disruptive reload or reset current gameplay.
+                    if !pathMonitor.isOffline, loadError != nil {
+                        loadError = nil
+                        isLoading = true
+                        progress = 0
+                        showSlowHint = false
+                        loadStartedAt = Date()
+                        attempt += 1
+                    }
+                case .inactive, .unknown:
+                    break
+                @unknown default:
+                    break
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
