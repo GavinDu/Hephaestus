@@ -1,3 +1,4 @@
+import AVFoundation
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -59,12 +60,97 @@ enum RecentGames {
     }
 }
 
+// A single shared queue/player keeps feed scrolling from starting multiple decoders.
+@MainActor
+private final class FeedPreviewPlayback: ObservableObject {
+    static let shared = FeedPreviewPlayback()
+
+    @Published private(set) var activeGameID: String?
+    let player = AVQueuePlayer()
+    private var looper: AVPlayerLooper?
+    private var pendingTask: Task<Void, Never>?
+    private var pendingGameID: String?
+
+    private init() {
+        player.isMuted = true
+        player.actionAtItemEnd = .none
+    }
+
+    func schedule(gameID: String, urlString: String?) {
+        guard let urlString, let url = URL(string: urlString),
+              url.scheme == "https" || url.scheme == "http",
+              !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+        pendingTask?.cancel()
+        pendingGameID = gameID
+        pendingTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
+            guard !Task.isCancelled, let self,
+                  !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+            self.start(gameID: gameID, url: url)
+        }
+    }
+
+    private func start(gameID: String, url: URL) {
+        player.pause()
+        player.removeAllItems()
+        looper = nil
+        activeGameID = gameID
+        let item = AVPlayerItem(url: url)
+        looper = AVPlayerLooper(player: player, templateItem: item)
+        player.isMuted = true
+        player.play()
+        pendingTask = nil
+        pendingGameID = nil
+    }
+
+    func stop(gameID: String? = nil) {
+        if let gameID, pendingGameID == gameID {
+            pendingTask?.cancel()
+            pendingTask = nil
+            pendingGameID = nil
+        }
+        guard gameID == nil || activeGameID == gameID else { return }
+        pendingTask?.cancel()
+        pendingTask = nil
+        pendingGameID = nil
+        player.pause()
+        player.removeAllItems()
+        looper = nil
+        activeGameID = nil
+    }
+}
+
+private struct FeedPreviewSurface: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerLayerView {
+        let view = PlayerLayerView()
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = .resizeAspect
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerLayerView, context: Context) {
+        if uiView.playerLayer.player !== player { uiView.playerLayer.player = player }
+    }
+
+    static func dismantleUIView(_ uiView: PlayerLayerView, coordinator: ()) {
+        uiView.playerLayer.player = nil
+    }
+
+    final class PlayerLayerView: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    }
+}
+
 // MARK: - Discover
 
 /// Backend-backed social feeds use the verified bearer session when present.
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedFeed: SocialFeedScope = .forYou
     @State private var games: [FeedGame] = []
     @State private var playerRequest: PixiPlayerRequest?
@@ -275,6 +361,12 @@ struct DiscoverView: View {
                 }
             }
             .refreshable { await load() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { FeedPreviewPlayback.shared.stop() }
+            }
+            .onChange(of: playerRequest) { _, request in
+                if request != nil { FeedPreviewPlayback.shared.stop() }
+            }
             .task {
                 savedGameIDs = Set(UserDefaults.standard.stringArray(forKey: "hephaestus.savedGames") ?? [])
                 await load()
@@ -521,6 +613,8 @@ private struct GameFeedCardSkeleton: View {
 
 private struct GameFeedCard: View {
     @ScaledMetric(relativeTo: .largeTitle) private var coverHeight: CGFloat = 220
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var previewPlayback = FeedPreviewPlayback.shared
     let game: FeedGame
     let isSaved: Bool
     let isLiked: Bool
@@ -567,6 +661,12 @@ private struct GameFeedCard: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
                     .accessibilityHidden(true)
+                }
+                if previewPlayback.activeGameID == game.id && !reduceMotion {
+                    FeedPreviewSurface(player: previewPlayback.player)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black)
+                        .accessibilityHidden(true)
                 }
                 Circle()
                     .fill(.white.opacity(0.12))
@@ -708,7 +808,15 @@ private struct GameFeedCard: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 5)
-        .onAppear(perform: onImpression)
+        .onAppear {
+            onImpression()
+            if !reduceMotion {
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
+            }
+        }
+        .onDisappear {
+            FeedPreviewPlayback.shared.stop(gameID: game.id)
+        }
     }
 }
 
