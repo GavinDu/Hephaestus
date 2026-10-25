@@ -4,6 +4,20 @@ import UIKit
 
 // MARK: - Shared pieces
 
+/// Semantic SwiftUI tokens shared by discovery, profiles, saved games, and player entry points.
+enum HephaestusDesign {
+    static let pageBackground = Color(uiColor: .systemGroupedBackground)
+    static let cardBackground = Color(uiColor: .secondarySystemGroupedBackground)
+    static let elevatedBackground = Color(uiColor: .tertiarySystemGroupedBackground)
+    static let cardRadius: CGFloat = 22
+    static let compactCardRadius: CGFloat = 14
+    static let sectionRadius: CGFloat = 20
+    static let horizontalInset: CGFloat = 16
+    static let sectionSpacing: CGFloat = 16
+    static let minimumActionHeight: CGFloat = 44
+    static let subtleBorder = Color(uiColor: .separator).opacity(0.18)
+}
+
 /// Recently played games, persisted locally.
 struct RecentGame: Codable, Identifiable {
     var id: String { gameID }
@@ -117,14 +131,15 @@ struct DiscoverView: View {
                     .accessibilityElement(children: .combine)
 
                     if isLoading && games.isEmpty {
-                        VStack(spacing: 12) {
-                            ProgressView()
-                            Text("Finding something fun…")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                        LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: HephaestusDesign.sectionSpacing) {
+                            ForEach(0..<(horizontalSizeClass == .regular ? 4 : 2), id: \.self) { _ in
+                                GameFeedCardSkeleton()
+                            }
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 64)
+                        .frame(maxWidth: 1120)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Loading games")
+                        .padding(.vertical, 8)
                     } else if let errorMessage, games.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "wifi.exclamationmark")
@@ -200,7 +215,7 @@ struct DiscoverView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 28)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(HephaestusDesign.pageBackground)
             .navigationTitle("Discover")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Find a game")
@@ -429,13 +444,42 @@ private struct SocialFeedUnavailableView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+        .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 }
 
 /// A game-first social card. Until the API returns real preview assets and creator
 /// metadata, the cover is a branded visual rather than fabricated artwork.
+private struct GameFeedCardSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                .frame(height: 168)
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                .frame(width: 176, height: 18)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                .frame(width: 112, height: 13)
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                    .frame(width: 100, height: HephaestusDesign.minimumActionHeight)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                    .frame(width: 86, height: HephaestusDesign.minimumActionHeight)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.cardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: HephaestusDesign.cardRadius, style: .continuous).strokeBorder(HephaestusDesign.subtleBorder, lineWidth: 1))
+        .accessibilityHidden(true)
+    }
+}
+
 private struct GameFeedCard: View {
     @ScaledMetric(relativeTo: .largeTitle) private var coverHeight: CGFloat = 220
     let game: FeedGame
@@ -523,7 +567,7 @@ private struct GameFeedCard: View {
                 if canFollowCreator {
                     Button(action: onToggleFollow) {
                         Label(isFollowingCreator ? "Following" : "Follow", systemImage: isFollowingCreator ? "person.fill.checkmark" : "person.badge.plus")
-                            .font(.caption.weight(.semibold)).frame(minHeight: 44)
+                            .font(.caption.weight(.semibold)).frame(minHeight: HephaestusDesign.minimumActionHeight)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
@@ -564,7 +608,7 @@ private struct GameFeedCard: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
                         .frame(width: 44, height: 44)
-                        .background(Color(uiColor: .tertiarySystemGroupedBackground), in: Circle())
+                        .background(HephaestusDesign.elevatedBackground, in: Circle())
                 }
                 .simultaneousGesture(TapGesture().onEnded {
                     Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
@@ -596,8 +640,8 @@ private struct GameFeedCard: View {
             .accessibilityHint("Opens this game in the player")
             .padding(14)
         }
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(HephaestusDesign.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: HephaestusDesign.cardRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
