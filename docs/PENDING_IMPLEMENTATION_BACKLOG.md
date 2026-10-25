@@ -1,6 +1,6 @@
 # Pending implementation backlog
 
-Last reconciled: 2026-10-24. This is a status ledger, not a claim that every item is production-ready.
+Last reconciled: 2026-10-25. This is a status ledger, not a claim that every item is production-ready.
 
 **Status key:** `[ ]` pending · `[~]` in progress · `[x]` implemented and validated within the stated scope.  
 **Review triggers:** revisit when inviting external users, preparing public/App Store launch, adding backend replicas, or when measured traffic makes the current design insufficient. Prefer a small usable implementation over speculative infrastructure while the product has few users.
@@ -18,13 +18,13 @@ Last reconciled: 2026-10-24. This is a status ledger, not a claim that every ite
 - [x] **#15 — Creator profiles and discovery.** Backend creator discovery PR #12 and iOS creator UI PR #25 are merged. Profiles show eligible public posts and server-backed follow state/counts; no fabricated avatars or popularity metrics.
 - [~] **#16 — Publishing safety and moderation.** Publishing is gated on package readiness and pending moderation; report/block endpoints, delivery eligibility checks, structured report reasons/details, append-only moderation audit trail, high-confidence text-risk triage, creator appeals, and configurable contact details are merged. Hephaestus PR #37 restores the iOS appeal/contact flow and removes the client call to operator-only incident aggregates; macOS Xcode and player-smoke checks passed before merge. Remaining: semantic/media review, a staffed operator workflow, and verified creator identity. Required before broad public user-generated-content launch.
 - [~] **#17 — Feed/gameplay telemetry.** Versioned v2 events, bounded process-local event-ID deduplication, opt-in JSONL retention, and token-protected aggregate perf/incident endpoints are merged. Backend derives `play_start`, replay, and completion from runtime `session_start`/`run_end`; Hephaestus records feed impressions, saves, shares, follows, and quick exits (dismissal within five seconds) without duplicating runtime starts. Remaining: verify event delivery from a live iOS gameplay session, configure `DQ_TELEMETRY_RETENTION_DAYS` and `DQ_TELEMETRY_ADMIN_TOKEN` in deployment, and build privacy-aware aggregate dashboards/queries. No account IDs or user content are added to social-event payloads.
-- [ ] **#18 — Feed ranking.** Keep ranking explainable and diverse, with newest-first fallback until enough real engagement signals exist. Evaluate against a baseline and document rollback; do not optimize raw time spent as the sole success metric. Depends on reliable telemetry and sufficient real usage data.
+- [~] **#18 — Feed ranking.** An explainable score is implemented in the backend: freshness, reactions, completion/replay/share/save/quick-exit signals, stable tie-breaks, creator-diversity interleaving, a 20-signal cold-start threshold, and `DQ_FEED_RANKING_ENABLED=false` rollback. Backend PR #32 pre-aggregates engagement in O(events) before sorting and adds regression coverage; GitHub Actions passed before merge. Remaining: evaluate against newest-first using reliable aggregate telemetry and sufficient real usage; do not optimize raw time spent as the sole success metric.
 - [x] **#19 — Recommendation controls (current feature scope).** Not-interested and block controls plus muted-topic preferences and reset behavior are merged in Hephaestus PR #29; iOS build/test workflow passed. Validate that these controls influence any future ranking logic when #18 is implemented.
 
 ## P2/P3 — Driven by observed usage and operational need
 
-- [ ] **#20 — Multi-instance operation and recovery.** Current JSON snapshot/JSONL event persistence is single-instance only. Before scaling, add shared durable storage, migration/rollback, measured load tests, and a verified backup/restore procedure.
-- [ ] **#21 — Media/package delivery.** Package/version endpoints and asset validation/size gates exist. Measure package sizes, request bytes, latency, errors, and cache behavior before choosing object storage/CDN. Verify immutable cache keys, removed-content behavior, and unsafe asset URLs at both publish and load boundaries.
+- [~] **#20 — Multi-instance operation and recovery.** A single-instance backup/restore runbook and automated store restart tests are in place. Backend PR #35 adds persistence-load/write failure tracking and `/readyz` readiness checks while keeping `/healthz` for liveness; its CI is pending. Current JSON snapshot/JSONL event persistence remains single-instance only. Remaining before scaling: shared durable storage, schema migration/rollback, idempotency/uniqueness guarantees, measured load tests, and a verified deployment backup/restore drill.
+- [~] **#21 — Media/package delivery.** Package/version endpoints, asset validation/size gates, safe public-only cache headers, ETags/304 handling, and aggregate request/byte/latency/status metrics are implemented. Backend PR #29 added cache behavior and PR #34 added token-protected process-local delivery metrics; PR #34's Go, Chromium, WebKit, and Playability Kit checks passed before merge. Remaining: configure `DQ_TELEMETRY_ADMIN_TOKEN` in deployment, collect real traffic baselines, verify immutable cache keys and removed-content behavior end-to-end, and decide on object storage/CDN only from measured package sizes, latency, bandwidth, and errors.
 
 ## Runtime architecture guardrail
 
@@ -38,6 +38,9 @@ The iOS player executes data-defined Game IR through the PixiJS + Rapier runtime
 - Hephaestus PR #8 is superseded by this reconciled ledger after its unique priority/trigger guidance has been retained here.
 - Backend PR #13 is merged. A subsequent Go validation run on PR #18 completed successfully for Go tests/race/static analysis, Chromium, WebKit, and Playability Kit.
 - Backend PR #16 (stabilize CI by serializing browser validation) was squash-merged after a fresh run passed all four jobs (Go tests/race/static analysis, Chromium, WebKit, Playability Kit). The merged main pipeline was separately validated in an isolated temporary checkout.
+- Backend PR #32 (pre-aggregate feed engagement scores) is merged; its current algorithmic complexity is documented, but ranking quality still requires real-usage evaluation.
+- Backend PR #34 (aggregate package delivery metrics) is merged; the metrics are process-local and need deployment configuration and real traffic to become an operational baseline.
+- Backend PR #35 (persistence failure readiness signal) is open and requires its own fresh GitHub Actions validation before merge.
 - Keep #10 and #11 open until explicitly authorized to revisit them.
 
 ## Definition of done
