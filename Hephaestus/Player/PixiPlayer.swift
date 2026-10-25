@@ -68,6 +68,12 @@ enum GameplayTelemetryPolicy {
     }
 }
 
+/// Keeps transient network state from covering a game that has already loaded.
+enum PlayerLoadingPolicy {
+    static func shouldShowOfflineOverlay(isOffline: Bool, isLoading: Bool, hasError: Bool) -> Bool {
+        isOffline && isLoading && !hasError
+    }
+}
 // MARK: - Telemetry (monitoring)
 
 /// Fire-and-forget reports to the backend's telemetry endpoint — the
@@ -164,6 +170,7 @@ struct PixiPlayerSheet: View {
                         onLoadFinish: {
                             isLoading = false
                             loadError = nil
+                            showSlowHint = false
                             let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
                             DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
                             PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
@@ -195,6 +202,8 @@ struct PixiPlayerSheet: View {
                                                        message: "auto-reload \(autoReloads) of 2")
                                 loadError = nil
                                 isLoading = true
+                                progress = 0
+                                showSlowHint = false
                                 loadStartedAt = Date()
                                 attempt += 1
                             } else {
@@ -227,7 +236,11 @@ struct PixiPlayerSheet: View {
                     }
                 }
 
-                if pathMonitor.isOffline && loadError == nil {
+                if PlayerLoadingPolicy.shouldShowOfflineOverlay(
+                    isOffline: pathMonitor.isOffline,
+                    isLoading: isLoading,
+                    hasError: loadError != nil
+                ) {
                     VStack(spacing: 14) {
                         Image(systemName: "wifi.slash")
                             .font(.system(size: 40))
@@ -260,6 +273,8 @@ struct PixiPlayerSheet: View {
                             self.loadError = nil
                             self.autoReloads = 0
                             isLoading = true
+                            progress = 0
+                            showSlowHint = false
                             loadStartedAt = Date()
                             attempt += 1
                         }
@@ -293,6 +308,8 @@ struct PixiPlayerSheet: View {
                 DevLog.info(.player, "quality preference -> \(qualityRaw) (effective \(effectiveQuality))")
                 loadError = nil
                 isLoading = true
+                progress = 0
+                showSlowHint = false
                 loadStartedAt = Date()
                 attempt += 1
             }
@@ -301,6 +318,8 @@ struct PixiPlayerSheet: View {
                     // Back online after a failed load: one quiet retry.
                     loadError = nil
                     isLoading = true
+                    progress = 0
+                    showSlowHint = false
                     loadStartedAt = Date()
                     attempt += 1
                 }

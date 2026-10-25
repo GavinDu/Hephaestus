@@ -52,6 +52,12 @@ struct HephaestusTests {
         #expect(DevLog.shared.exportText().contains("test entry"))
     }
 
+    @Test func offlineOverlayOnlyAppearsWhileLoading() {
+        #expect(PlayerLoadingPolicy.shouldShowOfflineOverlay(isOffline: true, isLoading: true, hasError: false))
+        #expect(!PlayerLoadingPolicy.shouldShowOfflineOverlay(isOffline: true, isLoading: false, hasError: false))
+        #expect(!PlayerLoadingPolicy.shouldShowOfflineOverlay(isOffline: true, isLoading: true, hasError: true))
+        #expect(!PlayerLoadingPolicy.shouldShowOfflineOverlay(isOffline: false, isLoading: true, hasError: false))
+    }
     @Test func gameplayTelemetryQuickExitThresholdIsBounded() {
         #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 0))
         #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 4_999))
