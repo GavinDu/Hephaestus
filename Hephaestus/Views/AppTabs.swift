@@ -469,50 +469,7 @@ private struct SocialFeedUnavailableView: View {
 
 /// Static, reduced-motion-friendly placeholders that preserve the feed's card rhythm
 /// while network data is loading. Hidden from VoiceOver because they are not content.
-private struct GameFeedCardSkeleton: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            RoundedRectangle(cornerRadius: 0)
-                .fill(Color(uiColor: .tertiarySystemGroupedBackground))
-                .frame(height: 220)
-                .overlay(alignment: .center) {
-                    Image(systemName: "gamecontroller")
-                        .font(.system(size: 34, weight: .light))
-                        .foregroundStyle(.tertiary)
-                }
-            VStack(alignment: .leading, spacing: 12) {
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(Color(uiColor: .tertiarySystemFill))
-                    .frame(width: 92, height: 10)
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(Color(uiColor: .tertiarySystemFill))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 18)
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(Color(uiColor: .tertiarySystemFill))
-                    .frame(width: 142, height: 12)
-                HStack(spacing: 10) {
-                    Capsule().fill(Color(uiColor: .tertiarySystemFill)).frame(width: 88, height: 34)
-                    Spacer()
-                    Circle().fill(Color(uiColor: .tertiarySystemFill)).frame(width: 34, height: 34)
-                    Circle().fill(Color(uiColor: .tertiarySystemFill)).frame(width: 34, height: 34)
-                }
-                .padding(.top, 4)
-            }
-            .padding(16)
-        }
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
-        }
-        .accessibilityHidden(true)
-    }
-}
-
-/// A game-first social card. Until the API returns real preview assets and creator
-/// metadata, the cover is a branded visual rather than fabricated artwork.
+/// Static, accessibility-hidden placeholder cards used while the feed loads.
 private struct GameFeedCardSkeleton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
