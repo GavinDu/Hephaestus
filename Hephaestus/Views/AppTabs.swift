@@ -1365,6 +1365,8 @@ struct ProfileView: View {
     @State private var logEntries = DevLog.shared.count
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
     @State private var isModerationAppealPresented = false
+    @State private var tokenDraft = BackendConfig.loadSessionToken() ?? ""
+    @State private var sessionMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -1376,7 +1378,42 @@ struct ProfileView: View {
                         Text(BackendConfig.userID)
                             .foregroundStyle(.secondary)
                     }
-                    Text("Parent-owned account — sign-in with Apple coming soon.")
+                    SecureField("Short-lived bearer session token", text: $tokenDraft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityLabel("Bearer session token")
+                    HStack {
+                        Button("Save session") {
+                            let token = tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !token.isEmpty else {
+                                sessionMessage = "Enter a session token first."
+                                return
+                            }
+                            guard BackendConfig.saveSessionToken(token) else {
+                                sessionMessage = "Could not save the session securely to Keychain."
+                                return
+                            }
+                            tokenDraft = token
+                            sessionMessage = "Session saved securely. New API requests will use bearer authentication."
+                            DevLog.info(.api, "bearer session token saved to Keychain")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Sign out", role: .destructive) {
+                            BackendConfig.clearSessionToken()
+                            tokenDraft = ""
+                            sessionMessage = "Session cleared from this device."
+                            DevLog.info(.api, "bearer session token cleared")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    if let sessionMessage {
+                        Text(sessionMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("session-status")
+                    }
+                    Text("Until Sign in with Apple is connected, paste a short-lived token from the trusted sign-in provider. Tokens are kept in Keychain; the app does not trust X-User-ID for production identity.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
