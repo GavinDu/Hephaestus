@@ -697,7 +697,9 @@ private struct GameFeedCard: View {
                         .background(Color.black)
                         .accessibilityHidden(true)
                 }
-                Circle()
+                if (game.previewPosterURL == nil || game.previewPosterURL?.isEmpty == true)
+                    && previewPlayback.activeGameID != game.id {
+                    Circle()
                     .fill(.white.opacity(0.12))
                     .frame(width: 180, height: 180)
                     .offset(x: 210, y: -80)
@@ -710,6 +712,7 @@ private struct GameFeedCard: View {
                     .foregroundStyle(.white.opacity(0.88))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityHidden(true)
+                }
                 VStack(alignment: .leading, spacing: 7) {
                     Text("COMMUNITY GAME")
                         .font(.caption2.weight(.bold))
