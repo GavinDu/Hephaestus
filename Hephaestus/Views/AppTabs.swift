@@ -440,22 +440,7 @@ struct DiscoverView: View {
                 PixiPlayerSheet(
                     gameID: request.gameID,
                     title: request.title,
-                    onSessionEnd: { durationMS in
-                        // Stage 1 trigger: a real session, not a
-                        // bounce and not an error close (which never
-                        // starts a session). The sheet appears after
-                        // the player dismisses; if another player
-                        // opened meanwhile, it is skipped.
-                        guard PostRunSheetPolicy.shouldShow(durationMS: durationMS),
-                              playerRequest == nil,
-                              let game = games.first(where: { $0.id == request.gameID }) else { return }
-                        Task {
-                            try? await Task.sleep(for: .milliseconds(500))
-                            if playerRequest == nil {
-                                resultSheetGame = game
-                            }
-                        }
-                    }
+                    onSessionEnd: { durationMS in handlePlayerSessionEnd(request: request, durationMS: durationMS) }
                 )
             }
             // onChange needs an Equatable value and FeedGame is
@@ -511,6 +496,23 @@ struct DiscoverView: View {
                     onSave: { topics in saveMutedTopics(topics) },
                     onReset: { resetFeedPreferences() }
                 )
+            }
+        }
+    }
+
+    /// #60 Stage 1 trigger, extracted from the player-sheet call
+    /// site so the DiscoverView body expression stays type-checkable:
+    /// a real session, not a bounce and not an error close (which
+    /// never starts a session). The sheet appears after the player
+    /// dismisses; if another player opened meanwhile, it is skipped.
+    private func handlePlayerSessionEnd(request: PixiPlayerRequest, durationMS: Int) {
+        guard PostRunSheetPolicy.shouldShow(durationMS: durationMS),
+              playerRequest == nil,
+              let game = games.first(where: { $0.id == request.gameID }) else { return }
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            if playerRequest == nil {
+                resultSheetGame = game
             }
         }
     }
