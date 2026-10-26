@@ -138,6 +138,7 @@ than guess.
       "replay": { "seed": 42, "inputs": [] },
       "logs": ["devlog.json", "telemetry.json"],
       "screenshots": ["launch-failed.png"],
+      "videos": ["run.mp4"],
       "detail": "Player web view stayed on the loading state past the 8s slow-load hint."
     }
   ],
@@ -181,6 +182,49 @@ than guess.
 to reclassify it; repeated `unknown` failures are themselves a
 framework bug.
 
+### 5.4 Media capture: screenshots and video
+
+Screenshots and video are part of the artifact, not an optional
+extra — a render failure without a picture of what rendered is
+almost unactionable for the next iteration.
+
+- **Screenshots (simulator and physical, always available).**
+  XCUITest `XCTAttachment` screenshots work on both. Every UI
+  test attaches a screenshot on failure, plus one success
+  screenshot at the key state (for the player smoke test: after
+  boot settles) as a baseline. Screenshot files are listed in
+  `cases[].screenshots` and stored with the artifact.
+- **Video (simulator, automatable).** `xcrun simctl io <device>
+  recordVideo` records the simulator screen for the whole run
+  (`tools/test-feedback/record-simulator.sh` wraps boot, record,
+  stop, and naming by `run_id`). Video is kept only when a case
+  fails, or when the run was explicitly dispatched with video
+  requested — a passing run's video is discarded, because
+  storing video for every green run would drown the archive in
+  unwatchable footage.
+- **Video (physical, limited — be honest about this).** There is
+  no `simctl` for a physical device, so video cannot be captured
+  the same way. The supported routes, in order of preference:
+  1. Start screen recording from Control Center before the run,
+     then import the recording into the artifact afterward.
+  2. Capture the mirrored device on the Mac (QuickTime Player →
+     New Movie Recording → device as camera source) while the
+     run executes.
+  3. In-app ReplayKit recording — possible, but it needs a
+     user-facing permission prompt and a privacy decision about
+     what else is on screen, so it is a future option, not the
+     default. It is listed here as an open sub-decision, not
+     assumed.
+- **Size and retention.** Screenshots are PNG as captured;
+  simulator video is H.264 as `simctl` produces it, trimmed to
+  the failing case's window when possible. Media follows the
+  same retention as its artifact (§12, decision 3): 90 days for
+  simulator/physical artifacts.
+- **Browser layer already does this.** Playwright runs upload
+  screenshots (and failure traces) as job artifacts today; the
+  §5 artifact for a browser run links to them the same way an
+  iOS run links to its attachments.
+
 ## 6. Logging: DevLog JSON export and telemetry correlation
 
 Today `DevLog` exports plain text (`exportText()`), which is good
@@ -210,8 +254,9 @@ filled in and its artifact is filed:
 1. Record `run_id`, commit, device/simulator profile, app build.
 2. Run the case list for the change (player smoke at minimum for
    player changes; the full UI suite for shell/navigation changes).
-3. On failure: capture the screenshot/video, the DevLog JSON
-   export, and the backend incidents for the run id. Do not
+3. On failure: capture the screenshot and, for simulator runs, the
+   run video (§5.4), the DevLog JSON export, and the backend
+   incidents for the run id. Do not
    re-run to "see if it happens again" before filing — the first
    failure's artifact is the evidence.
 4. File the artifact (CI artifact store for simulator runs; the
