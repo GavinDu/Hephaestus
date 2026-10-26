@@ -33,14 +33,34 @@ jobs:
           fi
           echo "Testing on iPhone simulator $UDID"
           set +e
-          xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusTests CODE_SIGNING_ALLOWED=NO
-          status=$?
+          xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusTests CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/unit.log
+          status=${PIPESTATUS[0]}
           if [ $status -ne 0 ]; then
             echo "First test attempt failed with exit $status; retrying once"
-            xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusTests CODE_SIGNING_ALLOWED=NO
-            status=$?
+            xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusTests CODE_SIGNING_ALLOWED=NO 2>&1 | tee -a /tmp/unit.log
+            status=${PIPESTATUS[0]}
           fi
           exit $status
+      # Same advisory producer as the smoke job (Phase 2b), for Layer 0:
+      # unit tests run on the simulator but need no device behaviour, so
+      # they are layer 0. The producer dedupes by case id, so the retry
+      # above never double-counts a case. Never gates this job.
+      - name: Build unit test-feedback artifact
+        if: always()
+        run: |
+          python3 tools/test-feedback/xcresult-to-feedback.py \
+            --log /tmp/unit.log --out /tmp/test-feedback-unit.json \
+            --run-id "unit-${{ github.run_id }}-${{ github.run_attempt }}" \
+            --commit "${{ github.sha }}" --layer 0 --prefix unit || true
+      - name: Upload unit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-tests
+          path: |
+            /tmp/unit.log
+            /tmp/test-feedback-unit.json
+          if-no-files-found: ignore
 
   # Phase 4 device matrix: the player smoke test drives the real app on
   # a simulator — Discover feed -> Play -> WKWebView player boots a game
@@ -99,7 +119,7 @@ jobs:
           python3 tools/test-feedback/xcresult-to-feedback.py \
             --log /tmp/smoke.log --out /tmp/test-feedback.json \
             --run-id "smoke-${{ github.run_id }}-${{ github.run_attempt }}" \
-            --commit "${{ github.sha }}" || true
+            --commit "${{ github.sha }}" --layer 1 --prefix player-smoke || true
       - name: Upload smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4

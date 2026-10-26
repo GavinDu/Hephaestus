@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a test-feedback.json artifact from a player-smoke run.
+"""Build a test-feedback.json artifact from an xcodebuild run.
 
 Per docs/TESTING_FRAMEWORK.md Phase 2b, this is the CI producer that
 turns a smoke-test run into the artifact the feedback loop consumes.
@@ -10,7 +10,8 @@ across Xcode versions.
 Usage:
     tools/test-feedback/xcresult-to-feedback.py \
         --log /tmp/smoke.log --out /tmp/test-feedback.json \
-        --run-id <id> --commit <sha> [--video run.mp4] [--screenshot shot.png]
+        --run-id <id> --commit <sha> [--layer 1] [--prefix player-smoke] \
+        [--video run.mp4] [--screenshot shot.png]
 
 The producer is advisory by design: it never exits non-zero for a
 missing or unparsable log. If no test cases can be found, it emits a
@@ -48,6 +49,10 @@ def main():
     parser.add_argument("--repo", default="GavinDu/Hephaestus")
     parser.add_argument("--video", default=None)
     parser.add_argument("--screenshot", default=None)
+    parser.add_argument("--layer", type=int, default=1,
+                        help="framework layer: 0 no device, 1 simulator, 2 physical")
+    parser.add_argument("--prefix", default="player-smoke",
+                        help="case-id prefix, e.g. player-smoke or unit")
     args = parser.parse_args()
 
     cases = []
@@ -58,28 +63,34 @@ def main():
         text = ""
         print(f"xcresult-to-feedback: cannot read log: {exc}", file=sys.stderr)
 
+    # Keep only the last result per case: the xcode job retries once on
+    # failure, so the log can hold two runs of the same case. The final
+    # run's verdict is the run's verdict; counting both would double
+    # count and could report a pass and a fail for one case.
+    by_id = {}
     for match in CASE_RE.finditer(text):
         name, result, _device, seconds = match.groups()
         name = name[:-2] if name.endswith("()") else name
         case = {
-            "id": f"player-smoke.{name}",
+            "id": f"{args.prefix}.{name}",
             "verdict": "pass" if result == "passed" else "fail",
             "duration_ms": int(float(seconds) * 1000),
         }
         if result == "failed":
             case["failure_class"] = "unknown"
             case["detail"] = (
-                "Smoke test failed; see the smoke log and the failure "
+                "Test failed; see the run log and the failure "
                 "screenshot attachment for the UI state at failure."
             )
         if args.screenshot and result == "failed":
             case["screenshots"] = [args.screenshot]
         if args.video and result == "failed":
             case["videos"] = [args.video]
-        cases.append(case)
+        by_id[case["id"]] = case
+    cases = list(by_id.values())
     if STARTED_RE.search(text) and not cases:
         cases.append({
-            "id": "player-smoke.discover-launches-player",
+            "id": f"{args.prefix}.no-result",
             "verdict": "fail",
             "failure_class": "timeout",
             "detail": "Smoke test started but produced no result line; "
@@ -87,9 +98,9 @@ def main():
         })
     if not cases:
         cases.append({
-            "id": "player-smoke.producer",
+            "id": f"{args.prefix}.producer",
             "verdict": "skip",
-            "detail": "No test-case result lines found in the smoke log; "
+            "detail": "No test-case result lines found in the log; "
                       "the producer could not determine the run outcome.",
         })
 
@@ -104,7 +115,7 @@ def main():
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "commit": args.commit,
         "repo": args.repo,
-        "layer": 1,
+        "layer": args.layer,
         "environment": {"kind": "simulator"},
         "cases": cases,
         "summary": summary,
