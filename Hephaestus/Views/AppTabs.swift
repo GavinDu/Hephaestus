@@ -230,6 +230,7 @@ struct DiscoverView: View {
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
     @State private var settledForYouGameID: String?
+    @State private var resultGame: FeedGame?
 
     private var visibleGames: [FeedGame] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -479,7 +480,20 @@ struct DiscoverView: View {
                 await load()
             }
             .fullScreenCover(item: $playerRequest) { request in
-                PixiPlayerSheet(gameID: request.gameID, title: request.title)
+                PixiPlayerSheet(gameID: request.gameID, title: request.title, onFinish: {
+                    resultGame = games.first(where: { $0.id == request.gameID })
+                })
+            }
+            .sheet(item: $resultGame) { game in
+                PlayerResultSheet(
+                    game: game,
+                    isLiked: likedGameIDs.contains(game.id),
+                    onPlayAgain: {
+                        DispatchQueue.main.async { play(game) }
+                    },
+                    onNextGame: { advanceToNextGame(after: game) },
+                    onToggleLike: { toggleLike(game) }
+                )
             }
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
@@ -507,6 +521,21 @@ struct DiscoverView: View {
     private func play(_ game: FeedGame) {
         RecentGames.record(gameID: game.id, title: game.title)
         playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
+    }
+
+    private func advanceToNextGame(after game: FeedGame) {
+        guard let index = visibleGames.firstIndex(where: { $0.id == game.id }),
+              visibleGames.indices.contains(index + 1) else {
+            resultGame = nil
+            return
+        }
+        let nextGame = visibleGames[index + 1]
+        resultGame = nil
+        if selectedFeed != .forYou || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            selectedFeed = .forYou
+            searchText = ""
+        }
+        settledForYouGameID = nextGame.id
     }
 
     private func loadMore() async {

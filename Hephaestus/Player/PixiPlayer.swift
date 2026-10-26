@@ -302,6 +302,7 @@ private struct PlayerStateCard<Content: View>: View {
 struct PixiPlayerSheet: View {
     let gameID: String
     let title: String
+    let onFinish: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var wasBackgrounded = false
@@ -471,7 +472,10 @@ struct PixiPlayerSheet: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .frame(minHeight: HephaestusDesign.minimumActionHeight)
-                            Button("Return to feed") { dismiss() }
+                    Button("Return to feed") {
+                        onFinish()
+                        dismiss()
+                    }
                                 .frame(minHeight: HephaestusDesign.minimumActionHeight)
                         }
                     }
@@ -481,7 +485,10 @@ struct PixiPlayerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Done") {
+                        onFinish()
+                        dismiss()
+                    }
                         .frame(minHeight: HephaestusDesign.minimumActionHeight)
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
@@ -598,6 +605,85 @@ struct PixiPlayerSheet: View {
                     }
                 }
                 gameplayStartedAt = nil
+            }
+        }
+    }
+}
+
+/// Native post-run handoff. Run score/outcome fields are deliberately absent
+/// until the backend exposes a verified run-result contract; this sheet must
+/// not display client-only claims from the bridgeless WebView.
+struct PlayerResultSheet: View {
+    let game: FeedGame
+    let isLiked: Bool
+    let onPlayAgain: () -> Void
+    let onNextGame: () -> Void
+    let onToggleLike: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 54))
+                    .foregroundStyle(.purple)
+                    .accessibilityHidden(true)
+                VStack(spacing: 8) {
+                    Text("Nice run")
+                        .font(.title2.weight(.bold))
+                    Text(game.title)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                    Text("Choose what you want to do next.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .accessibilityElement(children: .combine)
+
+                VStack(spacing: 12) {
+                    Button {
+                        dismiss()
+                        onPlayAgain()
+                    } label: {
+                        Label("Play Again", systemImage: "arrow.counterclockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(minHeight: HephaestusDesign.minimumActionHeight)
+
+                    Button {
+                        dismiss()
+                        onNextGame()
+                    } label: {
+                        Label("Next Game", systemImage: "chevron.up.2")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(minHeight: HephaestusDesign.minimumActionHeight)
+
+                    Button {
+                        onToggleLike()
+                    } label: {
+                        Label(isLiked ? "Liked" : "Like", systemImage: isLiked ? "heart.fill" : "heart")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(isLiked ? .pink : nil)
+                    .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                    .accessibilityLabel(isLiked ? "Unlike \(game.title)" : "Like \(game.title)")
+                }
+                .frame(maxWidth: 420)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(HephaestusDesign.pageBackground)
+            .navigationTitle("Run complete")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
             }
         }
     }
