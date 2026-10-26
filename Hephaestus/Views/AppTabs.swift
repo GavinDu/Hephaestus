@@ -21,6 +21,9 @@ enum HephaestusDesign {
     static let cardPadding: CGFloat = 24
     static let stateCardMaxWidth: CGFloat = 360
     static let stateIconSize: CGFloat = 40
+    /// Readable column cap for full-screen pager pages on regular size
+    /// classes (Hephaestus #59). Compact width uses the full width.
+    static let pagerMaxWidth: CGFloat = 560
     static let subtleBorder = Color(uiColor: .separator).opacity(0.18)
 }
 
@@ -203,6 +206,188 @@ private struct FeedPreviewSurface: UIViewRepresentable {
     }
 }
 
+/// Pure pager decisions for Hephaestus #59, kept out of the view so
+/// they are unit-testable. The settled page is the only page whose
+/// preview may play, and prefetch fires within two pages of the end.
+enum ForYouPager {
+    static func shouldPrefetch(settledIndex: Int, totalCount: Int) -> Bool {
+        totalCount > 0 && settledIndex >= totalCount - 2
+    }
+}
+
+/// Full-screen vertical pager for the For You feed (Hephaestus #59,
+/// docs/FOR_YOU_PAGER.md). One game per screen; the settled page owns
+/// preview playback and the impression, replacing the card grid's
+/// per-card appear/disappear heuristics for this scope only. Other
+/// scopes and search keep the card grid in DiscoverView.
+///
+/// The pager never touches playback policy itself beyond the
+/// reduce-motion guard: FeedPreviewPlayback already enforces Low
+/// Power Mode and constrained-network stops, and its stop() reports
+/// the measured dwell for the page being left.
+private struct ForYouPagerView<Card: View>: View {
+    private static let terminalID = "for-you-pager-terminal"
+
+    let games: [FeedGame]
+    let hasMorePages: Bool
+    let isLoadingMore: Bool
+    let footerError: String?
+    let onSettled: (FeedGame) -> Void
+    let onNearEnd: () -> Void
+    let onRefresh: () -> Void
+    let onLoadMore: () -> Void
+    @ViewBuilder let card: (FeedGame) -> Card
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var settledGameID: String?
+    /// A fling can report intermediate pages through scrollPosition
+    /// before settling, so the impression waits out the same 700ms
+    /// dwell gate the preview uses: a page flung past never counts
+    /// as an impression. The task is cancelled on every new settle.
+    @State private var impressionTask: Task<Void, Never>?
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(spacing: 0) {
+                ForEach(games) { game in
+                    page(for: game)
+                        .containerRelativeFrame(.vertical)
+                        .id(game.id)
+                }
+                terminalPage
+                    .containerRelativeFrame(.vertical)
+                    .id(Self.terminalID)
+            }
+            .scrollTargetLayout()
+        }
+        .scrollTargetBehavior(.paging)
+        .scrollPosition(id: $settledGameID)
+        .scrollIndicators(.hidden)
+        .onChange(of: settledGameID) { _, newID in
+            impressionTask?.cancel()
+            impressionTask = nil
+            if newID == nil {
+                FeedPreviewPlayback.shared.stop()
+                return
+            }
+            if newID == Self.terminalID {
+                FeedPreviewPlayback.shared.stop()
+                if hasMorePages { onNearEnd() }
+                return
+            }
+            guard let game = games.first(where: { $0.id == newID }) else { return }
+            settle(to: game)
+        }
+        .onChange(of: games.map(\.id)) { _, ids in
+            // Appends keep the settled page; a replaced feed resets
+            // to its first page (which settles, with an impression).
+            if let current = settledGameID, ids.contains(current) { return }
+            if let firstID = ids.first, let game = games.first(where: { $0.id == firstID }) {
+                settledGameID = game.id
+            } else {
+                settledGameID = nil
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { resumeSettledPreview() }
+            else { FeedPreviewPlayback.shared.stop() }
+        }
+        .onAppear {
+            if settledGameID != nil {
+                // Returning to the pager (e.g. tab switch): resume the
+                // preview without re-reporting the impression.
+                resumeSettledPreview()
+            } else if let game = games.first {
+                settledGameID = game.id
+            }
+        }
+        .onDisappear {
+            impressionTask?.cancel()
+            impressionTask = nil
+            FeedPreviewPlayback.shared.stop()
+        }
+    }
+
+    private func page(for game: FeedGame) -> some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            card(game)
+                .frame(maxWidth: horizontalSizeClass == .regular ? HephaestusDesign.pagerMaxWidth : .infinity)
+                .padding(.horizontal, horizontalSizeClass == .regular ? 0 : 16)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(HephaestusDesign.pageBackground)
+    }
+
+    private var terminalPage: some View {
+        VStack(spacing: 12) {
+            if hasMorePages {
+                if isLoadingMore {
+                    ProgressView("Loading more games…")
+                } else {
+                    Button("Load more games", action: onLoadMore)
+                        .buttonStyle(.bordered)
+                }
+                if let footerError {
+                    Label(footerError, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+            } else {
+                Image(systemName: "checkmark.circle")
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                Text("You're all caught up")
+                    .font(.headline)
+                Text("You've reached the end of For You.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Button("Refresh", action: onRefresh)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(HephaestusDesign.pageBackground)
+        .padding(.horizontal, 16)
+    }
+
+    /// The settled page takes over: the previous clip stops (which
+    /// reports its measured dwell), the new clip schedules, and
+    /// prefetch runs when the settled page is near the end. The
+    /// impression waits out the dwell gate (see impressionTask) so
+    /// a page flung past is never counted.
+    private func settle(to game: FeedGame) {
+        FeedPreviewPlayback.shared.stop()
+        if !reduceMotion {
+            FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
+        }
+        impressionTask?.cancel()
+        impressionTask = Task {
+            do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
+            guard !Task.isCancelled else { return }
+            onSettled(game)
+        }
+        if let index = games.firstIndex(where: { $0.id == game.id }),
+           ForYouPager.shouldPrefetch(settledIndex: index, totalCount: games.count) {
+            onNearEnd()
+        }
+        if UIAccessibility.isVoiceOverRunning {
+            UIAccessibility.post(notification: .announcement, argument: game.title)
+        }
+    }
+
+    private func resumeSettledPreview() {
+        guard !reduceMotion,
+              let current = settledGameID,
+              let game = games.first(where: { $0.id == current }) else { return }
+        FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
+    }
+}
+
 // MARK: - Discover
 
 /// Backend-backed social feeds use the verified bearer session when present.
@@ -249,16 +434,138 @@ struct DiscoverView: View {
 
     var body: some View {
         NavigationStack {
+            content
+                .background(HephaestusDesign.pageBackground)
+                .navigationTitle("Discover")
+                .navigationBarTitleDisplayMode(.inline)
+                .searchable(text: $searchText, prompt: "Find a game")
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            isFeedPreferencesPresented = true
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                        }
+                        .accessibilityLabel("Tune feed recommendations")
+                    }
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            isCreatorDiscoveryPresented = true
+                        } label: {
+                            Image(systemName: "person.2")
+                        }
+                        .accessibilityLabel("Discover creators")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            Task { await load() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .accessibilityLabel("Refresh games")
+                        .disabled(isLoading)
+                    }
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase != .active { FeedPreviewPlayback.shared.stop() }
+                }
+                .onChange(of: playerRequest?.gameID) { _, gameID in
+                    if gameID != nil { FeedPreviewPlayback.shared.stop() }
+                }
+                .task {
+                    savedGameIDs = Set(UserDefaults.standard.stringArray(forKey: "hephaestus.savedGames") ?? [])
+                    await load()
+                }
+                .fullScreenCover(item: $playerRequest) { request in
+                    PixiPlayerSheet(gameID: request.gameID, title: request.title)
+                }
+                .sheet(item: $commentsGame) { game in
+                    CommentsSheet(game: game)
+                }
+                .sheet(item: $reportingGame) { game in
+                    ReportGameSheet(game: game)
+                }
+                .sheet(item: $profileRequest) { request in
+                    CreatorProfileSheet(creatorID: request.id)
+                }
+                .sheet(isPresented: $isCreatorDiscoveryPresented) {
+                    CreatorDiscoverySheet()
+                }
+                .sheet(isPresented: $isFeedPreferencesPresented) {
+                    FeedPreferencesSheet(
+                        availableTopics: availableTopics,
+                        selectedTopics: mutedTopics,
+                        onSave: { topics in saveMutedTopics(topics) },
+                        onReset: { resetFeedPreferences() }
+                    )
+                }
+        }
+    }
+
+    /// The pager replaces the card grid for For You only, and only
+    /// once games exist with no search active. Every other state
+    /// (loading, error, empty, other scopes, search) keeps the list.
+    private var pagerMode: Bool {
+        selectedFeed == .forYou
+            && searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !games.isEmpty
+    }
+
+    private var feedPicker: some View {
+        Picker("Feed", selection: $selectedFeed) {
+            ForEach(SocialFeedScope.allCases) { scope in
+                Text(scope.title).tag(scope)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel("Social feed")
+        .onChange(of: selectedFeed) { _, _ in Task { await load() } }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if pagerMode {
+            VStack(spacing: 0) {
+                feedPicker
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+                ForYouPagerView(
+                    games: games,
+                    hasMorePages: nextCursor != nil,
+                    isLoadingMore: isLoadingMore,
+                    footerError: errorMessage,
+                    onSettled: { game in
+                        Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") }
+                    },
+                    onNearEnd: { Task { await loadMore() } },
+                    onRefresh: { Task { await load() } },
+                    onLoadMore: { Task { await loadMore() } }
+                ) { game in
+                    GameFeedCard(
+                        game: game,
+                        isSaved: savedGameIDs.contains(game.id),
+                        isLiked: likedGameIDs.contains(game.id),
+                        isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
+                        canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.currentUserID,
+                        onPlay: { play(game) },
+                        onToggleSaved: { toggleSaved(game) },
+                        onToggleLike: { toggleLike(game) },
+                        onToggleFollow: { if let id = game.ownerID { Task { await toggleFollow(id) } } },
+                        onOpenComments: { commentsGame = game },
+                        onOpenCreator: { if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) } },
+                        onReport: { reportingGame = game },
+                        onBlockCreator: { if let id = game.ownerID { Task { await blockCreator(id) } } },
+                        onNotInterested: { Task { await markNotInterested(game) } },
+                        onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } },
+                        managesPreview: false
+                    )
+                }
+            }
+        } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    Picker("Feed", selection: $selectedFeed) {
-                        ForEach(SocialFeedScope.allCases) { scope in
-                            Text(scope.title).tag(scope)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .accessibilityLabel("Social feed")
-                    .onChange(of: selectedFeed) { _, _ in Task { await load() } }
+                    feedPicker
 
                     VStack(alignment: .leading, spacing: 8) {
                         Label("PLAYABLE STORIES", systemImage: "sparkles")
@@ -388,71 +695,7 @@ struct DiscoverView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 28)
             }
-            .background(HephaestusDesign.pageBackground)
-            .navigationTitle("Discover")
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Find a game")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        isFeedPreferencesPresented = true
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                    }
-                    .accessibilityLabel("Tune feed recommendations")
-                }
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        isCreatorDiscoveryPresented = true
-                    } label: {
-                        Image(systemName: "person.2")
-                    }
-                    .accessibilityLabel("Discover creators")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await load() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .accessibilityLabel("Refresh games")
-                    .disabled(isLoading)
-                }
-            }
             .refreshable { await load() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase != .active { FeedPreviewPlayback.shared.stop() }
-            }
-            .onChange(of: playerRequest?.gameID) { _, gameID in
-                if gameID != nil { FeedPreviewPlayback.shared.stop() }
-            }
-            .task {
-                savedGameIDs = Set(UserDefaults.standard.stringArray(forKey: "hephaestus.savedGames") ?? [])
-                await load()
-            }
-            .fullScreenCover(item: $playerRequest) { request in
-                PixiPlayerSheet(gameID: request.gameID, title: request.title)
-            }
-            .sheet(item: $commentsGame) { game in
-                CommentsSheet(game: game)
-            }
-            .sheet(item: $reportingGame) { game in
-                ReportGameSheet(game: game)
-            }
-            .sheet(item: $profileRequest) { request in
-                CreatorProfileSheet(creatorID: request.id)
-            }
-            .sheet(isPresented: $isCreatorDiscoveryPresented) {
-                CreatorDiscoverySheet()
-            }
-            .sheet(isPresented: $isFeedPreferencesPresented) {
-                FeedPreferencesSheet(
-                    availableTopics: availableTopics,
-                    selectedTopics: mutedTopics,
-                    onSave: { topics in saveMutedTopics(topics) },
-                    onReset: { resetFeedPreferences() }
-                )
-            }
         }
     }
 
@@ -690,6 +933,11 @@ private struct GameFeedCard: View {
     let onBlockCreator: () -> Void
     let onNotInterested: () -> Void
     let onImpression: () -> Void
+    /// When false, the pager owns preview playback and impressions: the
+    /// card renders the shared preview surface but never schedules,
+    /// stops, or reports on its own (Hephaestus #59). The grid keeps
+    /// the default true, where each card manages itself.
+    let managesPreview: Bool = true
 
     private var shareURL: URL {
         var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"), resolvingAgainstBaseURL: false)!
@@ -879,15 +1127,18 @@ private struct GameFeedCard: View {
         }
         .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 5)
         .onAppear {
+            guard managesPreview else { return }
             onImpression()
             if !reduceMotion {
                 FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
             }
         }
         .onDisappear {
+            guard managesPreview else { return }
             FeedPreviewPlayback.shared.stop(gameID: game.id)
         }
         .onChange(of: reduceMotion) { _, shouldReduceMotion in
+            guard managesPreview else { return }
             if shouldReduceMotion {
                 FeedPreviewPlayback.shared.stop(gameID: game.id)
             } else {
@@ -895,6 +1146,7 @@ private struct GameFeedCard: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
+            guard managesPreview else { return }
             if phase == .active && !reduceMotion {
                 FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
             } else if phase != .active {
