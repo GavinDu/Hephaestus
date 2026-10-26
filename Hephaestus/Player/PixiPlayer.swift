@@ -101,7 +101,8 @@ enum PlayerTelemetry {
             kind: kind,
             name: name,
             message: message,
-            logTail: tail
+            logTail: tail,
+            runId: DevLog.shared.runID
         )
         Task.detached {
             await BackendAPI.shared.postPlayerTelemetry(report)

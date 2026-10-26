@@ -14,13 +14,33 @@ import XCTest
 
 final class PlayerSmokeTests: XCTestCase {
 
+    private var app: XCUIApplication?
+
     override func setUpWithError() throws {
         continueAfterFailure = false
+    }
+
+    /// On failure, attach a screenshot of whatever the app was showing:
+    /// a render failure without a picture of what rendered is almost
+    /// unactionable for the next iteration (docs/TESTING_FRAMEWORK.md
+    /// §5.4). The success-path screenshot after boot settles stays in
+    /// the test body as the baseline. Verified by the Hephaestus CI
+    /// xcode job — this VM has no Xcode to compile Swift locally.
+    override func tearDownWithError() throws {
+        if let run = testRun, run.totalFailureCount > 0, let app {
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "player-on-failure"
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        app = nil
+        try super.tearDownWithError()
     }
 
     @MainActor
     func testDiscoverLaunchesPlayer() throws {
         let app = XCUIApplication()
+        self.app = app
         app.launch()
         print("SMOKE: app launched")
 
