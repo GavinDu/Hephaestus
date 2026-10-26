@@ -58,6 +58,13 @@ struct HephaestusTests {
         #expect(!PlayerLoadingPolicy.shouldShowOfflineOverlay(isOffline: true, isLoading: true, hasError: true))
         #expect(!PlayerLoadingPolicy.shouldShowOfflineOverlay(isOffline: false, isLoading: true, hasError: false))
     }
+    @Test func previewDwellIsMeasuredNotFixed() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        #expect(FeedPreviewDwell.dwellMS(from: start, to: start.addingTimeInterval(2.5)) == 2_500)
+        #expect(FeedPreviewDwell.dwellMS(from: start, to: start) == 0)
+        // A clock jump backwards can never produce a negative dwell.
+        #expect(FeedPreviewDwell.dwellMS(from: start, to: start.addingTimeInterval(-5)) == 0)
+    }
     @Test func gameplayTelemetryQuickExitThresholdIsBounded() {
         #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 0))
         #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 4_999))
