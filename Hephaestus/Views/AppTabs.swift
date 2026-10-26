@@ -491,7 +491,7 @@ struct DiscoverView: View {
                     onPlayAgain: {
                         DispatchQueue.main.async { play(game) }
                     },
-                    onNextGame: { advanceToNextGame(after: game) },
+                    onNextGame: { Task { await advanceToNextGame(after: game) } },
                     onToggleLike: { toggleLike(game) }
                 )
             }
@@ -523,9 +523,15 @@ struct DiscoverView: View {
         playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
     }
 
-    private func advanceToNextGame(after game: FeedGame) {
-        guard let index = visibleGames.firstIndex(where: { $0.id == game.id }),
-              visibleGames.indices.contains(index + 1) else {
+    private func advanceToNextGame(after game: FeedGame) async {
+        guard let index = visibleGames.firstIndex(where: { $0.id == game.id }) else {
+            resultGame = nil
+            return
+        }
+        if !visibleGames.indices.contains(index + 1), nextCursor != nil {
+            await loadMore()
+        }
+        guard visibleGames.indices.contains(index + 1) else {
             resultGame = nil
             return
         }
@@ -596,6 +602,7 @@ struct DiscoverView: View {
         do {
             try await BackendAPI.shared.blockCreator(creatorID, blocked: true)
             games.removeAll { $0.ownerID == creatorID }
+            repairPagerSelection()
         } catch { errorMessage = "Couldn't block creator: \(error.localizedDescription)" }
     }
 
@@ -603,7 +610,14 @@ struct DiscoverView: View {
         do {
             try await BackendAPI.shared.markNotInterested(gameID: game.id)
             games.removeAll { $0.id == game.id }
+            repairPagerSelection()
         } catch { errorMessage = "Couldn't save feedback: \(error.localizedDescription)" }
+    }
+
+    private func repairPagerSelection() {
+        guard selectedFeed == .forYou else { return }
+        if let settledForYouGameID, games.contains(where: { $0.id == settledForYouGameID }) { return }
+        settledForYouGameID = games.first?.id
     }
 
     private func saveMutedTopics(_ topics: [String]) {
@@ -641,6 +655,7 @@ struct DiscoverView: View {
             guard generation == loadGeneration else { return }
             games = loadedGames.games
             nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
+            repairPagerSelection()
             let hasServerViewerState = loadedGames.games.contains {
                 $0.viewerLiked != nil || $0.viewerSaved != nil || $0.viewerFollowing != nil
             }
