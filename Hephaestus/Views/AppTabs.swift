@@ -863,11 +863,11 @@ private struct GameFeedCard: View {
                 FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.powerStateDidChangeNotification)) { _ in
-            if ProcessInfo.processInfo.isLowPowerModeEnabled {
-                FeedPreviewPlayback.shared.stop(gameID: game.id)
-            } else if !reduceMotion {
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && !reduceMotion {
                 FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
+            } else if phase != .active {
+                FeedPreviewPlayback.shared.stop(gameID: game.id)
             }
         }
     }
