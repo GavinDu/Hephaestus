@@ -649,6 +649,7 @@ private struct GameFeedCardSkeleton: View {
 
 private struct GameFeedCard: View {
     @ScaledMetric(relativeTo: .largeTitle) private var coverHeight: CGFloat = 220
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var previewPlayback = FeedPreviewPlayback.shared
     let game: FeedGame
