@@ -38,6 +38,16 @@ Build the sheet in two stages, and do not blur them:
 
 ### Stage 1 (implementable now, no backend or runtime change)
 
+> Implementation note (2026-10-26): Stage 1 shipped as
+> `PostRunSheet` in `Hephaestus/Views/AppTabs.swift`, triggered by
+> the player sheet's session-end callback with
+> `PostRunSheetPolicy` (the complement of the quick-exit
+> boundary). It ships Play again, Next game, and Like. Remix is
+> deferred: no Create entry point seeds a remix from an existing
+> game yet (`publishPost` accepts `remix_parent_id`, but nothing
+> in the app sets it), so a Remix button would have nowhere
+> honest to go. It lands when a Create remix entry lands.
+
 A sheet offered when the player closes after a real session — not
 after every open, and not per run:
 
