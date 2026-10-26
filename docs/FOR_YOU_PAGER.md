@@ -1,5 +1,9 @@
 # For You pager design (Hephaestus #59)
 
+Status: approved by Gavin 2026-10-26; implemented in `ForYouPagerView`
+(`Hephaestus/Views/AppTabs.swift`, For You scope only, card grid kept
+for other scopes and search).
+
 Design proposal for the full-screen vertical pager for the For You feed.
 This document is the design step; implementation follows after review.
 It does not change any code.
