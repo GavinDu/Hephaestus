@@ -68,6 +68,45 @@ enum GameplayTelemetryPolicy {
     }
 }
 
+/// Maps a WKWebView load failure to the player-facing error state
+/// (Hephaestus #53). Two rules, both fail-closed:
+///   - the UI shows only a fixed message per category, never the raw
+///     localizedDescription: that string can carry URLs, hostnames, and
+///     backend detail the player has no use for;
+///   - the raw error still goes to DevLog and telemetry, so the detail
+///     is not lost, it is just not shown.
+/// Network failures get a retry-first message; anything else gets the
+/// generic message. Both states offer Retry and Return to feed, so a
+/// failed load never leaves a blank player with no next action.
+enum PlayerLoadFailure {
+    enum Category { case network, unknown }
+
+    static func category(for error: Error) -> Category {
+        let ns = error as NSError
+        guard ns.domain == NSURLErrorDomain else { return .unknown }
+        switch ns.code {
+        case NSURLErrorNotConnectedToInternet,
+             NSURLErrorTimedOut,
+             NSURLErrorNetworkConnectionLost,
+             NSURLErrorCannotFindHost,
+             NSURLErrorCannotConnectToHost,
+             NSURLErrorDNSLookupFailed:
+            return .network
+        default:
+            return .unknown
+        }
+    }
+
+    static func userMessage(for error: Error) -> String {
+        switch category(for: error) {
+        case .network:
+            return "Check your connection and try again."
+        case .unknown:
+            return "The player couldn't load this game."
+        }
+    }
+}
+
 /// Keeps transient network state from covering a game that has already loaded.
 enum PlayerLoadingPolicy {
     static func shouldShowOfflineOverlay(isOffline: Bool, isLoading: Bool, hasError: Bool) -> Bool {
@@ -307,9 +346,12 @@ struct PixiPlayerSheet: View {
                                 didTrackGameplayStart = true
                             }
                         },
-                        onLoadFail: { message in
+                        onLoadFail: { error in
                             isLoading = false
-                            loadError = message
+                            // Raw detail goes to DevLog/telemetry;
+                            // the card shows only the mapped message.
+                            loadError = PlayerLoadFailure.userMessage(for: error)
+                            let message = error.localizedDescription
                             DevLog.error(.player, "player load failed for \(gameID): \(message)")
                             PlayerTelemetry.report(gameID: gameID, kind: "ios-load-failed",
                                                    name: "LoadFailed", message: message)
@@ -389,7 +431,7 @@ struct PixiPlayerSheet: View {
 
                 if let loadError {
                     VStack(spacing: 14) {
-                        Image(systemName: "wifi.exclamationmark")
+                        Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 40))
                             .foregroundStyle(.secondary)
                         Text("Couldn't load the player")
@@ -410,11 +452,15 @@ struct PixiPlayerSheet: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                        Button("Return to feed") { dismiss() }
+                            .frame(minHeight: HephaestusDesign.minimumActionHeight)
                     }
                     .padding(24)
                     .frame(maxWidth: 360)
                     .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous).strokeBorder(HephaestusDesign.subtleBorder, lineWidth: 1))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.background)
                 }
             }
             .navigationTitle(title)
@@ -549,7 +595,7 @@ private struct PlayerWebView: UIViewRepresentable {
     let url: URL
     let onProgress: (Double) -> Void
     let onLoadFinish: () -> Void
-    let onLoadFail: (String) -> Void
+    let onLoadFail: (Error) -> Void
     let onTerminate: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -588,13 +634,13 @@ private struct PlayerWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         let onProgress: (Double) -> Void
         let onLoadFinish: () -> Void
-        let onLoadFail: (String) -> Void
+        let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
         private var progressObservation: NSKeyValueObservation?
 
         init(onProgress: @escaping (Double) -> Void,
              onLoadFinish: @escaping () -> Void,
-             onLoadFail: @escaping (String) -> Void,
+             onLoadFail: @escaping (Error) -> Void,
              onTerminate: @escaping () -> Void) {
             self.onProgress = onProgress
             self.onLoadFinish = onLoadFinish
@@ -623,11 +669,11 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            onLoadFail(error.localizedDescription)
+            onLoadFail(error)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            onLoadFail(error.localizedDescription)
+            onLoadFail(error)
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {

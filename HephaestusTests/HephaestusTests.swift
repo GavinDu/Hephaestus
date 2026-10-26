@@ -58,6 +58,19 @@ struct HephaestusTests {
         #expect(!PlayerLoadingPolicy.shouldShowOfflineOverlay(isOffline: true, isLoading: true, hasError: true))
         #expect(!PlayerLoadingPolicy.shouldShowOfflineOverlay(isOffline: false, isLoading: true, hasError: false))
     }
+    @Test func playerLoadFailureMapsToFixedMessages() {
+        let offline = NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet, userInfo: [NSLocalizedDescriptionKey: "The Internet connection appears to be offline. https://example.test/player"])
+        #expect(PlayerLoadFailure.category(for: offline) == .network)
+        #expect(PlayerLoadFailure.userMessage(for: offline) == "Check your connection and try again.")
+        // The raw detail (including the URL) must never reach the UI string.
+        #expect(!PlayerLoadFailure.userMessage(for: offline).contains("example.test"))
+        let timedOut = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut, userInfo: nil)
+        #expect(PlayerLoadFailure.category(for: timedOut) == .network)
+        let other = NSError(domain: "SomeOtherDomain", code: 42, userInfo: [NSLocalizedDescriptionKey: "internal backend detail"])
+        #expect(PlayerLoadFailure.category(for: other) == .unknown)
+        #expect(PlayerLoadFailure.userMessage(for: other) == "The player couldn't load this game.")
+        #expect(!PlayerLoadFailure.userMessage(for: other).contains("internal backend detail"))
+    }
     @Test func gameplayTelemetryQuickExitThresholdIsBounded() {
         #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 0))
         #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 4_999))
