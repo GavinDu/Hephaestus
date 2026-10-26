@@ -78,6 +78,14 @@ struct HephaestusTests {
         // A clock jump backwards can never produce a negative dwell.
         #expect(FeedPreviewDwell.dwellMS(from: start, to: start.addingTimeInterval(-5)) == 0)
     }
+    @Test func postRunSheetShowsOnlyAfterRealSession() {
+        #expect(!PostRunSheetPolicy.shouldShow(durationMS: 0))
+        #expect(!PostRunSheetPolicy.shouldShow(durationMS: 4_999))
+        #expect(PostRunSheetPolicy.shouldShow(durationMS: 5_000))
+        #expect(PostRunSheetPolicy.shouldShow(durationMS: 12_000))
+        #expect(!PostRunSheetPolicy.shouldShow(durationMS: -1))
+    }
+
     @Test func gameplayTelemetryQuickExitThresholdIsBounded() {
         #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 0))
         #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 4_999))
