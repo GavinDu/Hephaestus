@@ -28,8 +28,8 @@ struct PixiPlayerRequest: Identifiable {
     /// Tap time for the #58 tap-to-nav-ready measurement, and the
     /// poster URL for the hold frame. Nil for entry points that do
     /// not set them: those plays keep today's behavior.
-    let tappedAt: Date? = nil
-    let posterURL: String? = nil
+    var tappedAt: Date? = nil
+    var posterURL: String? = nil
 }
 
 // MARK: - Quality (performance control)
@@ -313,9 +313,9 @@ struct PixiPlayerSheet: View {
     /// A video clip frame is deliberately NOT snapshotted: video
     /// layers render black into image contexts, so the poster is the
     /// honest hold frame the shell can offer today.
-    let holdPosterURL: String? = nil
+    var holdPosterURL: String? = nil
     /// Tap time for the tap-to-nav-ready measurement. Nil skips it.
-    let tappedAt: Date? = nil
+    var tappedAt: Date? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
