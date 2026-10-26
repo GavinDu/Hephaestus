@@ -708,16 +708,15 @@ private struct SocialFeedUnavailableView: View {
     }
 }
 
-/// A game-first social card. Until the API returns real preview assets and creator
-/// metadata, the cover is a branded visual rather than fabricated artwork.
 /// Post-run sheet trigger policy (Hephaestus #60, Stage 1). The sheet
-/// appears only after a real session: the complement of the
-/// quick-exit boundary, so a bounce never gets a sheet. Error closes
+/// appears only after a real session of at least the quick-exit
+/// threshold: a bounce never gets a sheet, and neither does a
+/// negative duration, which is not a session at all. Error closes
 /// never reach this policy — a session that never started reports no
 /// duration at all.
 enum PostRunSheetPolicy {
     static func shouldShow(durationMS: Int) -> Bool {
-        !GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: durationMS)
+        durationMS >= GameplayTelemetryPolicy.quickExitThresholdMS
     }
 }
 
@@ -775,6 +774,8 @@ private struct PostRunSheet: View {
     }
 }
 
+/// A game-first social card. Until the API returns real preview assets and creator
+/// metadata, the cover is a branded visual rather than fabricated artwork.
 private struct GameFeedCardSkeleton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
