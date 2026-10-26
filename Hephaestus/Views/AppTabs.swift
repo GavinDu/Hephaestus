@@ -253,11 +253,11 @@ private struct ForYouPagerView<Card: View>: View {
             LazyVStack(spacing: 0) {
                 ForEach(games) { game in
                     page(for: game)
-                        .containerRelativeFrame(.vertical)
+                        .containerRelativeFrame(.vertical, count: 1, spacing: 0)
                         .id(game.id)
                 }
                 terminalPage
-                    .containerRelativeFrame(.vertical)
+                    .containerRelativeFrame(.vertical, count: 1, spacing: 0)
                     .id(Self.terminalID)
             }
             .scrollTargetLayout()
