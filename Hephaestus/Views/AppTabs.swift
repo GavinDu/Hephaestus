@@ -1844,6 +1844,20 @@ struct ProfileView: View {
                     ShareLink(item: DevLog.shared.exportText()) {
                         Text("Share session log")
                     }
+                    // Test-feedback export (docs/TESTING_FRAMEWORK.md §6):
+                    // the structured JSON twin of the text log, for the
+                    // AI coding feedback loop. Sharing it files the
+                    // current session as a test-feedback artifact input:
+                    // DevLog JSON (with run_id when a test run set one)
+                    // plus the session header. Verified by the CI xcode
+                    // job — see the repo's verification route.
+                    Button("Copy test feedback (JSON)") {
+                        UIPasteboard.general.string = DevLog.shared.exportJSON() ?? "test feedback unavailable"
+                        DevLog.info(.app, "test feedback JSON copied")
+                    }
+                    ShareLink(item: DevLog.shared.exportJSON() ?? "test feedback unavailable") {
+                        Text("Share test feedback (JSON)")
+                    }
                     Button("Clear log", role: .destructive) {
                         DevLog.shared.clear()
                         logEntries = DevLog.shared.count
