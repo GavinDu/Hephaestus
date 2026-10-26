@@ -874,7 +874,7 @@ private struct GameFeedCard: View {
         .background(HephaestusDesign.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: HephaestusDesign.cardRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: HephaestusDesign.cardRadius, style: .continuous)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 5)
