@@ -213,6 +213,12 @@ struct DiscoverView: View {
     @State private var selectedFeed: SocialFeedScope = .forYou
     @State private var games: [FeedGame] = []
     @State private var playerRequest: PixiPlayerRequest?
+    /// Post-run actions sheet (Hephaestus #60, Stage 1). Set from the
+    /// player sheet's session-end callback, only for real sessions.
+    @State private var resultSheetGame: FeedGame?
+    /// Play requested from the result sheet: applied after the sheet
+    /// dismisses, so two presentations never overlap.
+    @State private var pendingPostRunPlay: FeedGame?
     @State private var errorMessage: String?
     @State private var isLoading = false
     @State private var searchText = ""
@@ -431,7 +437,56 @@ struct DiscoverView: View {
                 await load()
             }
             .fullScreenCover(item: $playerRequest) { request in
-                PixiPlayerSheet(gameID: request.gameID, title: request.title)
+                PixiPlayerSheet(
+                    gameID: request.gameID,
+                    title: request.title,
+                    onSessionEnd: { durationMS in
+                        // Stage 1 trigger: a real session, not a
+                        // bounce and not an error close (which never
+                        // starts a session). The sheet appears after
+                        // the player dismisses; if another player
+                        // opened meanwhile, it is skipped.
+                        guard PostRunSheetPolicy.shouldShow(durationMS: durationMS),
+                              playerRequest == nil,
+                              let game = games.first(where: { $0.id == request.gameID }) else { return }
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(500))
+                            if playerRequest == nil {
+                                resultSheetGame = game
+                            }
+                        }
+                    }
+                )
+            }
+            .onChange(of: resultSheetGame) { _, newValue in
+                if newValue == nil, let pending = pendingPostRunPlay {
+                    pendingPostRunPlay = nil
+                    // Wait out the sheet dismissal before presenting
+                    // the player, or the cover can be swallowed by
+                    // the in-flight dismissal.
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(500))
+                        if resultSheetGame == nil, playerRequest == nil {
+                            play(pending)
+                        }
+                    }
+                }
+            }
+            .sheet(item: $resultSheetGame) { game in
+                PostRunSheet(
+                    game: game,
+                    nextGame: nextGame(after: game),
+                    isLiked: likedGameIDs.contains(game.id),
+                    onPlayAgain: {
+                        pendingPostRunPlay = game
+                        resultSheetGame = nil
+                    },
+                    onNextGame: { next in
+                        pendingPostRunPlay = next
+                        resultSheetGame = nil
+                    },
+                    onToggleLike: { toggleLike(game) }
+                )
             }
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
@@ -459,6 +514,16 @@ struct DiscoverView: View {
     private func play(_ game: FeedGame) {
         RecentGames.record(gameID: game.id, title: game.title)
         playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
+    }
+
+    /// Next game in current feed order after the given one, for the
+    /// post-run sheet's Next action. Nil when the game is last or
+    /// no longer in the feed — the sheet then omits Next rather
+    /// than looping silently.
+    private func nextGame(after game: FeedGame) -> FeedGame? {
+        guard let index = games.firstIndex(where: { $0.id == game.id }),
+              index + 1 < games.count else { return nil }
+        return games[index + 1]
     }
 
     private func loadMore() async {
@@ -641,6 +706,71 @@ private struct SocialFeedUnavailableView: View {
 
 /// A game-first social card. Until the API returns real preview assets and creator
 /// metadata, the cover is a branded visual rather than fabricated artwork.
+/// Post-run sheet trigger policy (Hephaestus #60, Stage 1). The sheet
+/// appears only after a real session: the complement of the
+/// quick-exit boundary, so a bounce never gets a sheet. Error closes
+/// never reach this policy — a session that never started reports no
+/// duration at all.
+enum PostRunSheetPolicy {
+    static func shouldShow(durationMS: Int) -> Bool {
+        !GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: durationMS)
+    }
+}
+
+/// Post-run actions sheet (Hephaestus #60, Stage 1). Deliberately an
+/// actions sheet, not a result display: the shell cannot observe a
+/// run's outcome, and the game already shows its result in-canvas.
+/// The heading is neutral for exactly that reason — it never claims
+/// a win or a score. Remix is deferred: no Create entry point seeds
+/// a remix from an existing game yet.
+private struct PostRunSheet: View {
+    let game: FeedGame
+    let nextGame: FeedGame?
+    let isLiked: Bool
+    let onPlayAgain: () -> Void
+    let onNextGame: (FeedGame) -> Void
+    let onToggleLike: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text(game.title)
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
+                Text("Thanks for playing")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Button(action: onPlayAgain) {
+                    Label("Play again", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                if let nextGame {
+                    Button(action: { onNextGame(nextGame) }) {
+                        Label("Next game: \(nextGame.title)", systemImage: "forward.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                Button(action: onToggleLike) {
+                    Label(isLiked ? "Liked" : "Like", systemImage: isLiked ? "heart.fill" : "heart")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                Button("Done", role: .cancel) { dismiss() }
+                    .frame(maxWidth: .infinity)
+            }
+            .padding()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
 private struct GameFeedCardSkeleton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
