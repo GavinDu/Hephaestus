@@ -163,3 +163,12 @@ struct HephaestusTests {
     #expect(legacy.games.first?.previewPosterURL == nil)
     #expect(legacy.games.first?.viewerSaved == nil)
 }
+
+
+@Test func feedPreviewAutoplayRespectsMotionPowerAndNetworkPolicies() {
+    #expect(FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: false, constrainedNetwork: false))
+    #expect(!FeedPreviewPolicy.shouldAutoplay(hasClip: false, reduceMotion: false, lowPowerMode: false, constrainedNetwork: false))
+    #expect(!FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: true, lowPowerMode: false, constrainedNetwork: false))
+    #expect(!FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: true, constrainedNetwork: false))
+    #expect(!FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: false, constrainedNetwork: true))
+}

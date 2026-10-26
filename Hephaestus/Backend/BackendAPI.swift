@@ -375,7 +375,7 @@ final class BackendAPI: ObservableObject {
         var external_contact_configured: Bool
     }
     private struct ModerationAppealBody: Encodable { var reason: String }
-    private struct EventBody: Encodable { var event_id: String; var game_id: String; var kind: String; var duration_ms: Int; var expected_duration_ms: Int }
+    private struct EventBody: Encodable { var event_id: String; var game_id: String; var kind: String; var duration_ms: Int; var expected_duration_ms: Int; var preview_dwell_ms: Int = 0; var time_to_interactive_ms: Int = 0; var time_to_first_input_ms: Int = 0; var frame_time_p95_ms: Int = 0; var frame_time_avg_ms: Int = 0; var frame_count: Int = 0 }
 
     func fetchFeed(scope: SocialFeedScope = .forYou, cursor: String? = nil) async throws -> FeedResponse {
         var path = "v1/feed?scope=\(scope.rawValue)&limit=20"
@@ -489,9 +489,9 @@ final class BackendAPI: ObservableObject {
         let _: ActionResponse = try await send(ActionResponse.self, req)
     }
 
-    func trackSocialEvent(gameID: String, kind: String, durationMS: Int = 0, expectedMS: Int = 0, eventID: String = UUID().uuidString) async {
+    func trackSocialEvent(gameID: String, kind: String, durationMS: Int = 0, expectedMS: Int = 0, previewDwellMS: Int = 0, timeToInteractiveMS: Int = 0, timeToFirstInputMS: Int = 0, frameTimeP95MS: Int = 0, frameTimeAvgMS: Int = 0, frameCount: Int = 0, eventID: String = UUID().uuidString) async {
         guard let req = try? makeRequest("v1/telemetry/social-event", method: "POST",
-                                         body: EventBody(event_id: eventID, game_id: gameID, kind: kind, duration_ms: durationMS, expected_duration_ms: expectedMS)) else { return }
+                                         body: EventBody(event_id: eventID, game_id: gameID, kind: kind, duration_ms: durationMS, expected_duration_ms: expectedMS, preview_dwell_ms: previewDwellMS, time_to_interactive_ms: timeToInteractiveMS, time_to_first_input_ms: timeToFirstInputMS, frame_time_p95_ms: frameTimeP95MS, frame_time_avg_ms: frameTimeAvgMS, frame_count: frameCount)) else { return }
         _ = try? await session.data(for: req)
     }
 
