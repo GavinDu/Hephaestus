@@ -939,7 +939,10 @@ private struct GameFeedCard: View {
     /// card renders the shared preview surface but never schedules,
     /// stops, or reports on its own (Hephaestus #59). The grid keeps
     /// the default true, where each card manages itself.
-    let managesPreview: Bool = true
+    // var, not let: a defaulted let is not a memberwise-init parameter
+    // in this project (Swift 5.0 language mode), so the pager call
+    // site fails with "extra argument".
+    var managesPreview: Bool = true
 
     private var shareURL: URL {
         var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"), resolvingAgainstBaseURL: false)!
