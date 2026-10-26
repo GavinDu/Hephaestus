@@ -78,6 +78,13 @@ struct HephaestusTests {
         // A clock jump backwards can never produce a negative dwell.
         #expect(FeedPreviewDwell.dwellMS(from: start, to: start.addingTimeInterval(-5)) == 0)
     }
+    @Test func forYouPagerPrefetchesWithinTwoPagesOfEnd() {
+        #expect(ForYouPager.shouldPrefetch(settledIndex: 8, totalCount: 10))
+        #expect(ForYouPager.shouldPrefetch(settledIndex: 9, totalCount: 10))
+        #expect(!ForYouPager.shouldPrefetch(settledIndex: 7, totalCount: 10))
+        #expect(!ForYouPager.shouldPrefetch(settledIndex: 0, totalCount: 0))
+    }
+
     @Test func gameplayTelemetryQuickExitThresholdIsBounded() {
         #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 0))
         #expect(GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 4_999))
