@@ -226,7 +226,9 @@ enum ForYouPager {
 /// Power Mode and constrained-network stops, and its stop() reports
 /// the measured dwell for the page being left.
 private struct ForYouPagerView<Card: View>: View {
-    private static let terminalID = "for-you-pager-terminal"
+    // Static *stored* properties are not supported in generic types, so
+    // this is a computed property: same value, same call sites.
+    private static var terminalID: String { "for-you-pager-terminal" }
 
     let games: [FeedGame]
     let hasMorePages: Bool
