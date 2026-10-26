@@ -302,6 +302,12 @@ private struct PlayerStateCard<Content: View>: View {
 struct PixiPlayerSheet: View {
     let gameID: String
     let title: String
+    /// Called on dismiss with the played session length in ms, when a
+    /// session started (i.e. the player loaded). Nil by default: other
+    /// entry points keep today's behavior. DiscoverView uses it for
+    /// the post-run actions sheet (Hephaestus #60, Stage 1); the
+    /// quick-exit event above is untouched.
+    let onSessionEnd: ((Int) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var wasBackgrounded = false
@@ -597,6 +603,7 @@ struct PixiPlayerSheet: View {
                         )
                     }
                 }
+                onSessionEnd?(durationMS)
                 gameplayStartedAt = nil
             }
         }
