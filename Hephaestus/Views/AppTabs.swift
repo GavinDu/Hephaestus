@@ -458,8 +458,12 @@ struct DiscoverView: View {
                     }
                 )
             }
-            .onChange(of: resultSheetGame) { _, newValue in
-                if newValue == nil, let pending = pendingPostRunPlay {
+            // onChange needs an Equatable value and FeedGame is
+            // not Equatable, so watch its id: the handler only acts
+            // when the sheet is gone, so id changes between games
+            // are harmless no-ops here.
+            .onChange(of: resultSheetGame?.id) { _, _ in
+                if resultSheetGame == nil, let pending = pendingPostRunPlay {
                     pendingPostRunPlay = nil
                     // Wait out the sheet dismissal before presenting
                     // the player, or the cover can be swallowed by
