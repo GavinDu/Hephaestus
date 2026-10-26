@@ -18,6 +18,9 @@ enum HephaestusDesign {
     static let horizontalInset: CGFloat = 16
     static let sectionSpacing: CGFloat = 16
     static let minimumActionHeight: CGFloat = 44
+    static let cardPadding: CGFloat = 24
+    static let stateCardMaxWidth: CGFloat = 360
+    static let stateIconSize: CGFloat = 40
     static let subtleBorder = Color(uiColor: .separator).opacity(0.18)
 }
 
