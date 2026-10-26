@@ -25,6 +25,11 @@ struct PixiPlayerRequest: Identifiable {
     let id = UUID()
     let gameID: String
     let title: String
+    /// Tap time for the #58 tap-to-nav-ready measurement, and the
+    /// poster URL for the hold frame. Nil for entry points that do
+    /// not set them: those plays keep today's behavior.
+    let tappedAt: Date? = nil
+    let posterURL: String? = nil
 }
 
 // MARK: - Quality (performance control)
@@ -302,8 +307,24 @@ private struct PlayerStateCard<Content: View>: View {
 struct PixiPlayerSheet: View {
     let gameID: String
     let title: String
+    /// Hold frame for the #58 handoff: the feed poster's URL. While
+    /// set and not yet faded, the poster covers the web view so Play
+    /// never flashes a blank sheet. Nil keeps today's loading card.
+    /// A video clip frame is deliberately NOT snapshotted: video
+    /// layers render black into image contexts, so the poster is the
+    /// honest hold frame the shell can offer today.
+    let holdPosterURL: String? = nil
+    /// Tap time for the tap-to-nav-ready measurement. Nil skips it.
+    let tappedAt: Date? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Handoff state (#58): the hold fades out once, on the first
+    /// navigation finish. Reloads and retries never re-show it.
+    @State private var holdOpacity = 1.0
+    @State private var holdVisible = true
+    @State private var prewarmHit = false
+    @State private var didReportHandoff = false
     @State private var wasBackgrounded = false
     @State private var isLoading = true
     @State private var loadError: String?
@@ -352,6 +373,7 @@ struct PixiPlayerSheet: View {
                 if let url = playerURL {
                     PlayerWebView(
                         url: url,
+                        onPrewarmHit: { prewarmHit = true },
                         onProgress: { progress = $0 },
                         onLoadFinish: {
                             isLoading = false
@@ -368,9 +390,36 @@ struct PixiPlayerSheet: View {
                                 gameplayStartedAt = Date()
                                 didTrackGameplayStart = true
                             }
+                            // #58 handoff, once: tap-to-nav-ready is tap time
+                            // to navigation finish (the shell definition
+                            // Gavin confirmed), and the hold poster fades
+                            // out over the live web view. Reloads skip
+                            // both: the hold is already gone by then.
+                            if !didReportHandoff {
+                                didReportHandoff = true
+                                if let tappedAt {
+                                    let ms = max(0, Int(Date().timeIntervalSince(tappedAt) * 1000))
+                                    PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "TapToNavReady",
+                                                           message: "tap-to-nav-ready in \(ms)ms prewarmHit=\(prewarmHit) quality=\(effectiveQuality)")
+                                }
+                                if holdPosterURL != nil, holdVisible {
+                                    if reduceMotion {
+                                        holdOpacity = 0
+                                        holdVisible = false
+                                    } else {
+                                        withAnimation(.easeOut(duration: 0.25)) { holdOpacity = 0 }
+                                        Task {
+                                            try? await Task.sleep(for: .milliseconds(300))
+                                            holdVisible = false
+                                        }
+                                    }
+                                }
+                            }
                         },
                         onLoadFail: { error in
                             isLoading = false
+                            holdOpacity = 0
+                            holdVisible = false
                             // Raw detail goes to DevLog/telemetry;
                             // the card shows only the mapped message.
                             loadError = PlayerLoadFailure.userMessage(for: error)
@@ -409,7 +458,46 @@ struct PixiPlayerSheet: View {
                     .ignoresSafeArea(edges: .bottom)
                 }
 
-                if isLoading && loadError == nil {
+                // #58 hold frame: the poster covers the web view until
+                // the first navigation finish fades it out. A failed
+                // poster load falls back to black, never to a white
+                // flash; a missing poster URL means no hold at all.
+                if let holdPosterURL, holdVisible, let holdURL = URL(string: holdPosterURL) {
+                    AsyncImage(url: holdURL) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Color.black
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .opacity(holdOpacity)
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
+                }
+
+                if isLoading && loadError == nil, !prewarmHit {
+                    if holdPosterURL != nil, holdVisible {
+                        // Indicator over the snapshot, not over a blank
+                        // sheet: a compact overlay, since PlayerStateCard
+                        // paints its own full-screen background.
+                        VStack(spacing: 12) {
+                            ProgressView(value: progress)
+                                .progressViewStyle(.linear)
+                                .frame(width: 180)
+                            Text("Loading \(title)…")
+                                .font(.subheadline)
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
+                            if showSlowHint {
+                                Text("Still loading — the connection may be slow.")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.85))
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
                     PlayerStateCard {
                         VStack(spacing: 12) {
                             ProgressView(value: progress)
@@ -424,6 +512,7 @@ struct PixiPlayerSheet: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                    }
                     }
                 }
 
@@ -611,6 +700,9 @@ private struct PlayerWebView: UIViewRepresentable {
     let onLoadFinish: () -> Void
     let onLoadFail: (Error) -> Void
     let onTerminate: () -> Void
+    /// Fires when take() returned an already-finished prewarmed
+    /// navigation, before onLoadFinish is delivered after mount.
+    let onPrewarmHit: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onProgress: onProgress, onLoadFinish: onLoadFinish,
@@ -627,6 +719,7 @@ private struct PlayerWebView: UIViewRepresentable {
         } else if handoff.didFinish {
             // A prewarmed navigation may have finished before the sheet
             // attached its delegate. Deliver readiness after the view mounts.
+            onPrewarmHit()
             DispatchQueue.main.async {
                 context.coordinator.onProgress(1)
                 context.coordinator.onLoadFinish()
