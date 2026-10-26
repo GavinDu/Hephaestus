@@ -88,6 +88,18 @@ jobs:
           # noise, not signal.
           set -o pipefail
           xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus -destination "platform=iOS Simulator,id=$UDID" -only-testing:HephaestusUITests/PlayerSmokeTests -parallel-testing-enabled NO -resultBundlePath /tmp/smoke.xcresult CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/smoke.log
+      # Phase 2b producer: turn the smoke run into a test-feedback.json
+      # artifact for the AI coding feedback loop. Advisory only — it
+      # never fails this job (the script exits 0 even when it cannot
+      # parse the log, emitting a skip case instead), and the smoke
+      # test's own verdict remains the gate.
+      - name: Build test-feedback artifact
+        if: always()
+        run: |
+          python3 tools/test-feedback/xcresult-to-feedback.py \
+            --log /tmp/smoke.log --out /tmp/test-feedback.json \
+            --run-id "smoke-${{ github.run_id }}-${{ github.run_attempt }}" \
+            --commit "${{ github.sha }}" || true
       - name: Upload smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -96,4 +108,5 @@ jobs:
           path: |
             /tmp/smoke.log
             /tmp/smoke.xcresult
+            /tmp/test-feedback.json
           if-no-files-found: ignore
