@@ -837,6 +837,13 @@ private struct GameFeedCard: View {
                 )
             }
             .buttonStyle(.plain)
+            // A simultaneous zero-distance drag starts warming on finger-down
+            // without stealing the Button tap or changing its accessibility.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0).onChanged { _ in
+                    PlayerWebViewPool.prewarm(gameID: game.id)
+                }
+            )
             .accessibilityIdentifier("game.play")
             .accessibilityHint("Opens this game in the player")
             .padding(14)
