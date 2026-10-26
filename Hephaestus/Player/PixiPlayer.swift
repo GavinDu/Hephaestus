@@ -346,6 +346,10 @@ struct PixiPlayerSheet: View {
         return components?.url ?? BackendConfig.baseURL
     }
 
+    private func finishToFeed() {
+        if didTrackGameplayStart { onFinish() }
+        dismiss()
+    }
 
     var body: some View {
         NavigationStack {
@@ -473,8 +477,7 @@ struct PixiPlayerSheet: View {
                             .buttonStyle(.borderedProminent)
                             .frame(minHeight: HephaestusDesign.minimumActionHeight)
                     Button("Return to feed") {
-                        onFinish()
-                        dismiss()
+                        finishToFeed()
                     }
                                 .frame(minHeight: HephaestusDesign.minimumActionHeight)
                         }
@@ -486,8 +489,7 @@ struct PixiPlayerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
-                        onFinish()
-                        dismiss()
+                        finishToFeed()
                     }
                         .frame(minHeight: HephaestusDesign.minimumActionHeight)
                 }
