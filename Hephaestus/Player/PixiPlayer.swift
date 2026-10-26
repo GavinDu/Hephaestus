@@ -131,6 +131,110 @@ final class PlayerPathMonitor: ObservableObject {
     deinit { monitor.cancel() }
 }
 
+// MARK: - Single pooled, bridgeless player web view
+//
+// Prewarming starts only after an explicit Play press begins. The same
+// WKWebView is handed to the full-screen sheet, so its in-flight navigation
+// continues instead of starting a second cold page. On dismissal we navigate
+// to an empty document to stop the game runtime while retaining the WebView.
+@MainActor
+enum PlayerWebViewPool {
+    static let processPool = WKProcessPool()
+    private static var pooledView: WKWebView?
+    private static var currentURL: URL?
+    private static var loadedURL: URL?
+    private static var isAttached = false
+    private static let warmupDelegate = WarmupDelegate()
+
+    static func playerURL(gameID: String, quality: String? = nil) -> URL? {
+        var components = URLComponents(url: BackendConfig.baseURL, resolvingAgainstBaseURL: false)
+        components?.path = "/player"
+        let preference = PlayerQuality(rawValue:
+            UserDefaults.standard.string(forKey: PlayerQuality.defaultsKey) ?? PlayerQuality.auto.rawValue
+        ) ?? .auto
+        components?.queryItems = [
+            URLQueryItem(name: "game", value: gameID),
+            URLQueryItem(name: "quality", value: quality ?? PlayerQuality.effective(preference: preference))
+        ]
+        return components?.url
+    }
+
+    static func prewarm(gameID: String) {
+        guard !isAttached, let url = playerURL(gameID: gameID) else { return }
+        let view = pooledView ?? makeWebView()
+        pooledView = view
+        if currentURL == url && (view.isLoading || loadedURL == url) { return }
+
+        view.stopLoading()
+        currentURL = url
+        loadedURL = nil
+        view.navigationDelegate = warmupDelegate
+        view.load(URLRequest(url: url))
+        DevLog.info(.player, "prewarming player page for \(gameID)")
+    }
+
+    static func take(url: URL) -> (webView: WKWebView, shouldLoad: Bool, didFinish: Bool) {
+        let view = pooledView ?? makeWebView()
+        pooledView = view
+        let didFinish = currentURL == url && loadedURL == url && view.url == url
+        let alreadyLoading = currentURL == url && view.isLoading
+        let shouldLoad = !didFinish && !alreadyLoading
+        isAttached = true
+        currentURL = url
+        if shouldLoad { loadedURL = nil }
+        view.navigationDelegate = nil
+        return (view, shouldLoad, didFinish)
+    }
+
+    static func markLoaded(_ webView: WKWebView) {
+        guard let currentURL, webView.url == currentURL else { return }
+        loadedURL = currentURL
+    }
+
+    static func markFailed(_ webView: WKWebView) {
+        guard let currentURL, webView.url == currentURL else { return }
+        loadedURL = nil
+        self.currentURL = nil
+    }
+
+    static func recycle(_ webView: WKWebView) {
+        guard pooledView === webView else { return }
+        isAttached = false
+        currentURL = nil
+        loadedURL = nil
+        webView.navigationDelegate = warmupDelegate
+        webView.stopLoading()
+        webView.loadHTMLString("", baseURL: nil)
+    }
+
+    private static func makeWebView() -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        // No script handlers or user scripts: the runtime remains bridgeless.
+        configuration.processPool = processPool
+        configuration.allowsInlineMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.applicationNameForUserAgent = "HephaestusPlayer/1.1"
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.scrollView.bounces = false
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        return webView
+    }
+
+    private final class WarmupDelegate: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            PlayerWebViewPool.markLoaded(webView)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            PlayerWebViewPool.markFailed(webView)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            PlayerWebViewPool.markFailed(webView)
+        }
+    }
+}
+
 // MARK: - Sheet
 
 struct PixiPlayerSheet: View {
@@ -448,31 +552,26 @@ private struct PlayerWebView: UIViewRepresentable {
     let onLoadFail: (String) -> Void
     let onTerminate: () -> Void
 
-    /// One process pool for every player web view: the web content
-    /// process (and its JIT/engine state) is reused across games
-    /// instead of being spun up cold on every open.
-    private static let processPool = WKProcessPool()
-
     func makeCoordinator() -> Coordinator {
         Coordinator(onProgress: onProgress, onLoadFinish: onLoadFinish,
                     onLoadFail: onLoadFail, onTerminate: onTerminate)
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        // Deliberately no script message handlers and no user scripts:
-        // the web runtime must not reach native code (bridgeless).
-        configuration.processPool = Self.processPool
-        configuration.allowsInlineMediaPlayback = true
-        configuration.mediaTypesRequiringUserActionForPlayback = []
-        configuration.applicationNameForUserAgent = "HephaestusPlayer/1.1"
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let handoff = PlayerWebViewPool.take(url: url)
+        let webView = handoff.webView
         webView.navigationDelegate = context.coordinator
-        webView.scrollView.bounces = false
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
         context.coordinator.observeProgress(of: webView)
-        webView.load(URLRequest(url: url))
+        if handoff.shouldLoad {
+            webView.load(URLRequest(url: url))
+        } else if handoff.didFinish {
+            // A prewarmed navigation may have finished before the sheet
+            // attached its delegate. Deliver readiness after the view mounts.
+            DispatchQueue.main.async {
+                context.coordinator.onProgress(1)
+                context.coordinator.onLoadFinish()
+            }
+        }
         return webView
     }
 
@@ -483,8 +582,7 @@ private struct PlayerWebView: UIViewRepresentable {
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
         coordinator.stopObserving()
-        webView.navigationDelegate = nil
-        webView.stopLoading()
+        PlayerWebViewPool.recycle(webView)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
