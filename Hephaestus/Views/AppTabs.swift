@@ -69,6 +69,18 @@ enum FeedPreviewPolicy {
     }
 }
 
+/// Measured preview dwell for Hephaestus #61. The previous code reported
+/// a fixed 700ms at clip start — the autoplay delay, not a dwell. Dwell
+/// is now measured from clip start to clip stop and clamped at zero so
+/// a clock jump can never produce a negative duration the backend
+/// rejects. Every measured dwell is reported; ranking thresholds belong
+/// server-side, not in this helper.
+enum FeedPreviewDwell {
+    static func dwellMS(from startedAt: Date, to endedAt: Date) -> Int {
+        max(0, Int(endedAt.timeIntervalSince(startedAt) * 1000))
+    }
+}
+
 @MainActor
 private final class FeedPreviewPlayback: ObservableObject {
     static let shared = FeedPreviewPlayback()
@@ -78,6 +90,7 @@ private final class FeedPreviewPlayback: ObservableObject {
     private var looper: AVPlayerLooper?
     private var pendingTask: Task<Void, Never>?
     private var pendingGameID: String?
+    private var clipStartedAt: Date?
     private let networkMonitor = NWPathMonitor()
     private let networkQueue = DispatchQueue(label: "hephaestus.feed-preview.network")
     private(set) var isConstrained = false
@@ -124,14 +137,11 @@ private final class FeedPreviewPlayback: ObservableObject {
         player.removeAllItems()
         looper = nil
         activeGameID = gameID
+        clipStartedAt = Date()
         let item = AVPlayerItem(url: url)
         looper = AVPlayerLooper(player: player, templateItem: item)
         player.isMuted = true
         player.play()
-        Task {
-            await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "preview_dwell",
-                                                     durationMS: 700, expectedMS: 700, previewDwellMS: 700)
-        }
         pendingTask = nil
         pendingGameID = nil
     }
@@ -149,10 +159,20 @@ private final class FeedPreviewPlayback: ObservableObject {
             pendingTask = nil
             pendingGameID = nil
         }
+        let stoppedGameID = activeGameID
+        let startedAt = clipStartedAt
         player.pause()
         player.removeAllItems()
         looper = nil
         activeGameID = nil
+        clipStartedAt = nil
+        if let stoppedGameID, let startedAt {
+            let dwell = FeedPreviewDwell.dwellMS(from: startedAt, to: Date())
+            Task {
+                await BackendAPI.shared.trackSocialEvent(gameID: stoppedGameID, kind: "preview_dwell",
+                                                         durationMS: dwell, previewDwellMS: dwell)
+            }
+        }
     }
 }
 
