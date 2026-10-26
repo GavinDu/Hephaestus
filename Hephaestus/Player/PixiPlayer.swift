@@ -274,6 +274,29 @@ enum PlayerWebViewPool {
     }
 }
 
+/// Shared chrome for the player sheet's state cards (loading, offline,
+/// error). One place owns the padding, width cap, background, and border
+/// so the three states cannot drift apart again — the loading card used
+/// to miss the max-width and full-screen frame the other two had.
+/// Content keeps its own spacing; this only owns the card itself.
+private struct PlayerStateCard<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(HephaestusDesign.cardPadding)
+            .frame(maxWidth: HephaestusDesign.stateCardMaxWidth)
+            .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous).strokeBorder(HephaestusDesign.subtleBorder, lineWidth: 1))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.background)
+    }
+}
+
 // MARK: - Sheet
 
 struct PixiPlayerSheet: View {
@@ -387,22 +410,21 @@ struct PixiPlayerSheet: View {
                 }
 
                 if isLoading && loadError == nil {
-                    VStack(spacing: 12) {
-                        ProgressView(value: progress)
-                            .progressViewStyle(.linear)
-                            .frame(width: 180)
-                        Text("Loading \(title)…")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        if showSlowHint {
-                            Text("Still loading — the connection may be slow.")
-                                .font(.caption)
+                    PlayerStateCard {
+                        VStack(spacing: 12) {
+                            ProgressView(value: progress)
+                                .progressViewStyle(.linear)
+                                .frame(width: 180)
+                            Text("Loading \(title)…")
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                            if showSlowHint {
+                                Text("Still loading — the connection may be slow.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
-                    .padding(24)
-                    .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous).strokeBorder(HephaestusDesign.subtleBorder, lineWidth: 1))
                 }
 
                 if PlayerLoadingPolicy.shouldShowOfflineOverlay(
@@ -410,57 +432,49 @@ struct PixiPlayerSheet: View {
                     isLoading: isLoading,
                     hasError: loadError != nil
                 ) {
-                    VStack(spacing: 14) {
-                        Image(systemName: "wifi.slash")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.secondary)
-                        Text("You're offline")
-                            .font(.headline)
-                        Text("Games load from the internet. Reconnect and the player will retry on its own.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
+                    PlayerStateCard {
+                        VStack(spacing: 14) {
+                            Image(systemName: "wifi.slash")
+                                .font(.system(size: HephaestusDesign.stateIconSize))
+                                .foregroundStyle(.secondary)
+                            Text("You're offline")
+                                .font(.headline)
+                            Text("Games load from the internet. Reconnect and the player will retry on its own.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
                     }
-                    .padding(24)
-                    .frame(maxWidth: 360)
-                    .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous).strokeBorder(HephaestusDesign.subtleBorder, lineWidth: 1))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.background)
                 }
 
                 if let loadError {
-                    VStack(spacing: 14) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.secondary)
-                        Text("Couldn't load the player")
-                            .font(.headline)
-                        Text(loadError)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                        Button("Retry") {
-                            self.loadError = nil
-                            self.autoReloads = 0
-                            isLoading = true
-                            progress = 0
-                            showSlowHint = false
-                            loadStartedAt = Date()
-                            attempt += 1
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .frame(minHeight: HephaestusDesign.minimumActionHeight)
-                        Button("Return to feed") { dismiss() }
+                    PlayerStateCard {
+                        VStack(spacing: 14) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: HephaestusDesign.stateIconSize))
+                                .foregroundStyle(.secondary)
+                            Text("Couldn't load the player")
+                                .font(.headline)
+                            Text(loadError)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 32)
+                            Button("Retry") {
+                                self.loadError = nil
+                                self.autoReloads = 0
+                                isLoading = true
+                                progress = 0
+                                showSlowHint = false
+                                loadStartedAt = Date()
+                                attempt += 1
+                            }
+                            .buttonStyle(.borderedProminent)
                             .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                            Button("Return to feed") { dismiss() }
+                                .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                        }
                     }
-                    .padding(24)
-                    .frame(maxWidth: 360)
-                    .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous).strokeBorder(HephaestusDesign.subtleBorder, lineWidth: 1))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.background)
                 }
             }
             .navigationTitle(title)
