@@ -50,6 +50,13 @@ final class DevLog {
     let sessionStart = Date()
     let sessionID = String(UUID().uuidString.prefix(8)).lowercased()
 
+    /// Correlation key for the testing feedback loop
+    /// (docs/TESTING_FRAMEWORK.md §5–§6). Set by a test harness or a
+    /// Diagnostics export for the active run; nil for ordinary sessions.
+    /// Included in exportJSON() and in PlayerTelemetry payloads so a
+    /// failure can be joined to its server-side incidents by run id.
+    var runID: String?
+
     private init() {}
 
     // MARK: Recording
@@ -125,6 +132,48 @@ final class DevLog {
             lines.append("[\(Self.timeFormatter.string(from: e.date))] [\(e.category.rawValue)] \(e.level.rawValue)\(e.message)")
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// The same session as structured JSON, for the testing feedback
+    /// loop (docs/TESTING_FRAMEWORK.md §6). The text export stays for
+    /// humans reading a dump; this one is for machines joining a
+    /// failure to its cause. Returns nil only if encoding fails, which
+    /// must not happen for plain log strings.
+    func exportJSON() -> String? {
+        lock.lock()
+        let snapshot = entries
+        let runID = runID
+        lock.unlock()
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let dicts: [[String: Any]] = snapshot.map { e in
+            let level = e.level.rawValue.trimmingCharacters(in: .whitespaces).lowercased()
+            return [
+                "timestamp": iso.string(from: e.date),
+                "category": e.category.rawValue,
+                "level": level.isEmpty ? "info" : level,
+                "message": e.message,
+            ]
+        }
+        var doc: [String: Any] = [
+            "session_id": sessionID,
+            "started_at": iso.string(from: sessionStart),
+            "app_version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?",
+            "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?",
+            "os": UIDevice.current.systemVersion,
+            "device": UIDevice.current.model,
+            "backend": BackendConfig.baseURL.absoluteString,
+            "entries": dicts,
+        ]
+        if let runID {
+            doc["run_id"] = runID
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: doc, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return text
     }
 
     /// Session bootstrap line, recorded once at app launch.

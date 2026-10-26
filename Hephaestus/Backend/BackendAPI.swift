@@ -537,6 +537,10 @@ final class BackendAPI: ObservableObject {
         var message: String
         var stack: String = ""
         var logTail: [String] = []
+        /// Test-feedback correlation id (docs/TESTING_FRAMEWORK.md §6);
+        /// nil for ordinary sessions. Lets backend incidents be filtered
+        /// to one simulator/physical run.
+        var runId: String?
     }
 
     /// Fire-and-forget: telemetry must never fail the user, so errors
