@@ -416,6 +416,36 @@ final class BackendAPI: ObservableObject {
     private struct ModerationAppealBody: Encodable { var reason: String }
     private struct EventBody: Encodable { var event_id: String; var game_id: String; var kind: String; var duration_ms: Int; var expected_duration_ms: Int; var preview_dwell_ms: Int = 0; var time_to_interactive_ms: Int = 0; var time_to_first_input_ms: Int = 0; var frame_time_p95_ms: Int = 0; var frame_time_avg_ms: Int = 0; var frame_count: Int = 0 }
 
+    // MARK: - Sign in with Apple (#10)
+
+    struct AppleSignInResponse: Decodable {
+        var access_token: String
+        var token_type: String
+        var expires_in: Int
+        var subject: String
+    }
+    struct DeleteAccountResponse: Decodable {
+        var deleted: Bool
+        var subject: String
+    }
+    private struct AppleSignInBody: Encodable { var identity_token: String }
+
+    /// Exchanges a verified Apple identity token for a backend session
+    /// token. The server verifies the token against Apple's keys; this
+    /// method never invents an identity. The caller stores the returned
+    /// access token in Keychain via BackendConfig.
+    func signInWithApple(identityToken: String) async throws -> AppleSignInResponse {
+        let req = try makeRequest("v1/auth/apple", method: "POST", body: AppleSignInBody(identity_token: identityToken))
+        return try await send(AppleSignInResponse.self, req)
+    }
+
+    /// Deletes the signed-in account server-side (social data purged,
+    /// subject tombstoned). The caller clears the local session after.
+    func deleteAccount() async throws -> DeleteAccountResponse {
+        let req = try makeRequest("v1/users/me", method: "DELETE")
+        return try await send(DeleteAccountResponse.self, req)
+    }
+
     func fetchFeed(scope: SocialFeedScope = .forYou, cursor: String? = nil) async throws -> FeedResponse {
         var path = "v1/feed?scope=\(scope.rawValue)&limit=20"
         if let cursor, !cursor.isEmpty { path += "&cursor=\(cursor)" }

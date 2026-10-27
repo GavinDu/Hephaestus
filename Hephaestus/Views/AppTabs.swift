@@ -1,3 +1,4 @@
+import AuthenticationServices
 import AVFoundation
 import Combine
 import Network
@@ -1965,6 +1966,36 @@ struct ProfileView: View {
     @State private var isModerationAppealPresented = false
     @State private var tokenDraft = BackendConfig.loadSessionToken() ?? ""
     @State private var sessionMessage: String?
+    @State private var isDeleteAccountPresented = false
+
+    private func signInWithAppleToken(_ identityToken: String) async {
+        do {
+            let response = try await BackendAPI.shared.signInWithApple(identityToken: identityToken)
+            guard BackendConfig.saveSessionToken(response.access_token) else {
+                sessionMessage = "Could not save the session securely to Keychain."
+                return
+            }
+            tokenDraft = response.access_token
+            sessionMessage = "Signed in with Apple. Session valid for 30 days."
+            DevLog.info(.api, "signed in with Apple")
+        } catch {
+            sessionMessage = "Sign-in failed: \(error.localizedDescription)"
+            DevLog.error(.api, "Apple sign-in exchange failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func deleteAccount() async {
+        do {
+            _ = try await BackendAPI.shared.deleteAccount()
+            BackendConfig.clearSessionToken()
+            tokenDraft = ""
+            sessionMessage = "Account deleted. Your social data was removed."
+            DevLog.info(.api, "account deleted")
+        } catch {
+            sessionMessage = "Could not delete the account: \(error.localizedDescription)"
+            DevLog.error(.api, "account deletion failed: \(error.localizedDescription)")
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -1978,11 +2009,60 @@ struct ProfileView: View {
                             .font(.subheadline)
                             .foregroundStyle(BackendConfig.currentUserID.isEmpty ? Color.secondary : Color.green)
                     }
-                    SecureField("Short-lived bearer session token", text: $tokenDraft)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityLabel("Bearer session token")
-                    HStack {
+                    if BackendConfig.currentUserID.isEmpty {
+                        SignInWithAppleButton(.signIn) { request in
+                            // Identity only: no name or email scope is requested.
+                            // The backend sees just an opaque Apple identifier.
+                            request.requestedScopes = []
+                        } onCompletion: { result in
+                            switch result {
+                            case .success(let authorization):
+                                guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                                      let data = credential.identityToken,
+                                      let identityToken = String(data: data, encoding: .utf8) else {
+                                    sessionMessage = "Apple sign-in did not return an identity token."
+                                    return
+                                }
+                                Task { await signInWithAppleToken(identityToken) }
+                            case .failure(let error):
+                                sessionMessage = "Apple sign-in failed: \(error.localizedDescription)"
+                                DevLog.error(.api, "Apple sign-in failed: \(error.localizedDescription)")
+                            }
+                        }
+                        .signInWithAppleButtonStyle(.black)
+                        .frame(height: 44)
+                        .accessibilityLabel("Sign in with Apple")
+                        Text("Sign in with Apple to publish, follow, and save. No name or email is requested; the backend only sees an opaque Apple identifier, and sessions last 30 days.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        HStack {
+                            Button("Sign out", role: .destructive) {
+                                BackendConfig.clearSessionToken()
+                                tokenDraft = ""
+                                sessionMessage = "Session cleared from this device."
+                                DevLog.info(.api, "session cleared")
+                            }
+                            .buttonStyle(.bordered)
+                            Button("Delete account", role: .destructive) {
+                                isDeleteAccountPresented = true
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .alert("Delete account?", isPresented: $isDeleteAccountPresented) {
+                            Button("Delete account", role: .destructive) {
+                                Task { await deleteAccount() }
+                            }
+                            Button("Keep account", role: .cancel) {}
+                        } message: {
+                            Text("This removes your follows, saves, reactions, comments, and preferences, and signs you out. Published games stay published under an opaque identifier that carries no personal data. This cannot be undone.")
+                        }
+                    }
+                    if BackendConfig.usesDevelopmentIdentity {
+                        SecureField("Short-lived session token (development only)", text: $tokenDraft)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .accessibilityLabel("Session token")
                         Button("Save session") {
                             let token = tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                             guard !token.isEmpty else {
@@ -1994,18 +2074,11 @@ struct ProfileView: View {
                                 return
                             }
                             tokenDraft = token
-                            sessionMessage = "Session saved securely. New API requests will use bearer authentication."
-                            DevLog.info(.api, "bearer session token saved to Keychain")
+                            sessionMessage = "Session saved securely."
+                            DevLog.info(.api, "session saved to Keychain")
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        Button("Sign out", role: .destructive) {
-                            BackendConfig.clearSessionToken()
-                            tokenDraft = ""
-                            sessionMessage = "Session cleared from this device."
-                            DevLog.info(.api, "bearer session token cleared")
-                        }
-                        .buttonStyle(.bordered)
                     }
                     if let sessionMessage {
                         Text(sessionMessage)
@@ -2013,9 +2086,6 @@ struct ProfileView: View {
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("session-status")
                     }
-                    Text("Until Sign in with Apple is connected, paste a short-lived token from the trusted sign-in provider. Tokens are kept in Keychain; the app does not trust X-User-ID for production identity.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 Section("Safety & moderation") {
                     Button {
