@@ -74,8 +74,9 @@ so the matrix is complete):
 - The offline overlay shows only while loading without an error —
   it never covers a loaded game or an error card.
 - WebContent process termination (`ios-webview-terminated`
-  telemetry) reloads per policy; repeated termination is a failure
-  signal, not a silent loop (see open items).
+  telemetry) auto-reloads at most twice, then shows the error
+  card; repeated termination is a failure signal, not a silent
+  loop.
 
 ### Runtime health failures (in-page, recorded)
 
@@ -115,6 +116,9 @@ Verified server-side in `package.go`:
   fixture set exercised by backend tests, the browser player, and
   the iOS player alike does not exist yet. This matrix is the spec
   such fixtures should be built against.
-- **Repeated WebContent termination:** the reload policy exists, but
-  no documented cap after which the shell stops retrying and shows
-  the error card instead.
+- **Repeated WebContent termination:** capped at 2 auto-reloads
+  (`autoReloads < 2` in PixiPlayerSheet): after the second
+  termination the shell stops retrying, reports
+  `WebContentProcessTerminated` ("gave up after 2 auto-reloads"),
+  and shows the error card ("The player kept stopping — its web
+  process ended repeatedly. Close and reopen the game.").
