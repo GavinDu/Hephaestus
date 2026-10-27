@@ -205,6 +205,12 @@ private struct FeedPreviewSurface: UIViewRepresentable {
 
 // MARK: - Discover
 
+private struct PlayerResultPresentation: Identifiable {
+    let game: FeedGame
+    let result: VerifiedRunResult
+    var id: String { result.runID }
+}
+
 /// Backend-backed social feeds use the verified bearer session when present.
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
@@ -229,6 +235,8 @@ struct DiscoverView: View {
     @State private var reportingGame: FeedGame?
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
+    @State private var settledForYouGameID: String?
+    @State private var resultPresentation: PlayerResultPresentation?
 
     private var visibleGames: [FeedGame] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -247,19 +255,64 @@ struct DiscoverView: View {
         return [GridItem(.flexible())]
     }
 
+    private var showsForYouPager: Bool {
+        selectedFeed == .forYou && searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !isLoading && errorMessage == nil && !visibleGames.isEmpty
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    Picker("Feed", selection: $selectedFeed) {
-                        ForEach(SocialFeedScope.allCases) { scope in
-                            Text(scope.title).tag(scope)
-                        }
+            VStack(spacing: 0) {
+                Picker("Feed", selection: $selectedFeed) {
+                    ForEach(SocialFeedScope.allCases) { scope in
+                        Text(scope.title).tag(scope)
                     }
-                    .pickerStyle(.segmented)
-                    .accessibilityLabel("Social feed")
-                    .onChange(of: selectedFeed) { _, _ in Task { await load() } }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityLabel("Social feed")
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
+                .onChange(of: selectedFeed) { _, _ in
+                    settledForYouGameID = nil
+                    Task { await load() }
+                }
 
+                if showsForYouPager {
+                    ForYouPagerView(
+                        settledGameID: $settledForYouGameID,
+                        games: visibleGames,
+                        savedGameIDs: savedGameIDs,
+                        likedGameIDs: likedGameIDs,
+                        followedCreatorIDs: followedCreatorIDs,
+                        onPlay: { play($0) },
+                        onToggleSaved: { toggleSaved($0) },
+                        onToggleLike: { toggleLike($0) },
+                        onToggleFollow: { game in
+                            if let id = game.ownerID { Task { await toggleFollow(id) } }
+                        },
+                        onOpenComments: { commentsGame = $0 },
+                        onOpenCreator: { game in
+                            if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) }
+                        },
+                        onReport: { reportingGame = $0 },
+                        onBlockCreator: { game in
+                            if let id = game.ownerID { Task { await blockCreator(id) } }
+                        },
+                        onNotInterested: { Task { await markNotInterested($0) } },
+                        onImpression: { game in
+                            Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") }
+                        },
+                        onNearEnd: {
+                            if nextCursor != nil && !isLoadingMore && !isLoading {
+                                Task { await loadMore() }
+                            }
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("PLAYABLE STORIES", systemImage: "sparkles")
                             .font(.caption.weight(.bold))
@@ -387,7 +440,9 @@ struct DiscoverView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 28)
-            }
+                        }
+                    }
+                }
             .background(HephaestusDesign.pageBackground)
             .navigationTitle("Discover")
             .navigationBarTitleDisplayMode(.inline)
@@ -432,7 +487,22 @@ struct DiscoverView: View {
             }
             .fullScreenCover(item: $playerRequest) { request in
                 PixiPlayerSheet(gameID: request.gameID, title: request.title,
-                                holdPosterURL: request.posterURL, tappedAt: request.tappedAt)
+                                holdPosterURL: request.posterURL, tappedAt: request.tappedAt, onFinish: {
+                    guard let game = games.first(where: { $0.id == request.gameID }) else { return }
+                    resultPresentation = PlayerResultPresentation(game: game, result: $0)
+                })
+            }
+            .sheet(item: $resultPresentation) { presentation in
+                PlayerResultSheet(
+                    game: presentation.game,
+                    result: presentation.result,
+                    isLiked: likedGameIDs.contains(presentation.game.id),
+                    onPlayAgain: {
+                        DispatchQueue.main.async { play(presentation.game) }
+                    },
+                    onNextGame: { Task { await advanceToNextGame(after: presentation.game) } },
+                    onToggleLike: { toggleLike(presentation.game) }
+                )
             }
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
@@ -464,6 +534,27 @@ struct DiscoverView: View {
         // over the web view until navigation finishes.
         playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title,
                                           tappedAt: Date(), posterURL: game.previewPosterURL)
+    }
+
+    private func advanceToNextGame(after game: FeedGame) async {
+        guard let index = visibleGames.firstIndex(where: { $0.id == game.id }) else {
+            resultPresentation = nil
+            return
+        }
+        if !visibleGames.indices.contains(index + 1), nextCursor != nil {
+            await loadMore()
+        }
+        guard visibleGames.indices.contains(index + 1) else {
+            resultPresentation = nil
+            return
+        }
+        let nextGame = visibleGames[index + 1]
+        resultPresentation = nil
+        if selectedFeed != .forYou || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            selectedFeed = .forYou
+            searchText = ""
+        }
+        settledForYouGameID = nextGame.id
     }
 
     private func loadMore() async {
@@ -524,6 +615,7 @@ struct DiscoverView: View {
         do {
             try await BackendAPI.shared.blockCreator(creatorID, blocked: true)
             games.removeAll { $0.ownerID == creatorID }
+            repairPagerSelection()
         } catch { errorMessage = "Couldn't block creator: \(error.localizedDescription)" }
     }
 
@@ -531,7 +623,14 @@ struct DiscoverView: View {
         do {
             try await BackendAPI.shared.markNotInterested(gameID: game.id)
             games.removeAll { $0.id == game.id }
+            repairPagerSelection()
         } catch { errorMessage = "Couldn't save feedback: \(error.localizedDescription)" }
+    }
+
+    private func repairPagerSelection() {
+        guard selectedFeed == .forYou else { return }
+        if let settledForYouGameID, games.contains(where: { $0.id == settledForYouGameID }) { return }
+        settledForYouGameID = games.first?.id
     }
 
     private func saveMutedTopics(_ topics: [String]) {
@@ -569,6 +668,7 @@ struct DiscoverView: View {
             guard generation == loadGeneration else { return }
             games = loadedGames.games
             nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
+            repairPagerSelection()
             let hasServerViewerState = loadedGames.games.contains {
                 $0.viewerLiked != nil || $0.viewerSaved != nil || $0.viewerFollowing != nil
             }
@@ -695,6 +795,7 @@ private struct GameFeedCard: View {
     let onBlockCreator: () -> Void
     let onNotInterested: () -> Void
     let onImpression: () -> Void
+    let shouldAutoplayPreview: Bool = true
 
     private var shareURL: URL {
         var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"), resolvingAgainstBaseURL: false)!
@@ -885,7 +986,7 @@ private struct GameFeedCard: View {
         .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 5)
         .onAppear {
             onImpression()
-            if !reduceMotion {
+            if shouldAutoplayPreview && !reduceMotion {
                 FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
             }
         }
@@ -893,19 +994,91 @@ private struct GameFeedCard: View {
             FeedPreviewPlayback.shared.stop(gameID: game.id)
         }
         .onChange(of: reduceMotion) { _, shouldReduceMotion in
-            if shouldReduceMotion {
+            if shouldReduceMotion || !shouldAutoplayPreview {
                 FeedPreviewPlayback.shared.stop(gameID: game.id)
             } else {
                 FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
             }
         }
+        .onChange(of: shouldAutoplayPreview) { _, shouldPlay in
+            if shouldPlay && !reduceMotion && scenePhase == .active {
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
+            } else {
+                FeedPreviewPlayback.shared.stop(gameID: game.id)
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active && !reduceMotion {
+            if phase == .active && shouldAutoplayPreview && !reduceMotion {
                 FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
             } else if phase != .active {
                 FeedPreviewPlayback.shared.stop(gameID: game.id)
             }
         }
+    }
+}
+
+private struct ForYouPagerView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Binding var settledGameID: String?
+    let games: [FeedGame]
+    let savedGameIDs: Set<String>
+    let likedGameIDs: Set<String>
+    let followedCreatorIDs: Set<String>
+    let onPlay: (FeedGame) -> Void
+    let onToggleSaved: (FeedGame) -> Void
+    let onToggleLike: (FeedGame) -> Void
+    let onToggleFollow: (FeedGame) -> Void
+    let onOpenComments: (FeedGame) -> Void
+    let onOpenCreator: (FeedGame) -> Void
+    let onReport: (FeedGame) -> Void
+    let onBlockCreator: (FeedGame) -> Void
+    let onNotInterested: (FeedGame) -> Void
+    let onImpression: (FeedGame) -> Void
+    let onNearEnd: () -> Void
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(spacing: 0) {
+                ForEach(games) { game in
+                    GameFeedCard(
+                        game: game,
+                        isSaved: savedGameIDs.contains(game.id),
+                        isLiked: likedGameIDs.contains(game.id),
+                        isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
+                        canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.currentUserID,
+                        onPlay: { onPlay(game) },
+                        onToggleSaved: { onToggleSaved(game) },
+                        onToggleLike: { onToggleLike(game) },
+                        onToggleFollow: { onToggleFollow(game) },
+                        onOpenComments: { onOpenComments(game) },
+                        onOpenCreator: { onOpenCreator(game) },
+                        onReport: { onReport(game) },
+                        onBlockCreator: { onBlockCreator(game) },
+                        onNotInterested: { onNotInterested(game) },
+                        onImpression: { onImpression(game) },
+                        shouldAutoplayPreview: game.id == settledGameID
+                    )
+                    .frame(maxWidth: 1120)
+                    .frame(maxWidth: .infinity)
+                    .containerRelativeFrame(.vertical)
+                    .id(game.id)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityHint("Swipe up for the next game")
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollIndicators(.hidden)
+        .scrollTargetBehavior(.paging)
+        .scrollPosition(id: $settledGameID)
+        .onAppear {
+            if settledGameID == nil { settledGameID = games.first?.id }
+        }
+        .onChange(of: settledGameID) { _, id in
+            guard let id, let index = games.firstIndex(where: { $0.id == id }) else { return }
+            if index >= max(0, games.count - 2) { onNearEnd() }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settledGameID)
     }
 }
 
