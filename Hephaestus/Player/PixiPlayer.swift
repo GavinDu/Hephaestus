@@ -344,6 +344,7 @@ struct PixiPlayerSheet: View {
     @State private var reportedMemoryWarning = false
     @State private var gameplayStartedAt: Date?
     @State private var didTrackGameplayStart = false
+    @State private var didReportInteractive = false
     @State private var verifiedResult: VerifiedRunResult?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
     @StateObject private var pathMonitor = PlayerPathMonitor()
@@ -429,6 +430,18 @@ struct PixiPlayerSheet: View {
         DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
         PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
                                message: "loaded in \(ms)ms quality=\(effectiveQuality)")
+        if !didReportInteractive {
+            didReportInteractive = true
+            let eventID = "ios-tti:\(gameID):\(loadStartedAt.timeIntervalSince1970)"
+            Task {
+                await BackendAPI.shared.trackSocialEvent(
+                    gameID: gameID,
+                    kind: "player_ready",
+                    timeToInteractiveMS: max(0, ms),
+                    eventID: eventID
+                )
+            }
+        }
         // The backend derives play_start/replay/completion from
         // runtime session_start/run_end events. Only track the
         // sheet lifecycle here to avoid double-counting starts.
@@ -474,7 +487,7 @@ struct PixiPlayerSheet: View {
                         url: url,
                         gameID: gameID,
                         onProgress: { progress = $0 },
-                        onLoadFinish: { handleLoadFinish() },
+                        onLoadFinish: { handleLoadFinish() }
                         onLoadFail: { error in
                             isLoading = false
                             holdOpacity = 0
@@ -913,6 +926,7 @@ private struct PlayerWebView: UIViewRepresentable {
     let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
         private var acceptedRunIDs = Set<String>()
+        private var acceptedMetricIDs = Set<String>()
         private var runtimeSessionID: String?
         private var isActive = true
         lazy var messageProxy = WeakScriptMessageHandler(delegate: self)
@@ -937,18 +951,22 @@ private struct PlayerWebView: UIViewRepresentable {
                   message.frameInfo.isMainFrame,
                   sameOrigin(message.frameInfo.securityOrigin),
                   let body = message.body as? [String: Any],
-                  Set(body.keys).isSubset(of: ["schema", "type", "sessionId", "gameId", "runId"]),
                   body["schema"] as? Int == 1,
-                  body["type"] as? String == "verified_run_available",
                   let runtimeSessionID = body["sessionId"] as? String,
                   !runtimeSessionID.isEmpty, runtimeSessionID.count <= 128,
                   body["gameId"] as? String == expectedGameID,
+                  let type = body["type"] as? String else { return }
+            if let boundSessionID = self.runtimeSessionID, boundSessionID != runtimeSessionID { return }
+            self.runtimeSessionID = runtimeSessionID
+            if type == "player_metric" {
+                handleMetric(body, runtimeSessionID: runtimeSessionID)
+                return
+            }
+            guard type == "verified_run_available",
+                  Set(body.keys).isSubset(of: ["schema", "type", "sessionId", "gameId", "runId"]),
                   let runID = body["runId"] as? String,
                   !runID.isEmpty, runID.count <= 128,
                   acceptedRunIDs.insert(runID).inserted else { return }
-            if let boundSessionID = self.runtimeSessionID, boundSessionID != runtimeSessionID { return }
-            self.runtimeSessionID = runtimeSessionID
-
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 do {
@@ -961,6 +979,36 @@ private struct PlayerWebView: UIViewRepresentable {
                                            name: "VerifiedRunResultFetchFailed",
                                            message: "verified result unavailable")
                 }
+            }
+        }
+
+        private func handleMetric(_ body: [String: Any], runtimeSessionID: String) {
+            guard Set(body.keys).isSubset(of: ["schema", "type", "sessionId", "gameId", "metric", "sequence", "ms", "frameTimeP95Ms", "frameTimeAvgMs", "frameCount"]),
+                  let metric = body["metric"] as? String,
+                  let sequence = body["sequence"] as? Int,
+                  sequence >= 0, sequence <= 100_000 else { return }
+            let metricID = "\(runtimeSessionID):\(metric):\(sequence)"
+            guard acceptedMetricIDs.insert(metricID).inserted else { return }
+            switch metric {
+            case "first_input":
+                guard let ms = body["ms"] as? Int, (0...86_400_000).contains(ms) else { return }
+                Task { await BackendAPI.shared.trackSocialEvent(
+                    gameID: expectedGameID, kind: "player_first_input",
+                    timeToFirstInputMS: ms, eventID: "ios-metric:\(metricID)"
+                ) }
+            case "perf_window":
+                guard let p95 = body["frameTimeP95Ms"] as? Int,
+                      let avg = body["frameTimeAvgMs"] as? Int,
+                      let count = body["frameCount"] as? Int,
+                      (0...60_000).contains(p95), (0...60_000).contains(avg),
+                      (1...10_000).contains(count) else { return }
+                Task { await BackendAPI.shared.trackSocialEvent(
+                    gameID: expectedGameID, kind: "player_perf_window",
+                    frameTimeP95MS: p95, frameTimeAvgMS: avg,
+                    frameCount: count, eventID: "ios-metric:\(metricID)"
+                ) }
+            default:
+                return
             }
         }
 

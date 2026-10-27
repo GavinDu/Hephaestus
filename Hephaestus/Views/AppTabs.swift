@@ -172,9 +172,11 @@ private final class FeedPreviewPlayback: ObservableObject {
         clipStartedAt = nil
         if let stoppedGameID, let startedAt {
             let dwell = FeedPreviewDwell.dwellMS(from: startedAt, to: Date())
+            let eventID = "ios-preview-dwell:\(stoppedGameID):\(startedAt.timeIntervalSince1970)"
             Task {
                 await BackendAPI.shared.trackSocialEvent(gameID: stoppedGameID, kind: "preview_dwell",
-                                                         durationMS: dwell, previewDwellMS: dwell)
+                                                         durationMS: dwell, previewDwellMS: dwell,
+                                                         eventID: eventID)
             }
         }
     }
