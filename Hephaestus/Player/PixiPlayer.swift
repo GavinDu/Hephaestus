@@ -8,18 +8,19 @@ import WebKit
 //
 // The player is the PixiJS + Rapier Game IR runtime — the single runtime
 // since the 2026-10-20 consolidation. The runtime is served by the backend
-// at /player and embedded here in a bridgeless WKWebView: no
-// WKScriptMessageHandler, no evaluateJavaScript control channel, no
-// native API exposure (App Store Guideline 4.7 posture). Everything this
+// at /player and embedded here in a constrained WKWebView: the only native
+// message is a verified-run notification; there is no evaluateJavaScript
+// control channel and no arbitrary native API exposure (App Store Guideline
+// 4.7 posture). Everything this
 // shell does for resource control, performance, and telemetry respects
 // that boundary:
 //   - performance reaches the page only as a URL parameter (?quality=),
 //     never as a script call;
 //   - telemetry leaves the app as ordinary HTTPS POSTs from the app's
-//     own networking (the same endpoint the page beacons to), never as
-//     a message from the page;
+//     own networking (the same endpoint the page beacons to); the page may
+//     only notify native of an opaque run ID after server submission;
 //   - lifecycle signals come from WKNavigationDelegate, KVO on the web
-//     view, and OS notifications — all native-side.
+//     view, OS notifications, and the validated run-result notification.
 
 struct PixiPlayerRequest: Identifiable {
     let id = UUID()
@@ -175,7 +176,7 @@ final class PlayerPathMonitor: ObservableObject {
     deinit { monitor.cancel() }
 }
 
-// MARK: - Single pooled, bridgeless player web view
+// MARK: - Single pooled player web view
 //
 // Prewarming starts only after an explicit Play press begins. The same
 // WKWebView is handed to the full-screen sheet, so its in-flight navigation
@@ -253,7 +254,8 @@ enum PlayerWebViewPool {
 
     private static func makeWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        // No script handlers or user scripts: the runtime remains bridgeless.
+        // The only handler is attached per presentation and accepts one
+        // validated run-result notification; there is no script control API.
         configuration.processPool = processPool
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
@@ -307,6 +309,7 @@ private struct PlayerStateCard<Content: View>: View {
 struct PixiPlayerSheet: View {
     let gameID: String
     let title: String
+    let onFinish: (VerifiedRunResult) -> Void = { _ in }
     /// Hold frame for the #58 handoff: the feed poster's URL. While
     /// set and not yet faded, the poster covers the web view so Play
     /// never flashes a blank sheet. Nil keeps today's loading card.
@@ -338,6 +341,7 @@ struct PixiPlayerSheet: View {
     @State private var reportedMemoryWarning = false
     @State private var gameplayStartedAt: Date?
     @State private var didTrackGameplayStart = false
+    @State private var verifiedResult: VerifiedRunResult?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
     @StateObject private var pathMonitor = PlayerPathMonitor()
 
@@ -366,6 +370,55 @@ struct PixiPlayerSheet: View {
         return components?.url ?? BackendConfig.baseURL
     }
 
+    /// #58 hold backdrop, extracted so the body expression stays
+    /// small enough to type-check. A failed poster load falls back
+    /// to black, never to a white flash.
+    private var holdBackdrop: some View {
+        Group {
+            if let holdPosterURL, let holdURL = URL(string: holdPosterURL) {
+                AsyncImage(url: holdURL) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        Color.black
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .opacity(holdOpacity)
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+            }
+        }
+    }
+
+    /// #58 compact progress overlay drawn ON the hold poster.
+    /// PlayerStateCard paints its own full-screen background, which
+    /// would hide the hold, so it cannot be reused here.
+    private var holdLoadingOverlay: some View {
+        VStack(spacing: 12) {
+            ProgressView(value: progress)
+                .progressViewStyle(.linear)
+                .frame(width: 180)
+            Text("Loading \(title)…")
+                .font(.subheadline)
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
+            if showSlowHint {
+                Text("Still loading — the connection may be slow.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func finishToFeed() {
+        if didTrackGameplayStart, let verifiedResult, verifiedResult.isVerified {
+            onFinish(verifiedResult)
+        }
+        dismiss()
+    }
 
     var body: some View {
         NavigationStack {
@@ -373,6 +426,7 @@ struct PixiPlayerSheet: View {
                 if let url = playerURL {
                     PlayerWebView(
                         url: url,
+                        gameID: gameID,
                         onPrewarmHit: { prewarmHit = true },
                         onProgress: { progress = $0 },
                         onLoadFinish: {
@@ -452,6 +506,9 @@ struct PixiPlayerSheet: View {
                                                        name: "WebContentProcessTerminated",
                                                        message: "gave up after 2 auto-reloads")
                             }
+                        },
+                        onVerifiedRun: { result in
+                            verifiedResult = result
                         }
                     )
                     .id(attempt)
@@ -459,44 +516,15 @@ struct PixiPlayerSheet: View {
                 }
 
                 // #58 hold frame: the poster covers the web view until
-                // the first navigation finish fades it out. A failed
-                // poster load falls back to black, never to a white
-                // flash; a missing poster URL means no hold at all.
-                if let holdPosterURL, holdVisible, let holdURL = URL(string: holdPosterURL) {
-                    AsyncImage(url: holdURL) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill()
-                        } else {
-                            Color.black
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                    .opacity(holdOpacity)
-                    .ignoresSafeArea()
-                    .accessibilityHidden(true)
+                // the first navigation finish fades it out. A missing
+                // poster URL means no hold at all.
+                if holdPosterURL != nil, holdVisible {
+                    holdBackdrop
                 }
 
                 if isLoading && loadError == nil, !prewarmHit {
                     if holdPosterURL != nil, holdVisible {
-                        // Indicator over the snapshot, not over a blank
-                        // sheet: a compact overlay, since PlayerStateCard
-                        // paints its own full-screen background.
-                        VStack(spacing: 12) {
-                            ProgressView(value: progress)
-                                .progressViewStyle(.linear)
-                                .frame(width: 180)
-                            Text("Loading \(title)…")
-                                .font(.subheadline)
-                                .foregroundStyle(.white)
-                                .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
-                            if showSlowHint {
-                                Text("Still loading — the connection may be slow.")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.85))
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        holdLoadingOverlay
                     } else {
                     PlayerStateCard {
                         VStack(spacing: 12) {
@@ -560,7 +588,9 @@ struct PixiPlayerSheet: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .frame(minHeight: HephaestusDesign.minimumActionHeight)
-                            Button("Return to feed") { dismiss() }
+                    Button("Return to feed") {
+                        finishToFeed()
+                    }
                                 .frame(minHeight: HephaestusDesign.minimumActionHeight)
                         }
                     }
@@ -570,7 +600,9 @@ struct PixiPlayerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Done") {
+                        finishToFeed()
+                    }
                         .frame(minHeight: HephaestusDesign.minimumActionHeight)
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
@@ -692,26 +724,133 @@ struct PixiPlayerSheet: View {
     }
 }
 
-// MARK: - Bridgeless WKWebView host
+/// Native post-run handoff. The result is fetched from BackendAPI after the
+/// WebView reports an opaque run ID; JavaScript never supplies display data.
+struct PlayerResultSheet: View {
+    let game: FeedGame
+    let result: VerifiedRunResult
+    let isLiked: Bool
+    let onPlayAgain: () -> Void
+    let onNextGame: () -> Void
+    let onToggleLike: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 54))
+                    .foregroundStyle(.purple)
+                    .accessibilityHidden(true)
+                VStack(spacing: 8) {
+                    Text(result.result?.won == true ? "You did it!" : "Run complete")
+                        .font(.title2.weight(.bold))
+                    Text(game.title)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                    if let outcome = result.result {
+                        Text("Score: \(outcome.score)")
+                            .font(.title3.weight(.semibold))
+                        if let rank = result.rank {
+                            Text("Weekly rank: #\(rank.position)")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("Choose what you want to do next.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .accessibilityElement(children: .combine)
+
+                VStack(spacing: 12) {
+                    Button {
+                        dismiss()
+                        onPlayAgain()
+                    } label: {
+                        Label("Play Again", systemImage: "arrow.counterclockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(minHeight: HephaestusDesign.minimumActionHeight)
+
+                    Button {
+                        dismiss()
+                        onNextGame()
+                    } label: {
+                        Label("Next Game", systemImage: "chevron.up.2")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(minHeight: HephaestusDesign.minimumActionHeight)
+
+                    Button {
+                        onToggleLike()
+                    } label: {
+                        Label(isLiked ? "Liked" : "Like", systemImage: isLiked ? "heart.fill" : "heart")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(isLiked ? .pink : nil)
+                    .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                    .accessibilityLabel(isLiked ? "Unlike \(game.title)" : "Like \(game.title)")
+                }
+                .frame(maxWidth: 420)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(HephaestusDesign.pageBackground)
+            .navigationTitle("Run complete")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Verified-result WKWebView host
+
+private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
+    weak var delegate: WKScriptMessageHandler?
+
+    init(delegate: WKScriptMessageHandler) {
+        self.delegate = delegate
+    }
+
+    func userContentController(_ userContentController: WKUserContentController,
+                                didReceive message: WKScriptMessage) {
+        delegate?.userContentController(userContentController, didReceive: message)
+    }
+}
 
 private struct PlayerWebView: UIViewRepresentable {
     let url: URL
+    let gameID: String
     let onProgress: (Double) -> Void
     let onLoadFinish: () -> Void
     let onLoadFail: (Error) -> Void
     let onTerminate: () -> Void
+    let onVerifiedRun: (VerifiedRunResult) -> Void
     /// Fires when take() returned an already-finished prewarmed
     /// navigation, before onLoadFinish is delivered after mount.
-    let onPrewarmHit: () -> Void
+    var onPrewarmHit: () -> Void = {}
+
+    private static let messageName = "hephaestusRunResult"
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onProgress: onProgress, onLoadFinish: onLoadFinish,
-                    onLoadFail: onLoadFail, onTerminate: onTerminate)
+        Coordinator(gameID: gameID, onProgress: onProgress,
+                    onLoadFinish: onLoadFinish, onLoadFail: onLoadFail,
+                    onTerminate: onTerminate, onVerifiedRun: onVerifiedRun)
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let handoff = PlayerWebViewPool.take(url: url)
         let webView = handoff.webView
+        webView.configuration.userContentController.add(context.coordinator.messageProxy, name: Self.messageName)
         webView.navigationDelegate = context.coordinator
         context.coordinator.observeProgress(of: webView)
         if handoff.shouldLoad {
@@ -735,24 +874,78 @@ private struct PlayerWebView: UIViewRepresentable {
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
         coordinator.stopObserving()
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: messageName)
         PlayerWebViewPool.recycle(webView)
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        let expectedGameID: String
         let onProgress: (Double) -> Void
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
+        let onVerifiedRun: (VerifiedRunResult) -> Void
+    /// Fires when take() returned an already-finished prewarmed
+    /// navigation, before onLoadFinish is delivered after mount.
+    var onPrewarmHit: () -> Void = {}
         private var progressObservation: NSKeyValueObservation?
+        private var acceptedRunIDs = Set<String>()
+        private var runtimeSessionID: String?
+        private var isActive = true
+        lazy var messageProxy = WeakScriptMessageHandler(delegate: self)
 
-        init(onProgress: @escaping (Double) -> Void,
+        init(gameID: String,
+             onProgress: @escaping (Double) -> Void,
              onLoadFinish: @escaping () -> Void,
              onLoadFail: @escaping (Error) -> Void,
-             onTerminate: @escaping () -> Void) {
+             onTerminate: @escaping () -> Void,
+             onVerifiedRun: @escaping (VerifiedRunResult) -> Void) {
+            self.expectedGameID = gameID
             self.onProgress = onProgress
             self.onLoadFinish = onLoadFinish
             self.onLoadFail = onLoadFail
             self.onTerminate = onTerminate
+            self.onVerifiedRun = onVerifiedRun
+        }
+
+        func userContentController(_ userContentController: WKUserContentController,
+                                   didReceive message: WKScriptMessage) {
+            guard message.name == PlayerWebView.messageName,
+                  message.frameInfo.isMainFrame,
+                  sameOrigin(message.frameInfo.securityOrigin),
+                  let body = message.body as? [String: Any],
+                  Set(body.keys).isSubset(of: ["schema", "type", "sessionId", "gameId", "runId"]),
+                  body["schema"] as? Int == 1,
+                  body["type"] as? String == "verified_run_available",
+                  let runtimeSessionID = body["sessionId"] as? String,
+                  !runtimeSessionID.isEmpty, runtimeSessionID.count <= 128,
+                  body["gameId"] as? String == expectedGameID,
+                  let runID = body["runId"] as? String,
+                  !runID.isEmpty, runID.count <= 128,
+                  acceptedRunIDs.insert(runID).inserted else { return }
+            if let boundSessionID = self.runtimeSessionID, boundSessionID != runtimeSessionID { return }
+            self.runtimeSessionID = runtimeSessionID
+
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let result = try await BackendAPI.shared.fetchVerifiedRunResult(runID: runID)
+                    guard self.isActive, self.runtimeSessionID == runtimeSessionID,
+                          result.gameID == expectedGameID, result.isVerified else { return }
+                    onVerifiedRun(result)
+                } catch {
+                    PlayerTelemetry.report(gameID: expectedGameID, kind: "ios-run-result-failed",
+                                           name: "VerifiedRunResultFetchFailed",
+                                           message: "verified result unavailable")
+                }
+            }
+        }
+
+        private func sameOrigin(_ origin: WKSecurityOrigin) -> Bool {
+            guard let expectedScheme = BackendConfig.baseURL.scheme,
+                  let expectedHost = BackendConfig.baseURL.host else { return false }
+            let expectedPort = BackendConfig.baseURL.port ?? (expectedScheme == "https" ? 443 : 80)
+            return origin.protocol == expectedScheme && origin.host == expectedHost && origin.port == expectedPort
         }
 
         func observeProgress(of webView: WKWebView) {
@@ -762,6 +955,7 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func stopObserving() {
+            isActive = false
             progressObservation?.invalidate()
             progressObservation = nil
         }
