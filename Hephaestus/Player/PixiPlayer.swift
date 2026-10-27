@@ -309,16 +309,19 @@ private struct PlayerStateCard<Content: View>: View {
 struct PixiPlayerSheet: View {
     let gameID: String
     let title: String
-    let onFinish: (VerifiedRunResult) -> Void = { _ in }
     /// Hold frame for the #58 handoff: the feed poster's URL. While
     /// set and not yet faded, the poster covers the web view so Play
     /// never flashes a blank sheet. Nil keeps today's loading card.
     /// A video clip frame is deliberately NOT snapshotted: video
     /// layers render black into image contexts, so the poster is the
     /// honest hold frame the shell can offer today.
+    /// Declared before onFinish on purpose: Swift call-site
+    /// arguments must follow declaration order, and the cover site
+    /// passes holdPosterURL/tappedAt before the trailing onFinish.
     var holdPosterURL: String? = nil
     /// Tap time for the tap-to-nav-ready measurement. Nil skips it.
     var tappedAt: Date? = nil
+    let onFinish: (VerifiedRunResult) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -834,10 +837,13 @@ private struct PlayerWebView: UIViewRepresentable {
     let onLoadFinish: () -> Void
     let onLoadFail: (Error) -> Void
     let onTerminate: () -> Void
-    let onVerifiedRun: (VerifiedRunResult) -> Void
     /// Fires when take() returned an already-finished prewarmed
     /// navigation, before onLoadFinish is delivered after mount.
+    /// Declared before onProgress on purpose: Swift call-site
+    /// arguments must follow declaration order, and the sheet site
+    /// passes onPrewarmHit first.
     var onPrewarmHit: () -> Void = {}
+    let onVerifiedRun: (VerifiedRunResult) -> Void
 
     private static let messageName = "hephaestusRunResult"
 
@@ -884,10 +890,13 @@ private struct PlayerWebView: UIViewRepresentable {
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
-        let onVerifiedRun: (VerifiedRunResult) -> Void
-    /// Fires when take() returned an already-finished prewarmed
+        /// Fires when take() returned an already-finished prewarmed
     /// navigation, before onLoadFinish is delivered after mount.
+    /// Declared before onProgress on purpose: Swift call-site
+    /// arguments must follow declaration order, and the sheet site
+    /// passes onPrewarmHit first.
     var onPrewarmHit: () -> Void = {}
+    let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
         private var acceptedRunIDs = Set<String>()
         private var runtimeSessionID: String?
