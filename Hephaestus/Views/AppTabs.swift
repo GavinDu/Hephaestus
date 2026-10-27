@@ -205,6 +205,12 @@ private struct FeedPreviewSurface: UIViewRepresentable {
 
 // MARK: - Discover
 
+private struct PlayerResultPresentation: Identifiable {
+    let game: FeedGame
+    let result: VerifiedRunResult
+    var id: String { result.runID }
+}
+
 /// Backend-backed social feeds use the verified bearer session when present.
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
@@ -230,7 +236,7 @@ struct DiscoverView: View {
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
     @State private var settledForYouGameID: String?
-    @State private var resultGame: FeedGame?
+    @State private var resultPresentation: PlayerResultPresentation?
 
     private var visibleGames: [FeedGame] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -481,18 +487,20 @@ struct DiscoverView: View {
             }
             .fullScreenCover(item: $playerRequest) { request in
                 PixiPlayerSheet(gameID: request.gameID, title: request.title, onFinish: {
-                    resultGame = games.first(where: { $0.id == request.gameID })
+                    guard let game = games.first(where: { $0.id == request.gameID }) else { return }
+                    resultPresentation = PlayerResultPresentation(game: game, result: $0)
                 })
             }
-            .sheet(item: $resultGame) { game in
+            .sheet(item: $resultPresentation) { presentation in
                 PlayerResultSheet(
-                    game: game,
-                    isLiked: likedGameIDs.contains(game.id),
+                    game: presentation.game,
+                    result: presentation.result,
+                    isLiked: likedGameIDs.contains(presentation.game.id),
                     onPlayAgain: {
-                        DispatchQueue.main.async { play(game) }
+                        DispatchQueue.main.async { play(presentation.game) }
                     },
-                    onNextGame: { Task { await advanceToNextGame(after: game) } },
-                    onToggleLike: { toggleLike(game) }
+                    onNextGame: { Task { await advanceToNextGame(after: presentation.game) } },
+                    onToggleLike: { toggleLike(presentation.game) }
                 )
             }
             .sheet(item: $commentsGame) { game in
@@ -525,18 +533,18 @@ struct DiscoverView: View {
 
     private func advanceToNextGame(after game: FeedGame) async {
         guard let index = visibleGames.firstIndex(where: { $0.id == game.id }) else {
-            resultGame = nil
+            resultPresentation = nil
             return
         }
         if !visibleGames.indices.contains(index + 1), nextCursor != nil {
             await loadMore()
         }
         guard visibleGames.indices.contains(index + 1) else {
-            resultGame = nil
+            resultPresentation = nil
             return
         }
         let nextGame = visibleGames[index + 1]
-        resultGame = nil
+        resultPresentation = nil
         if selectedFeed != .forYou || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             selectedFeed = .forYou
             searchText = ""

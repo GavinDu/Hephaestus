@@ -192,3 +192,30 @@ struct HephaestusTests {
     #expect(!FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: true, constrainedNetwork: false))
     #expect(!FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: false, constrainedNetwork: true))
 }
+
+@Test func verifiedRunResultDecodesOutcomeAndRank() throws {
+    let json = """
+    {
+      "runId": "run-1",
+      "gameId": "game-1",
+      "status": "verified",
+      "result": {"won": true, "score": 420, "durationMs": 12800, "completedAt": "2026-10-26T23:59:12Z"},
+      "rank": {"scope": "weekly", "position": 7, "total": 184}
+    }
+    """.data(using: .utf8)!
+    let result = try JSONDecoder().decode(VerifiedRunResult.self, from: json)
+    #expect(result.isVerified)
+    #expect(result.runID == "run-1")
+    #expect(result.gameID == "game-1")
+    #expect(result.result?.score == 420)
+    #expect(result.result?.durationMS == 12_800)
+    #expect(result.rank?.position == 7)
+}
+
+@Test func unverifiedRunResultCannotBePresented() throws {
+    let json = """
+    {"runId":"run-2","gameId":"game-1","status":"pending","result":null}
+    """.data(using: .utf8)!
+    let result = try JSONDecoder().decode(VerifiedRunResult.self, from: json)
+    #expect(!result.isVerified)
+}

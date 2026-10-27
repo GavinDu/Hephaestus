@@ -226,6 +226,43 @@ struct CreatorDiscoveryResponse: Decodable {
     var next_cursor: String?
 }
 
+struct VerifiedRunResult: Decodable, Identifiable {
+    let runID: String
+    let gameID: String
+    let status: String
+    let result: Outcome?
+    let rank: Rank?
+
+    var id: String { runID }
+
+    struct Outcome: Decodable {
+        let won: Bool
+        let score: Int
+        let durationMS: Int
+        let completedAt: String?
+
+        enum CodingKeys: String, CodingKey {
+            case won, score
+            case durationMS = "durationMs"
+            case completedAt
+        }
+    }
+
+    struct Rank: Decodable {
+        let scope: String
+        let position: Int
+        let total: Int?
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case runID = "runId"
+        case gameID = "gameId"
+        case status, result, rank
+    }
+
+    var isVerified: Bool { status == "verified" && result != nil }
+}
+
 struct IngestResult: Codable {
     var ingest_id: String
     var elements: [Element]
@@ -267,11 +304,13 @@ struct CreateGameResponse: Codable {
 enum APIError: Error, LocalizedError {
     case badStatus(Int)
     case decoding(Error)
+    case invalidInput(String)
 
     var errorDescription: String? {
         switch self {
         case .badStatus(let code): return "Backend returned HTTP \(code)."
         case .decoding(let e): return "Couldn't read the backend reply: \(e.localizedDescription)"
+        case .invalidInput(let message): return message
         }
     }
 }
@@ -382,6 +421,15 @@ final class BackendAPI: ObservableObject {
         if let cursor, !cursor.isEmpty { path += "&cursor=\(cursor)" }
         let req = try makeRequest(path)
         return try await send(FeedResponse.self, req)
+    }
+
+    func fetchVerifiedRunResult(runID: String) async throws -> VerifiedRunResult {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        guard let encodedRunID = runID.addingPercentEncoding(withAllowedCharacters: allowed), !encodedRunID.isEmpty else {
+            throw APIError.invalidInput("Invalid run identifier.")
+        }
+        let req = try makeRequest("v1/runs/\(encodedRunID)/result")
+        return try await send(VerifiedRunResult.self, req)
     }
 
     func fetchFollowingCreatorIDs() async throws -> Set<String> {
