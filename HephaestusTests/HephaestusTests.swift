@@ -218,4 +218,24 @@ struct HephaestusTests {
     """.data(using: .utf8)!
     let result = try JSONDecoder().decode(VerifiedRunResult.self, from: json)
     #expect(!result.isVerified)
+
+    @Test func appleSignInResponseDecodesSession() throws {
+        let json = """
+        {"access_token":"abc.def","token_type":"Bearer","expires_in":2592000,"subject":"apple:001"}
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(BackendAPI.AppleSignInResponse.self, from: json)
+        #expect(response.access_token == "abc.def")
+        #expect(response.token_type == "Bearer")
+        #expect(response.expires_in == 2592000)
+        #expect(response.subject == "apple:001")
+    }
+
+    @Test func deleteAccountResponseDecodes() throws {
+        let json = """
+        {"deleted":true,"subject":"apple:001"}
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(BackendAPI.DeleteAccountResponse.self, from: json)
+        #expect(response.deleted)
+        #expect(response.subject == "apple:001")
+    }
 }
