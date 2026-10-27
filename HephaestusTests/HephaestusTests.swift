@@ -239,4 +239,3 @@ struct HephaestusTests {
     #expect(response.deleted)
     #expect(response.subject == "apple:001")
 }
-}
