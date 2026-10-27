@@ -416,6 +416,53 @@ struct PixiPlayerSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// Navigation-finish handler, extracted from the PlayerWebView
+    /// call site so that expression stays type-checkable: the inline
+    /// version (with the #58 handoff block) timed out the compiler.
+    /// @State assignment needs no `mutating` here: the wrappers'
+    /// setters forward to external storage.
+    private func handleLoadFinish() {
+        isLoading = false
+        loadError = nil
+        showSlowHint = false
+        let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
+        DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
+        PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
+                               message: "loaded in \(ms)ms quality=\(effectiveQuality)")
+        // The backend derives play_start/replay/completion from
+        // runtime session_start/run_end events. Only track the
+        // sheet lifecycle here to avoid double-counting starts.
+        if !didTrackGameplayStart {
+            gameplayStartedAt = Date()
+            didTrackGameplayStart = true
+        }
+        // #58 handoff, once: tap-to-nav-ready is tap time
+        // to navigation finish (the shell definition
+        // Gavin confirmed), and the hold poster fades
+        // out over the live web view. Reloads skip
+        // both: the hold is already gone by then.
+        if !didReportHandoff {
+            didReportHandoff = true
+            if let tappedAt {
+                let ms = max(0, Int(Date().timeIntervalSince(tappedAt) * 1000))
+                PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "TapToNavReady",
+                                       message: "tap-to-nav-ready in \(ms)ms prewarmHit=\(prewarmHit) quality=\(effectiveQuality)")
+            }
+            if holdPosterURL != nil, holdVisible {
+                if reduceMotion {
+                    holdOpacity = 0
+                    holdVisible = false
+                } else {
+                    withAnimation(.easeOut(duration: 0.25)) { holdOpacity = 0 }
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        holdVisible = false
+                    }
+                }
+            }
+        }
+    }
+
     private func finishToFeed() {
         if didTrackGameplayStart, let verifiedResult, verifiedResult.isVerified {
             onFinish(verifiedResult)
@@ -432,47 +479,7 @@ struct PixiPlayerSheet: View {
                         gameID: gameID,
                         onPrewarmHit: { prewarmHit = true },
                         onProgress: { progress = $0 },
-                        onLoadFinish: {
-                            isLoading = false
-                            loadError = nil
-                            showSlowHint = false
-                            let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
-                            DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
-                            PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
-                                                   message: "loaded in \(ms)ms quality=\(effectiveQuality)")
-                            // The backend derives play_start/replay/completion from
-                            // runtime session_start/run_end events. Only track the
-                            // sheet lifecycle here to avoid double-counting starts.
-                            if !didTrackGameplayStart {
-                                gameplayStartedAt = Date()
-                                didTrackGameplayStart = true
-                            }
-                            // #58 handoff, once: tap-to-nav-ready is tap time
-                            // to navigation finish (the shell definition
-                            // Gavin confirmed), and the hold poster fades
-                            // out over the live web view. Reloads skip
-                            // both: the hold is already gone by then.
-                            if !didReportHandoff {
-                                didReportHandoff = true
-                                if let tappedAt {
-                                    let ms = max(0, Int(Date().timeIntervalSince(tappedAt) * 1000))
-                                    PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "TapToNavReady",
-                                                           message: "tap-to-nav-ready in \(ms)ms prewarmHit=\(prewarmHit) quality=\(effectiveQuality)")
-                                }
-                                if holdPosterURL != nil, holdVisible {
-                                    if reduceMotion {
-                                        holdOpacity = 0
-                                        holdVisible = false
-                                    } else {
-                                        withAnimation(.easeOut(duration: 0.25)) { holdOpacity = 0 }
-                                        Task {
-                                            try? await Task.sleep(for: .milliseconds(300))
-                                            holdVisible = false
-                                        }
-                                    }
-                                }
-                            }
-                        },
+                        onLoadFinish: { handleLoadFinish() },
                         onLoadFail: { error in
                             isLoading = false
                             holdOpacity = 0
