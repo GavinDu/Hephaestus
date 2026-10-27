@@ -282,7 +282,7 @@ struct DiscoverView: View {
 
                 if showsForYouPager {
                     forYouPager
-                    .frame(maxWidth: .infinity, maxHeight: .infinity).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
