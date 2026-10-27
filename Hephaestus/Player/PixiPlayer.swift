@@ -463,16 +463,12 @@ struct PixiPlayerSheet: View {
         }
     }
 
-    private func finishToFeed() {
-        if didTrackGameplayStart, let verifiedResult, verifiedResult.isVerified {
-            onFinish(verifiedResult)
-        }
-        dismiss()
-    }
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
+    /// The player stack, extracted from `body` so the body
+    /// expression stays type-checkable: the full body (stack +
+    /// overlays + toolbar + lifecycle modifiers) timed out the
+    /// compiler after the #58 additions.
+    private var playerContent: some View {
+        ZStack {
                 if let url = playerURL {
                     PlayerWebView(
                         url: url,
@@ -605,10 +601,12 @@ struct PixiPlayerSheet: View {
                         }
                     }
                 }
-            }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var playerToolbar: some ToolbarContent {
+
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
                         finishToFeed()
@@ -638,6 +636,22 @@ struct PixiPlayerSheet: View {
                     .accessibilityLabel("Player quality settings")
                     .accessibilityHint("Changing quality reloads the game.")
                 }
+    }
+
+    private func finishToFeed() {
+        if didTrackGameplayStart, let verifiedResult, verifiedResult.isVerified {
+            onFinish(verifiedResult)
+        }
+        dismiss()
+    }
+
+    var body: some View {
+        NavigationStack {
+            playerContent
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                playerToolbar
             }
             .onChange(of: qualityRaw) { _, _ in
                 // Apply the saved quality on the next game launch, not during
