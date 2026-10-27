@@ -473,7 +473,6 @@ struct PixiPlayerSheet: View {
                     PlayerWebView(
                         url: url,
                         gameID: gameID,
-                        onPrewarmHit: { prewarmHit = true },
                         onProgress: { progress = $0 },
                         onLoadFinish: { handleLoadFinish() },
                         onLoadFail: { error in
@@ -513,6 +512,7 @@ struct PixiPlayerSheet: View {
                                                        message: "gave up after 2 auto-reloads")
                             }
                         },
+                        onPrewarmHit: { prewarmHit = true },
                         onVerifiedRun: { result in
                             verifiedResult = result
                         }
