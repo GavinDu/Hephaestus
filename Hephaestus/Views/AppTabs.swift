@@ -456,7 +456,7 @@ struct DiscoverView: View {
                         onBlockCreator: { game in
                             if let id = game.ownerID { Task { await blockCreator(id) } }
                         },
-                        onNotInterested: { Task { await markNotInterested($0) } },
+                        onNotInterested: { game in Task { await markNotInterested(game) } },
                         onImpression: { game in
                             Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") }
                         },
@@ -813,7 +813,7 @@ private struct GameFeedCard: View {
     let onBlockCreator: () -> Void
     let onNotInterested: () -> Void
     let onImpression: () -> Void
-    let shouldAutoplayPreview: Bool = true
+    var shouldAutoplayPreview: Bool = true
 
     private var shareURL: URL {
         var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"), resolvingAgainstBaseURL: false)!
