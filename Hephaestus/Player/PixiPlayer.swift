@@ -321,7 +321,7 @@ struct PixiPlayerSheet: View {
     var holdPosterURL: String? = nil
     /// Tap time for the tap-to-nav-ready measurement. Nil skips it.
     var tappedAt: Date? = nil
-    let onFinish: (VerifiedRunResult) -> Void = { _ in }
+    var onFinish: (VerifiedRunResult) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
