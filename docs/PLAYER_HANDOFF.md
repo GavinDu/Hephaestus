@@ -1,8 +1,10 @@
 # Preview-to-game handoff design (Hephaestus #58)
 
 Design proposal for making Play feel like the clip turning into the
-game. This document is the design step; implementation follows after
-review. It does not change any code.
+game, confirmed by Gavin 2026-10-26 and implemented on PR #86
+(see "Implementation" below). The remaining follow-ups are a
+runtime first-frame signal, the Layer 1 smoke extension, and
+physical validation — all listed at the end, none claimed done.
 
 ## What already exists (do not rebuild)
 
@@ -136,14 +138,60 @@ would corrupt the tap-to-interactive measurement.
   existing sheet). If it regresses, removing the snapshot layer
   restores today's sheet in one change.
 
-## Open questions for review
+## Open questions for review — answered 2026-10-26
 
 1. Crossfade on navigation finish (proposal) vs waiting for a
-   runtime first-frame signal (needs a runtime contract)? The
-   proposal is definition 1 now, definition 2 as a follow-up.
+   runtime first-frame signal (needs a runtime contract)?
+   **Answered: definition 1 now, definition 2 as a follow-up.**
 2. Snapshot source when the clip never started (poster) vs when
    the card is mid-clip — is the poster acceptable as the hold
    frame, or should the hold be skipped when no clip frame exists?
+   **Answered: the poster is the hold frame.** The shell cannot
+   snapshot a video layer (it renders black into image contexts),
+   so a mid-clip frame is not capturable from the shell today;
+   capturing one needs video-output plumbing in
+   `FeedPreviewPlayback` and is a follow-up, not faked here.
 3. Is the 1.5 s budget judged on the shell definition
    (navigation finish) or held until first-frame measurement
    exists?
+   **Answered: judged on the shell definition**, measured as
+   `tap-to-nav-ready` (tap timestamp to navigation finish) so the
+   name can never be confused with a later first-frame metric.
+
+## Implementation (PR #86, rebased onto main 2026-10-26)
+
+- `PixiPlayerRequest` carries `tappedAt` and `posterURL`,
+  set by `DiscoverView.play()`; other entry points leave them
+  nil and keep today's behavior exactly. They are `var`, not
+  `let`: a defaulted `let` is not a memberwise-init parameter
+  in this project's Swift 5.0 language mode.
+- `PixiPlayerSheet` takes `holdPosterURL` and `tappedAt`
+  alongside the verified-result `onFinish` — the two flows are
+  independent: the hold fades at navigation finish, the result
+  sheet fires on the verified outcome. While the hold is up,
+  the poster (or black on poster-load failure) covers the web
+  view; the progress indicator is a compact overlay on the
+  poster instead of `PlayerStateCard`, whose full-screen
+  background would hide it. On the first navigation finish the
+  poster fades out over 250 ms (instant under Reduce Motion);
+  reloads and retries never re-show it, and a load failure
+  drops it immediately so the error card is uncovered.
+- `PlayerWebView` reports a prewarm hit through `onPrewarmHit`
+  (from `take()`'s already-finished navigation). A prewarm hit
+  skips the loading indicator entirely and the crossfade runs
+  immediately; the hit is also tagged on the telemetry so the
+  hit rate is measurable from the existing reports.
+- Telemetry: one `TapToNavReady` perf report per sheet on first
+  navigation finish, carrying milliseconds and the prewarm-hit
+  flag, alongside the existing `PlayerLoad` report (which
+  measures sheet-internal load time, a different number).
+- The hold backdrop and loading overlay are helper computed
+  properties, not inline body code: an inline version timed
+  out the compiler (`unable to type-check this expression in
+  reasonable time`) at the PlayerWebView call site.
+- Deliberately not in this change: a first-frame signal (needs
+  the runtime contract), the Layer 1 smoke extension (no-blank-
+  frame screenshot check + return-position check), and physical
+  validation on iPhone/iPad over Wi-Fi and cellular. Rollback
+  stays one change: remove the hold layer and the sheet is
+  today's sheet again.

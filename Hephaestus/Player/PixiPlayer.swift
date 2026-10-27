@@ -26,6 +26,11 @@ struct PixiPlayerRequest: Identifiable {
     let id = UUID()
     let gameID: String
     let title: String
+    /// Tap time for the #58 tap-to-nav-ready measurement, and the
+    /// poster URL for the hold frame. Nil for entry points that do
+    /// not set them: those plays keep today's behavior.
+    var tappedAt: Date? = nil
+    var posterURL: String? = nil
 }
 
 // MARK: - Quality (performance control)
@@ -304,9 +309,28 @@ private struct PlayerStateCard<Content: View>: View {
 struct PixiPlayerSheet: View {
     let gameID: String
     let title: String
-    let onFinish: (VerifiedRunResult) -> Void = { _ in }
+    /// Hold frame for the #58 handoff: the feed poster's URL. While
+    /// set and not yet faded, the poster covers the web view so Play
+    /// never flashes a blank sheet. Nil keeps today's loading card.
+    /// A video clip frame is deliberately NOT snapshotted: video
+    /// layers render black into image contexts, so the poster is the
+    /// honest hold frame the shell can offer today.
+    /// Declared before onFinish on purpose: Swift call-site
+    /// arguments must follow declaration order, and the cover site
+    /// passes holdPosterURL/tappedAt before the trailing onFinish.
+    var holdPosterURL: String? = nil
+    /// Tap time for the tap-to-nav-ready measurement. Nil skips it.
+    var tappedAt: Date? = nil
+    var onFinish: (VerifiedRunResult) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Handoff state (#58): the hold fades out once, on the first
+    /// navigation finish. Reloads and retries never re-show it.
+    @State private var holdOpacity = 1.0
+    @State private var holdVisible = true
+    @State private var prewarmHit = false
+    @State private var didReportHandoff = false
     @State private var wasBackgrounded = false
     @State private var isLoading = true
     @State private var loadError: String?
@@ -349,39 +373,112 @@ struct PixiPlayerSheet: View {
         return components?.url ?? BackendConfig.baseURL
     }
 
-    private func finishToFeed() {
-        if didTrackGameplayStart, let verifiedResult, verifiedResult.isVerified {
-            onFinish(verifiedResult)
+    /// #58 hold backdrop, extracted so the body expression stays
+    /// small enough to type-check. A failed poster load falls back
+    /// to black, never to a white flash.
+    private var holdBackdrop: some View {
+        Group {
+            if let holdPosterURL, let holdURL = URL(string: holdPosterURL) {
+                AsyncImage(url: holdURL) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        Color.black
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .opacity(holdOpacity)
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+            }
         }
-        dismiss()
     }
 
-    var body: some View {
-        NavigationStack {
-            ZStack {
+    /// #58 compact progress overlay drawn ON the hold poster.
+    /// PlayerStateCard paints its own full-screen background, which
+    /// would hide the hold, so it cannot be reused here.
+    private var holdLoadingOverlay: some View {
+        VStack(spacing: 12) {
+            ProgressView(value: progress)
+                .progressViewStyle(.linear)
+                .frame(width: 180)
+            Text("Loading \(title)…")
+                .font(.subheadline)
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
+            if showSlowHint {
+                Text("Still loading — the connection may be slow.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Navigation-finish handler, extracted from the PlayerWebView
+    /// call site so that expression stays type-checkable: the inline
+    /// version (with the #58 handoff block) timed out the compiler.
+    /// @State assignment needs no `mutating` here: the wrappers'
+    /// setters forward to external storage.
+    private func handleLoadFinish() {
+        isLoading = false
+        loadError = nil
+        showSlowHint = false
+        let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
+        DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
+        PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
+                               message: "loaded in \(ms)ms quality=\(effectiveQuality)")
+        // The backend derives play_start/replay/completion from
+        // runtime session_start/run_end events. Only track the
+        // sheet lifecycle here to avoid double-counting starts.
+        if !didTrackGameplayStart {
+            gameplayStartedAt = Date()
+            didTrackGameplayStart = true
+        }
+        // #58 handoff, once: tap-to-nav-ready is tap time
+        // to navigation finish (the shell definition
+        // Gavin confirmed), and the hold poster fades
+        // out over the live web view. Reloads skip
+        // both: the hold is already gone by then.
+        if !didReportHandoff {
+            didReportHandoff = true
+            if let tappedAt {
+                let ms = max(0, Int(Date().timeIntervalSince(tappedAt) * 1000))
+                PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "TapToNavReady",
+                                       message: "tap-to-nav-ready in \(ms)ms prewarmHit=\(prewarmHit) quality=\(effectiveQuality)")
+            }
+            if holdPosterURL != nil, holdVisible {
+                if reduceMotion {
+                    holdOpacity = 0
+                    holdVisible = false
+                } else {
+                    withAnimation(.easeOut(duration: 0.25)) { holdOpacity = 0 }
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        holdVisible = false
+                    }
+                }
+            }
+        }
+    }
+
+    /// The player stack, extracted from `body` so the body
+    /// expression stays type-checkable: the full body (stack +
+    /// overlays + toolbar + lifecycle modifiers) timed out the
+    /// compiler after the #58 additions.
+    private var playerContent: some View {
+        ZStack {
                 if let url = playerURL {
                     PlayerWebView(
                         url: url,
                         gameID: gameID,
                         onProgress: { progress = $0 },
-                        onLoadFinish: {
-                            isLoading = false
-                            loadError = nil
-                            showSlowHint = false
-                            let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
-                            DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
-                            PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
-                                                   message: "loaded in \(ms)ms quality=\(effectiveQuality)")
-                            // The backend derives play_start/replay/completion from
-                            // runtime session_start/run_end events. Only track the
-                            // sheet lifecycle here to avoid double-counting starts.
-                            if !didTrackGameplayStart {
-                                gameplayStartedAt = Date()
-                                didTrackGameplayStart = true
-                            }
-                        },
+                        onLoadFinish: { handleLoadFinish() },
                         onLoadFail: { error in
                             isLoading = false
+                            holdOpacity = 0
+                            holdVisible = false
                             // Raw detail goes to DevLog/telemetry;
                             // the card shows only the mapped message.
                             loadError = PlayerLoadFailure.userMessage(for: error)
@@ -415,6 +512,7 @@ struct PixiPlayerSheet: View {
                                                        message: "gave up after 2 auto-reloads")
                             }
                         },
+                        onPrewarmHit: { prewarmHit = true },
                         onVerifiedRun: { result in
                             verifiedResult = result
                         }
@@ -423,7 +521,17 @@ struct PixiPlayerSheet: View {
                     .ignoresSafeArea(edges: .bottom)
                 }
 
-                if isLoading && loadError == nil {
+                // #58 hold frame: the poster covers the web view until
+                // the first navigation finish fades it out. A missing
+                // poster URL means no hold at all.
+                if holdPosterURL != nil, holdVisible {
+                    holdBackdrop
+                }
+
+                if isLoading && loadError == nil, !prewarmHit {
+                    if holdPosterURL != nil, holdVisible {
+                        holdLoadingOverlay
+                    } else {
                     PlayerStateCard {
                         VStack(spacing: 12) {
                             ProgressView(value: progress)
@@ -438,6 +546,7 @@ struct PixiPlayerSheet: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                    }
                     }
                 }
 
@@ -492,10 +601,12 @@ struct PixiPlayerSheet: View {
                         }
                     }
                 }
-            }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var playerToolbar: some ToolbarContent {
+
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
                         finishToFeed()
@@ -525,6 +636,22 @@ struct PixiPlayerSheet: View {
                     .accessibilityLabel("Player quality settings")
                     .accessibilityHint("Changing quality reloads the game.")
                 }
+    }
+
+    private func finishToFeed() {
+        if didTrackGameplayStart, let verifiedResult, verifiedResult.isVerified {
+            onFinish(verifiedResult)
+        }
+        dismiss()
+    }
+
+    var body: some View {
+        NavigationStack {
+            playerContent
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                playerToolbar
             }
             .onChange(of: qualityRaw) { _, _ in
                 // Apply the saved quality on the next game launch, not during
@@ -731,6 +858,11 @@ private struct PlayerWebView: UIViewRepresentable {
     let onLoadFinish: () -> Void
     let onLoadFail: (Error) -> Void
     let onTerminate: () -> Void
+    /// Fires when take() returned an already-finished prewarmed
+    /// navigation, before onLoadFinish is delivered after mount.
+    /// Declared between onTerminate and onVerifiedRun to match the
+    /// call-site argument order (Swift requires the same order).
+    var onPrewarmHit: () -> Void = {}
     let onVerifiedRun: (VerifiedRunResult) -> Void
 
     private static let messageName = "hephaestusRunResult"
@@ -752,6 +884,7 @@ private struct PlayerWebView: UIViewRepresentable {
         } else if handoff.didFinish {
             // A prewarmed navigation may have finished before the sheet
             // attached its delegate. Deliver readiness after the view mounts.
+            onPrewarmHit()
             DispatchQueue.main.async {
                 context.coordinator.onProgress(1)
                 context.coordinator.onLoadFinish()
@@ -777,7 +910,7 @@ private struct PlayerWebView: UIViewRepresentable {
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
-        let onVerifiedRun: (VerifiedRunResult) -> Void
+    let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
         private var acceptedRunIDs = Set<String>()
         private var runtimeSessionID: String?
