@@ -860,9 +860,8 @@ private struct PlayerWebView: UIViewRepresentable {
     let onTerminate: () -> Void
     /// Fires when take() returned an already-finished prewarmed
     /// navigation, before onLoadFinish is delivered after mount.
-    /// Declared before onProgress on purpose: Swift call-site
-    /// arguments must follow declaration order, and the sheet site
-    /// passes onPrewarmHit first.
+    /// Declared between onTerminate and onVerifiedRun to match the
+    /// call-site argument order (Swift requires the same order).
     var onPrewarmHit: () -> Void = {}
     let onVerifiedRun: (VerifiedRunResult) -> Void
 
@@ -911,12 +910,6 @@ private struct PlayerWebView: UIViewRepresentable {
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
-        /// Fires when take() returned an already-finished prewarmed
-    /// navigation, before onLoadFinish is delivered after mount.
-    /// Declared before onProgress on purpose: Swift call-site
-    /// arguments must follow declaration order, and the sheet site
-    /// passes onPrewarmHit first.
-    var onPrewarmHit: () -> Void = {}
     let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
         private var acceptedRunIDs = Set<String>()
