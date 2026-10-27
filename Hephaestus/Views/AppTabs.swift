@@ -486,7 +486,8 @@ struct DiscoverView: View {
                 await load()
             }
             .fullScreenCover(item: $playerRequest) { request in
-                PixiPlayerSheet(gameID: request.gameID, title: request.title, onFinish: {
+                PixiPlayerSheet(gameID: request.gameID, title: request.title,
+                                holdPosterURL: request.posterURL, tappedAt: request.tappedAt, onFinish: {
                     guard let game = games.first(where: { $0.id == request.gameID }) else { return }
                     resultPresentation = PlayerResultPresentation(game: game, result: $0)
                 })
@@ -528,7 +529,11 @@ struct DiscoverView: View {
 
     private func play(_ game: FeedGame) {
         RecentGames.record(gameID: game.id, title: game.title)
-        playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
+        // #58: the tap timestamp and poster travel with the request so
+        // the sheet can measure tap-to-nav-ready and hold the poster
+        // over the web view until navigation finishes.
+        playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title,
+                                          tappedAt: Date(), posterURL: game.previewPosterURL)
     }
 
     private func advanceToNextGame(after game: FeedGame) async {
