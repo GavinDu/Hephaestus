@@ -260,9 +260,11 @@ struct DiscoverView: View {
             !isLoading && errorMessage == nil && !visibleGames.isEmpty
     }
 
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
+    /// Feed stack, extracted from `body` so the body expression
+    /// stays type-checkable: picker + pager/grid branches + the
+    /// sheet/cover modifiers together timed out the compiler.
+    private var feedContent: some View {
+        VStack(spacing: 0) {
                 Picker("Feed", selection: $selectedFeed) {
                     ForEach(SocialFeedScope.allCases) { scope in
                         Text(scope.title).tag(scope)
@@ -279,37 +281,8 @@ struct DiscoverView: View {
                 }
 
                 if showsForYouPager {
-                    ForYouPagerView(
-                        settledGameID: $settledForYouGameID,
-                        games: visibleGames,
-                        savedGameIDs: savedGameIDs,
-                        likedGameIDs: likedGameIDs,
-                        followedCreatorIDs: followedCreatorIDs,
-                        onPlay: { play($0) },
-                        onToggleSaved: { toggleSaved($0) },
-                        onToggleLike: { toggleLike($0) },
-                        onToggleFollow: { game in
-                            if let id = game.ownerID { Task { await toggleFollow(id) } }
-                        },
-                        onOpenComments: { commentsGame = $0 },
-                        onOpenCreator: { game in
-                            if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) }
-                        },
-                        onReport: { reportingGame = $0 },
-                        onBlockCreator: { game in
-                            if let id = game.ownerID { Task { await blockCreator(id) } }
-                        },
-                        onNotInterested: { Task { await markNotInterested($0) } },
-                        onImpression: { game in
-                            Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") }
-                        },
-                        onNearEnd: {
-                            if nextCursor != nil && !isLoadingMore && !isLoading {
-                                Task { await loadMore() }
-                            }
-                        }
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    forYouPager
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
@@ -382,23 +355,7 @@ struct DiscoverView: View {
                     } else {
                         LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: 18) {
                             ForEach(visibleGames) { game in
-                                GameFeedCard(
-                                    game: game,
-                                    isSaved: savedGameIDs.contains(game.id),
-                                    isLiked: likedGameIDs.contains(game.id),
-                                    isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
-                                    canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.currentUserID,
-                                    onPlay: { play(game) },
-                                    onToggleSaved: { toggleSaved(game) },
-                                    onToggleLike: { toggleLike(game) },
-                                    onToggleFollow: { if let id = game.ownerID { Task { await toggleFollow(id) } } },
-                                    onOpenComments: { commentsGame = game },
-                                    onOpenCreator: { if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) } },
-                                    onReport: { reportingGame = game },
-                                    onBlockCreator: { if let id = game.ownerID { Task { await blockCreator(id) } } },
-                                    onNotInterested: { Task { await markNotInterested(game) } },
-                                    onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } }
-                                )
+                                gridCard(for: game)
                             }
                         }
                         .frame(maxWidth: 1120)
@@ -473,7 +430,68 @@ struct DiscoverView: View {
                     .accessibilityLabel("Refresh games")
                     .disabled(isLoading)
                 }
-            }
+        }
+    }
+
+    /// Pager construction, extracted from feedContent for the same
+    /// reason: sixteen closure arguments in one expression.
+    private var forYouPager: some View {
+                    ForYouPagerView(
+                        settledGameID: $settledForYouGameID,
+                        games: visibleGames,
+                        savedGameIDs: savedGameIDs,
+                        likedGameIDs: likedGameIDs,
+                        followedCreatorIDs: followedCreatorIDs,
+                        onPlay: { play($0) },
+                        onToggleSaved: { toggleSaved($0) },
+                        onToggleLike: { toggleLike($0) },
+                        onToggleFollow: { game in
+                            if let id = game.ownerID { Task { await toggleFollow(id) } }
+                        },
+                        onOpenComments: { commentsGame = $0 },
+                        onOpenCreator: { game in
+                            if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) }
+                        },
+                        onReport: { reportingGame = $0 },
+                        onBlockCreator: { game in
+                            if let id = game.ownerID { Task { await blockCreator(id) } }
+                        },
+                        onNotInterested: { Task { await markNotInterested($0) } },
+                        onImpression: { game in
+                            Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") }
+                        },
+                        onNearEnd: {
+                            if nextCursor != nil && !isLoadingMore && !isLoading {
+                                Task { await loadMore() }
+                            }
+                        }
+                    )
+    }
+
+    /// Grid card construction, extracted from feedContent.
+    private func gridCard(for game: FeedGame) -> some View {
+                                GameFeedCard(
+                                    game: game,
+                                    isSaved: savedGameIDs.contains(game.id),
+                                    isLiked: likedGameIDs.contains(game.id),
+                                    isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
+                                    canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.currentUserID,
+                                    onPlay: { play(game) },
+                                    onToggleSaved: { toggleSaved(game) },
+                                    onToggleLike: { toggleLike(game) },
+                                    onToggleFollow: { if let id = game.ownerID { Task { await toggleFollow(id) } } },
+                                    onOpenComments: { commentsGame = game },
+                                    onOpenCreator: { if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) } },
+                                    onReport: { reportingGame = game },
+                                    onBlockCreator: { if let id = game.ownerID { Task { await blockCreator(id) } } },
+                                    onNotInterested: { Task { await markNotInterested(game) } },
+                                    onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } }
+                                )
+    }
+
+    var body: some View {
+        NavigationStack {
+            feedContent
             .refreshable { await load() }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { FeedPreviewPlayback.shared.stop() }
@@ -1036,10 +1054,9 @@ private struct ForYouPagerView: View {
     let onImpression: (FeedGame) -> Void
     let onNearEnd: () -> Void
 
-    var body: some View {
-        ScrollView(.vertical) {
-            LazyVStack(spacing: 0) {
-                ForEach(games) { game in
+    /// Card construction, extracted from the pager body so that
+    /// expression stays type-checkable.
+    private func card(for game: FeedGame) -> some View {
                     GameFeedCard(
                         game: game,
                         isSaved: savedGameIDs.contains(game.id),
@@ -1058,6 +1075,13 @@ private struct ForYouPagerView: View {
                         onImpression: { onImpression(game) },
                         shouldAutoplayPreview: game.id == settledGameID
                     )
+    }
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(spacing: 0) {
+                ForEach(games) { game in
+                    card(for: game)
                     .frame(maxWidth: 1120)
                     .frame(maxWidth: .infinity)
                     .containerRelativeFrame(.vertical)
