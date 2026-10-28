@@ -45,6 +45,19 @@ struct HephaestusTests {
         #expect(!BackendConfig.userID.isEmpty)
     }
 
+    @MainActor @Test func nativePlayerURLUsesPlayPresentation() {
+        let url = PlayerWebViewPool.playerURL(gameID: "game-1", quality: "low")
+        #expect(url != nil)
+        guard let url else { return }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        let values = Dictionary(uniqueKeysWithValues: (query ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+        #expect(values["game"] == "game-1")
+        #expect(values["quality"] == "low")
+        #expect(values["presentation"] == "play")
+    }
+
     @Test func devLogRecordsAndExports() {
         let before = DevLog.shared.count
         DevLog.info(.app, "test entry")

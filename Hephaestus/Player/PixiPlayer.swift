@@ -199,7 +199,8 @@ enum PlayerWebViewPool {
         ) ?? .auto
         components?.queryItems = [
             URLQueryItem(name: "game", value: gameID),
-            URLQueryItem(name: "quality", value: quality ?? PlayerQuality.effective(preference: preference))
+            URLQueryItem(name: "quality", value: quality ?? PlayerQuality.effective(preference: preference)),
+            URLQueryItem(name: "presentation", value: "play")
         ]
         return components?.url
     }
@@ -358,13 +359,7 @@ struct PixiPlayerSheet: View {
     }
 
     private var playerURL: URL? {
-        var components = URLComponents(url: BackendConfig.baseURL, resolvingAgainstBaseURL: false)
-        components?.path = "/player"
-        components?.queryItems = [
-            URLQueryItem(name: "game", value: gameID),
-            URLQueryItem(name: "quality", value: activeQuality ?? effectiveQuality),
-        ]
-        return components?.url
+        PlayerWebViewPool.playerURL(gameID: gameID, quality: activeQuality ?? effectiveQuality)
     }
 
     private var shareURL: URL {
@@ -487,7 +482,7 @@ struct PixiPlayerSheet: View {
                         url: url,
                         gameID: gameID,
                         onProgress: { progress = $0 },
-                        onLoadFinish: { handleLoadFinish() }
+                        onLoadFinish: { handleLoadFinish() },
                         onLoadFail: { error in
                             isLoading = false
                             holdOpacity = 0
