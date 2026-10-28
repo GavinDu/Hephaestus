@@ -116,12 +116,12 @@ private final class FeedPreviewPlayback: ObservableObject {
         pendingTask?.cancel()
     }
 
-    func schedule(gameID: String, urlString: String?) {
+    func schedule(gameID: String, urlString: String?, reduceMotion: Bool) {
         guard let urlString, let url = URL(string: urlString),
               url.scheme == "https" || url.scheme == "http",
               FeedPreviewPolicy.shouldAutoplay(
                 hasClip: true,
-                reduceMotion: false,
+                reduceMotion: reduceMotion,
                 lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
                 constrainedNetwork: isConstrained
               ) else { return }
@@ -1008,7 +1008,7 @@ private struct GameFeedCard: View {
         .onAppear {
             onImpression()
             if shouldAutoplayPreview && !reduceMotion {
-                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
             }
         }
         .onDisappear {
@@ -1018,19 +1018,287 @@ private struct GameFeedCard: View {
             if shouldReduceMotion || !shouldAutoplayPreview {
                 FeedPreviewPlayback.shared.stop(gameID: game.id)
             } else {
-                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
             }
         }
         .onChange(of: shouldAutoplayPreview) { _, shouldPlay in
             if shouldPlay && !reduceMotion && scenePhase == .active {
-                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
             } else {
                 FeedPreviewPlayback.shared.stop(gameID: game.id)
             }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && shouldAutoplayPreview && !reduceMotion {
-                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL)
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
+            } else if phase != .active {
+                FeedPreviewPlayback.shared.stop(gameID: game.id)
+            }
+        }
+    }
+}
+
+enum ForYouPageLayout {
+    static func stageWidth(containerWidth: CGFloat, containerHeight: CGFloat, isRegular: Bool) -> CGFloat {
+        guard isRegular else { return containerWidth }
+        return min(containerWidth, min(containerHeight * 9 / 16, 560))
+    }
+}
+
+private struct ForYouGamePage: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var previewPlayback = FeedPreviewPlayback.shared
+
+    let game: FeedGame
+    let isSaved: Bool
+    let isLiked: Bool
+    let isFollowingCreator: Bool
+    let canFollowCreator: Bool
+    let isSettled: Bool
+    let onPlay: () -> Void
+    let onToggleSaved: () -> Void
+    let onToggleLike: () -> Void
+    let onToggleFollow: () -> Void
+    let onOpenComments: () -> Void
+    let onOpenCreator: () -> Void
+    let onReport: () -> Void
+    let onBlockCreator: () -> Void
+    let onNotInterested: () -> Void
+    let onImpression: () -> Void
+
+    private var shareURL: URL {
+        var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "game", value: game.id)]
+        return components.url ?? BackendConfig.baseURL
+    }
+
+    private var palette: [Color] {
+        let palettes: [[Color]] = [
+            [Color(red: 0.31, green: 0.20, blue: 0.67), Color(red: 0.10, green: 0.55, blue: 0.69)],
+            [Color(red: 0.86, green: 0.29, blue: 0.48), Color(red: 0.98, green: 0.57, blue: 0.31)],
+            [Color(red: 0.10, green: 0.48, blue: 0.39), Color(red: 0.55, green: 0.69, blue: 0.30)],
+            [Color(red: 0.16, green: 0.33, blue: 0.68), Color(red: 0.39, green: 0.63, blue: 0.92)],
+            [Color(red: 0.49, green: 0.24, blue: 0.59), Color(red: 0.82, green: 0.40, blue: 0.63)]
+        ]
+        let seed = game.id.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return palettes[seed % palettes.count]
+    }
+
+    private var creatorName: String {
+        guard let creator = game.ownerID, !creator.isEmpty else { return "Mini game" }
+        return game.creatorDisplayName?.isEmpty == false ? game.creatorDisplayName! : creator
+    }
+
+    private var mediaLayer: some View {
+        ZStack {
+            LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
+            if let poster = game.previewPosterURL, let url = URL(string: poster) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+            } else {
+                Image(systemName: "gamecontroller.fill")
+                    .font(.system(size: 68, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            if previewPlayback.activeGameID == game.id && !reduceMotion {
+                FeedPreviewSurface(player: previewPlayback.player)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+            }
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.02), location: 0),
+                    .init(color: .black.opacity(0.08), location: 0.42),
+                    .init(color: .black.opacity(0.88), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .clipped()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Preview of \(game.title)")
+        .accessibilityAddTraits(.isImage)
+        .accessibilitySortPriority(100)
+    }
+
+    private func iconAction(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .accessibilityLabel(label)
+    }
+
+    private func detailsOverlay(bottomInset: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Spacer(minLength: 100)
+            Text("COMMUNITY GAME")
+                .font(.caption2.weight(.bold))
+                .tracking(1.2)
+                .foregroundStyle(.white.opacity(0.82))
+            Text(game.title)
+                .font(.system(.title, design: .rounded).weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .accessibilitySortPriority(90)
+            if let caption = game.caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.94))
+                    .lineLimit(3)
+            }
+            HStack(spacing: 8) {
+                Button(action: onOpenCreator) {
+                    HStack(spacing: 7) {
+                        if let avatar = game.creatorAvatarURL, let url = URL(string: avatar) {
+                            AsyncImage(url: url) { phase in
+                                if let image = phase.image { image.resizable().scaledToFill() }
+                                else { Image(systemName: "person.crop.circle.fill").resizable().scaledToFit() }
+                            }
+                            .frame(width: 28, height: 28)
+                            .clipShape(Circle())
+                            .accessibilityHidden(true)
+                        } else {
+                            Image(systemName: "person.crop.circle").font(.title3)
+                        }
+                        Text(creatorName)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                    }
+                    .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .accessibilityLabel("View profile for \(creatorName)")
+                .accessibilitySortPriority(80)
+                Spacer(minLength: 4)
+                if canFollowCreator {
+                    Button(action: onToggleFollow) {
+                        Label(isFollowingCreator ? "Following" : "Follow", systemImage: isFollowingCreator ? "person.fill.checkmark" : "person.badge.plus")
+                            .font(.caption.weight(.bold))
+                            .frame(minHeight: 44)
+                            .padding(.horizontal, 10)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                    .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
+                    .accessibilitySortPriority(70)
+                }
+            }
+            HStack(spacing: 8) {
+                iconAction(isSaved ? "bookmark.fill" : "bookmark", label: isSaved ? "Remove from library" : "Save game", action: onToggleSaved)
+                iconAction(isLiked ? "heart.fill" : "heart", label: isLiked ? "Unlike game" : "Like game", action: onToggleLike)
+                iconAction("bubble.right", label: "View comments", action: onOpenComments)
+                Menu {
+                    Button("Report game", role: .destructive, action: onReport)
+                    Button("Not interested", action: onNotInterested)
+                    if game.ownerID != nil {
+                        Button("Block creator", role: .destructive, action: onBlockCreator)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .foregroundStyle(.white)
+                .accessibilityLabel("More game actions")
+                .accessibilitySortPriority(70)
+                Spacer(minLength: 0)
+                ShareLink(item: shareURL) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .simultaneousGesture(TapGesture().onEnded {
+                    Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
+                })
+                .foregroundStyle(.white)
+                .accessibilityLabel("Share \(game.title)")
+            }
+            HStack(spacing: 10) {
+                Button(action: onPlay) {
+                    Label("Play now", systemImage: "play.fill")
+                        .font(.subheadline.weight(.bold))
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .foregroundStyle(.black)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("game.play")
+                .accessibilityHint("Opens this game in the player")
+                .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in
+                    PlayerWebViewPool.prewarm(gameID: game.id)
+                })
+            }
+            .accessibilitySortPriority(60)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
+        .padding(.bottom, max(24, bottomInset + 12))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .background(
+            LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
+                .allowsHitTesting(false)
+        )
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let pageWidth = ForYouPageLayout.stageWidth(containerWidth: proxy.size.width, containerHeight: proxy.size.height, isRegular: horizontalSizeClass == .regular)
+            ZStack {
+                Color(uiColor: .systemBackground).ignoresSafeArea()
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    ZStack(alignment: .bottom) {
+                        mediaLayer
+                        detailsOverlay(bottomInset: proxy.safeAreaInsets.bottom)
+                    }
+                    .frame(width: pageWidth, height: proxy.size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: horizontalSizeClass == .regular ? 24 : 0, style: .continuous))
+                    Spacer(minLength: 0)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onAppear {
+            onImpression()
+            if isSettled && !reduceMotion && scenePhase == .active {
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
+            }
+        }
+        .onDisappear { FeedPreviewPlayback.shared.stop(gameID: game.id) }
+        .onChange(of: reduceMotion) { _, shouldReduceMotion in
+            if shouldReduceMotion || !isSettled {
+                FeedPreviewPlayback.shared.stop(gameID: game.id)
+            } else {
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: shouldReduceMotion)
+            }
+        }
+        .onChange(of: isSettled) { _, shouldPlay in
+            if shouldPlay && !reduceMotion && scenePhase == .active {
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
+            } else {
+                FeedPreviewPlayback.shared.stop(gameID: game.id)
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && isSettled && !reduceMotion {
+                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
             } else if phase != .active {
                 FeedPreviewPlayback.shared.stop(gameID: game.id)
             }
@@ -1057,27 +1325,27 @@ private struct ForYouPagerView: View {
     let onImpression: (FeedGame) -> Void
     let onNearEnd: () -> Void
 
-    /// Card construction, extracted from the pager body so that
-    /// expression stays type-checkable.
+    /// A dedicated full-bleed page keeps the For You layout independent
+    /// from the compact card used by Search, Following, and Friends.
     private func card(for game: FeedGame) -> some View {
-                    GameFeedCard(
-                        game: game,
-                        isSaved: savedGameIDs.contains(game.id),
-                        isLiked: likedGameIDs.contains(game.id),
-                        isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
-                        canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.currentUserID,
-                        onPlay: { onPlay(game) },
-                        onToggleSaved: { onToggleSaved(game) },
-                        onToggleLike: { onToggleLike(game) },
-                        onToggleFollow: { onToggleFollow(game) },
-                        onOpenComments: { onOpenComments(game) },
-                        onOpenCreator: { onOpenCreator(game) },
-                        onReport: { onReport(game) },
-                        onBlockCreator: { onBlockCreator(game) },
-                        onNotInterested: { onNotInterested(game) },
-                        onImpression: { onImpression(game) },
-                        shouldAutoplayPreview: game.id == settledGameID
-                    )
+        ForYouGamePage(
+            game: game,
+            isSaved: savedGameIDs.contains(game.id),
+            isLiked: likedGameIDs.contains(game.id),
+            isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
+            canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.currentUserID,
+            isSettled: game.id == settledGameID,
+            onPlay: { onPlay(game) },
+            onToggleSaved: { onToggleSaved(game) },
+            onToggleLike: { onToggleLike(game) },
+            onToggleFollow: { onToggleFollow(game) },
+            onOpenComments: { onOpenComments(game) },
+            onOpenCreator: { onOpenCreator(game) },
+            onReport: { onReport(game) },
+            onBlockCreator: { onBlockCreator(game) },
+            onNotInterested: { onNotInterested(game) },
+            onImpression: { onImpression(game) }
+        )
     }
 
     var body: some View {
@@ -1085,9 +1353,8 @@ private struct ForYouPagerView: View {
             LazyVStack(spacing: 0) {
                 ForEach(games) { game in
                     card(for: game)
-                    .frame(maxWidth: 1120)
-                    .frame(maxWidth: .infinity)
-                    .containerRelativeFrame(.vertical)
+                        .frame(maxWidth: .infinity)
+                        .containerRelativeFrame(.vertical)
                     .id(game.id)
                     .accessibilityElement(children: .contain)
                     .accessibilityHint("Swipe up for the next game")

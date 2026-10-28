@@ -252,3 +252,10 @@ struct HephaestusTests {
     #expect(response.deleted)
     #expect(response.subject == "apple:001")
 }
+
+
+@Test func forYouPageLayoutUsesPortraitStageOnRegularWidth() {
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 390, containerHeight: 844, isRegular: false) == 390)
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 1024, containerHeight: 768, isRegular: true) == 432)
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 768, containerHeight: 1024, isRegular: true) == 560)
+}
