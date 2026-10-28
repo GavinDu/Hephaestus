@@ -1592,8 +1592,9 @@ private struct CommentsSheet: View {
     }
 }
 
-// MARK: - Create
+// MARK: - Library
 
+/// Recently played games.
 struct LibraryView: View {
     @State private var recent: [RecentGame] = []
     @State private var saved: [FeedGame] = []
