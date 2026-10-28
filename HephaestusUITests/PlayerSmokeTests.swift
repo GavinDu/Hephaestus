@@ -65,6 +65,12 @@ final class PlayerSmokeTests: XCTestCase {
                       "Player sheet should host a WKWebView. UI: \(app.debugDescription)")
         print("SMOKE: player web view visible")
 
+        // A loaded game must always have a stable, accessible way back to
+        // the feed; this catches toolbar regressions independently of copy.
+        let done = app.buttons["player.done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10),
+                      "Player sheet should expose its Done control. UI: \(app.debugDescription)")
+
         // Let the game boot, then keep a screenshot as evidence.
         _ = XCTWaiter.wait(for: [expectation(description: "boot settle")], timeout: 6)
         let shot = XCTAttachment(screenshot: app.screenshot())
