@@ -612,10 +612,12 @@ struct PixiPlayerSheet: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .frame(minHeight: HephaestusDesign.minimumActionHeight)
-                    Button("Return to feed") {
-                        finishToFeed()
-                    }
-                                .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                            .accessibilityIdentifier("player.retry")
+                            Button("Return to feed") {
+                                finishToFeed()
+                            }
+                            .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                            .accessibilityIdentifier("player.returnToFeed")
                         }
                     }
                 }
@@ -629,7 +631,8 @@ struct PixiPlayerSheet: View {
                     Button("Done") {
                         finishToFeed()
                     }
-                        .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                    .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                    .accessibilityIdentifier("player.done")
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
                     ShareLink(item: shareURL) {
