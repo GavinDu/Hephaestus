@@ -268,7 +268,7 @@ struct HephaestusTests {
 }
 
 
-@Test func playerURLRejectsEmptyGameIDAndNormalizesUnsupportedQuality() {
+@MainActor @Test func playerURLRejectsEmptyGameIDAndNormalizesUnsupportedQuality() {
     #expect(PlayerWebViewPool.playerURL(gameID: "   ") == nil)
 
     let url = PlayerWebViewPool.playerURL(gameID: " game-1 ", quality: "ultra")
