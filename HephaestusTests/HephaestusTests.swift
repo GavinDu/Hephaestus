@@ -252,3 +252,10 @@ struct HephaestusTests {
     #expect(response.deleted)
     #expect(response.subject == "apple:001")
 }
+
+
+@Test func playerStageLayoutUsesFullWidthOnPhoneAndPortraitStageOnIPad() {
+    #expect(PlayerStageLayout.width(containerWidth: 390, containerHeight: 844, isRegular: false) == 390)
+    #expect(PlayerStageLayout.width(containerWidth: 1024, containerHeight: 768, isRegular: true) == 432)
+    #expect(PlayerStageLayout.width(containerWidth: 768, containerHeight: 1024, isRegular: true) == 560)
+}
