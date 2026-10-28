@@ -1,0 +1,254 @@
+name: Player presentation CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Hephaestus/**"
+      - "HephaestusTests/**"
+      - "HephaestusUITests/**"
+      - "Hephaestus.xcodeproj/**"
+      - ".github/workflows/player-presentation.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Hephaestus/**"
+      - "HephaestusTests/**"
+      - "HephaestusUITests/**"
+      - "Hephaestus.xcodeproj/**"
+      - ".github/workflows/player-presentation.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: player-presentation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XCODE_PROJECT: Hephaestus.xcodeproj
+  XCODE_SCHEME: Hephaestus
+  BACKEND_HEALTH_URL: https://html-5-game-generator.replit.app/v1/feed
+
+jobs:
+  ios-build-and-unit:
+    name: iOS build and URL unit tests
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out iOS app
+        uses: actions/checkout@v4
+
+      - name: List Xcode schemes
+        run: xcodebuild -list -project "$XCODE_PROJECT"
+
+      - name: Build for iOS Simulator
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee /tmp/player-presentation-build.log
+
+      - name: Run focused native URL contract test
+        shell: bash
+        run: |
+          set -o pipefail
+          UDID="$(xcrun simctl list devices available \
+            | grep -E 'iPhone [0-9]' \
+            | head -n 1 \
+            | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' || true)"
+          if [[ -z "$UDID" ]]; then
+            echo "No available iPhone simulator found"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          xcodebuild test \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -only-testing:HephaestusTests/nativePlayerURLUsesPlayPresentation \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/player-presentation-url-test.log
+
+      - name: Run complete unit test target
+        shell: bash
+        run: |
+          set -o pipefail
+          UDID="$(xcrun simctl list devices available \
+            | grep -E 'iPhone [0-9]' \
+            | head -n 1 \
+            | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' || true)"
+          if [[ -z "$UDID" ]]; then
+            echo "No available iPhone simulator found"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          xcodebuild test \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "platform=iOS Simulator,id=$UDID" \
+            -only-testing:HephaestusTests \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/player-presentation-unit.log
+
+      - name: Upload iOS build and unit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-presentation-ios-unit
+          path: |
+            /tmp/player-presentation-build.log
+            /tmp/player-presentation-url-test.log
+            /tmp/player-presentation-unit.log
+          if-no-files-found: ignore
+
+  ios-player-smoke:
+    name: iPhone WebView player smoke
+    runs-on: macos-latest
+    timeout-minutes: 30
+    needs: ios-build-and-unit
+    steps:
+      - name: Check out iOS app
+        uses: actions/checkout@v4
+
+      - name: Warm production backend
+        shell: bash
+        run: |
+          set -u
+          ready=0
+          for attempt in $(seq 1 18); do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$BACKEND_HEALTH_URL" || true)"
+            echo "backend warm-up attempt $attempt: HTTP $code"
+            if [[ "$code" == "200" ]]; then
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$ready" -ne 1 ]]; then
+            echo "Production backend did not become ready"
+            exit 1
+          fi
+
+      - name: Boot iPhone simulator
+        id: iphone
+        shell: bash
+        run: |
+          set -euo pipefail
+          UDID="$(xcrun simctl list devices available \
+            | grep -E 'iPhone [0-9]' \
+            | head -n 1 \
+            | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' || true)"
+          if [[ -z "$UDID" ]]; then
+            echo "No available iPhone simulator found"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Run WebView player smoke test
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "platform=iOS Simulator,id=${{ steps.iphone.outputs.udid }}" \
+            -only-testing:HephaestusUITests/PlayerSmokeTests \
+            -parallel-testing-enabled NO \
+            -resultBundlePath /tmp/player-presentation-smoke.xcresult \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/player-presentation-smoke.log
+
+      - name: Upload player smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-presentation-iphone-smoke
+          path: |
+            /tmp/player-presentation-smoke.log
+            /tmp/player-presentation-smoke.xcresult
+          if-no-files-found: ignore
+
+  ios-ipad-smoke:
+    name: Optional iPad regular-width smoke
+    runs-on: macos-latest
+    timeout-minutes: 30
+    needs: ios-build-and-unit
+    continue-on-error: true
+    steps:
+      - name: Check out iOS app
+        uses: actions/checkout@v4
+
+      - name: Select an available iPad simulator
+        id: ipad
+        shell: bash
+        run: |
+          set -euo pipefail
+          UDID="$(xcrun simctl list devices available \
+            | grep -E 'iPad' \
+            | head -n 1 \
+            | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' || true)"
+          if [[ -z "$UDID" ]]; then
+            echo "No iPad simulator is installed; recording this optional job as skipped"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Run iPad player smoke test
+        if: steps.ipad.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "platform=iOS Simulator,id=${{ steps.ipad.outputs.udid }}" \
+            -only-testing:HephaestusUITests/PlayerSmokeTests \
+            -parallel-testing-enabled NO \
+            -resultBundlePath /tmp/player-presentation-ipad.xcresult \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/player-presentation-ipad.log
+
+      - name: Upload iPad smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-presentation-ipad-smoke
+          path: |
+            /tmp/player-presentation-ipad.log
+            /tmp/player-presentation-ipad.xcresult
+          if-no-files-found: ignore
+
+  backend-play-contract:
+    name: Backend play-presentation contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out backend
+        uses: actions/checkout@v4
+        with:
+          repository: GavinDu/html5-game-generator
+          path: backend
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Validate runtime syntax
+        working-directory: backend
+        run: node --check internal/api/web/pixi-runtime.js
+
+      - name: Run backend contract and regression tests
+        working-directory: backend
+        run: go test ./...
