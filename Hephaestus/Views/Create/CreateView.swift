@@ -395,6 +395,3 @@ struct CreateView: View {
     }
 }
 
-// MARK: - Library
-
-/// Recently played games.
