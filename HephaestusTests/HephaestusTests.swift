@@ -83,6 +83,13 @@ struct HephaestusTests {
         #expect(PlayerLoadFailure.category(for: other) == .unknown)
         #expect(PlayerLoadFailure.userMessage(for: other) == "The player couldn't load this game.")
         #expect(!PlayerLoadFailure.userMessage(for: other).contains("internal backend detail"))
+
+        #expect(PlayerLoadFailure.category(for: PlayerLoadFailure.httpError(statusCode: 404)) == .unavailable)
+        #expect(PlayerLoadFailure.userMessage(for: PlayerLoadFailure.httpError(statusCode: 404)).contains("Return to the feed"))
+        #expect(PlayerLoadFailure.category(for: PlayerLoadFailure.httpError(statusCode: 426)) == .incompatible)
+        #expect(PlayerLoadFailure.userMessage(for: PlayerLoadFailure.httpError(statusCode: 426)).contains("Update the app"))
+        #expect(PlayerLoadFailure.category(for: PlayerLoadFailure.httpError(statusCode: 403)) == .accessDenied)
+        #expect(PlayerLoadFailure.userMessage(for: PlayerLoadFailure.httpError(statusCode: 403)).contains("sign in again"))
     }
     @Test func previewDwellIsMeasuredNotFixed() {
         let start = Date(timeIntervalSince1970: 1_000_000)
