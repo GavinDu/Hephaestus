@@ -1772,6 +1772,7 @@ private struct CommentsSheet: View {
 
 /// Photograph a drawing → analyze → generate → confirm → play.
 struct CreateView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     enum Phase {
         case pick
         case analyzing
@@ -1880,54 +1881,155 @@ struct CreateView: View {
     }
 
     private func reviewView(result: IngestResult, image: UIImage) -> some View {
-        List {
-            Section("Drawing") {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            Section("Elements found") {
-                ForEach(result.elements, id: \.name) { el in
-                    HStack {
-                        Text(el.name)
-                        Spacer()
-                        Text(el.role).foregroundStyle(.secondary)
+        Group {
+            if horizontalSizeClass == .regular {
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(spacing: 12) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 560)
+                            .frame(maxWidth: .infinity)
+                        Text("Your drawing")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 16)
+
+                    List {
+                        Section("Elements found") {
+                            ForEach(result.elements, id: \.name) { el in
+                                HStack {
+                                    Text(el.name)
+                                    Spacer()
+                                    Text(el.role).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        Section("What should the game be about?") {
+                            TextField("Intent", text: $intentText, axis: .vertical)
+                                .lineLimit(3...6)
+                        }
+                        Section {
+                            Button("Generate game") {
+                                Task { await generate(result: result) }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                    .frame(maxWidth: 620)
+                }
+                .padding(.horizontal, 24)
+                .accessibilityIdentifier("create.review.regular")
+            } else {
+                List {
+                    Section("Drawing") {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 180)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    Section("Elements found") {
+                        ForEach(result.elements, id: \.name) { el in
+                            HStack {
+                                Text(el.name)
+                                Spacer()
+                                Text(el.role).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Section("What should the game be about?") {
+                        TextField("Intent", text: $intentText)
+                    }
+                    Section {
+                        Button("Generate game") {
+                            Task { await generate(result: result) }
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
                 }
-            }
-            Section("What should the game be about?") {
-                TextField("Intent", text: $intentText)
-            }
-            Section {
-                Button("Generate game") {
-                    Task { await generate(result: result) }
-                }
-                .buttonStyle(.borderedProminent)
             }
         }
     }
 
     private func confirmingView(job: JobStatus) -> some View {
-        List {
-            Section("Design doc") {
-                if let doc = job.design_doc {
-                    Text(doc.title).font(.headline)
-                    if let plot = doc.plot { Text(plot) }
-                    if let mechanics = doc.mechanics {
-                        Text("How it plays: \(mechanics)")
+        Group {
+            if horizontalSizeClass == .regular {
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(spacing: 12) {
+                        if let previewImage {
+                            Image(uiImage: previewImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxHeight: 560)
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.secondary.opacity(0.15))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 320)
+                                .overlay {
+                                    Image(systemName: "photo")
+                                        .font(.largeTitle)
+                                        .foregroundStyle(.secondary)
+                                }
+                        }
+                        Text("Your drawing")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                } else {
-                    Text("The design is ready to review.")
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 16)
+
+                    List {
+                        Section("Design doc") {
+                            if let doc = job.design_doc {
+                                Text(doc.title).font(.headline)
+                                if let plot = doc.plot { Text(plot) }
+                                if let mechanics = doc.mechanics {
+                                    Text("How it plays: \(mechanics)")
+                                        .foregroundStyle(.secondary)
+                                }
+                            } else {
+                                Text("The design is ready to review.")
+                            }
+                        }
+                        Section {
+                            Button("Looks good — build it") {
+                                Task { await confirm(job: job) }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                    .frame(maxWidth: 620)
                 }
-            }
-            Section {
-                Button("Looks good — build it") {
-                    Task { await confirm(job: job) }
+                .padding(.horizontal, 24)
+                .accessibilityIdentifier("create.confirming.regular")
+            } else {
+                List {
+                    Section("Design doc") {
+                        if let doc = job.design_doc {
+                            Text(doc.title).font(.headline)
+                            if let plot = doc.plot { Text(plot) }
+                            if let mechanics = doc.mechanics {
+                                Text("How it plays: \(mechanics)")
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Text("The design is ready to review.")
+                        }
+                    }
+                    Section {
+                        Button("Looks good — build it") {
+                            Task { await confirm(job: job) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
     }
