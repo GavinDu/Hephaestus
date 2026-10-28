@@ -282,3 +282,15 @@ struct HephaestusTests {
     #expect(values["quality"] == "low" || values["quality"] == "high")
     #expect(values["quality"] != "ultra")
 }
+
+
+@Test func playerLoadFailuresUseSafeActionableMessages() {
+    let timeout = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
+    let malformedPackage = NSError(domain: "GamePackage", code: 1)
+
+    #expect(PlayerLoadFailure.category(for: timeout) == .network)
+    #expect(PlayerLoadFailure.userMessage(for: timeout) == "Check your connection and try again.")
+    #expect(PlayerLoadFailure.category(for: malformedPackage) == .unknown)
+    #expect(PlayerLoadFailure.userMessage(for: malformedPackage) == "The player couldn't load this game.")
+    #expect(!PlayerLoadFailure.userMessage(for: malformedPackage).contains("GamePackage"))
+}
