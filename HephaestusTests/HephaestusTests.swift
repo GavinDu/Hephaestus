@@ -266,3 +266,19 @@ struct HephaestusTests {
     #expect(PlayerStageLayout.width(containerWidth: 1024, containerHeight: 768, isRegular: true) == 432)
     #expect(PlayerStageLayout.width(containerWidth: 768, containerHeight: 1024, isRegular: true) == 560)
 }
+
+
+@MainActor @Test func playerURLRejectsEmptyGameIDAndNormalizesUnsupportedQuality() {
+    #expect(PlayerWebViewPool.playerURL(gameID: "   ") == nil)
+
+    let url = PlayerWebViewPool.playerURL(gameID: " game-1 ", quality: "ultra")
+    #expect(url != nil)
+    guard let url else { return }
+    let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+    let values = Dictionary(uniqueKeysWithValues: query.compactMap { item in
+        item.value.map { (item.name, $0) }
+    })
+    #expect(values["game"] == "game-1")
+    #expect(values["quality"] == "low" || values["quality"] == "high")
+    #expect(values["quality"] != "ultra")
+}

@@ -192,14 +192,22 @@ enum PlayerWebViewPool {
     private static let warmupDelegate = WarmupDelegate()
 
     static func playerURL(gameID: String, quality: String? = nil) -> URL? {
+        // Do not construct a player URL for an empty identifier, and never
+        // forward arbitrary quality values into the runtime query contract.
+        let normalizedGameID = gameID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedGameID.isEmpty else { return nil }
+
         var components = URLComponents(url: BackendConfig.baseURL, resolvingAgainstBaseURL: false)
         components?.path = "/player"
         let preference = PlayerQuality(rawValue:
             UserDefaults.standard.string(forKey: PlayerQuality.defaultsKey) ?? PlayerQuality.auto.rawValue
         ) ?? .auto
+        let requestedQuality = quality.flatMap { value in
+            ["low", "high"].contains(value) ? value : nil
+        }
         components?.queryItems = [
-            URLQueryItem(name: "game", value: gameID),
-            URLQueryItem(name: "quality", value: quality ?? PlayerQuality.effective(preference: preference)),
+            URLQueryItem(name: "game", value: normalizedGameID),
+            URLQueryItem(name: "quality", value: requestedQuality ?? PlayerQuality.effective(preference: preference)),
             URLQueryItem(name: "presentation", value: "play")
         ]
         return components?.url
