@@ -301,3 +301,15 @@ struct HephaestusTests {
     #expect(PlayerLoadFailure.userMessage(for: malformedPackage) == "The player couldn't load this game.")
     #expect(!PlayerLoadFailure.userMessage(for: malformedPackage).contains("GamePackage"))
 }
+
+
+@Test func playerHTTPFailuresDistinguishRetryableServerErrorsFromPermanentErrors() {
+    for status in [408, 425, 429, 500, 502, 503, 504] {
+        let error = PlayerLoadFailure.httpError(statusCode: status)
+        #expect(PlayerLoadFailure.category(for: error) == .network)
+        #expect(PlayerLoadFailure.userMessage(for: error) == "Check your connection and try again.")
+    }
+    #expect(PlayerLoadFailure.category(for: PlayerLoadFailure.httpError(statusCode: 404)) == .unavailable)
+    #expect(PlayerLoadFailure.category(for: PlayerLoadFailure.httpError(statusCode: 426)) == .incompatible)
+    #expect(PlayerLoadFailure.category(for: PlayerLoadFailure.httpError(statusCode: 400)) == .unknown)
+}
