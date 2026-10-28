@@ -127,7 +127,7 @@ final class FeedPreviewPlayback: ObservableObject {
                 lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
                 constrainedNetwork: isConstrained
               ) else {
-            stop()
+            stop(gameID: gameID)
             return
         }
         // SwiftUI may call schedule repeatedly as a card re-renders. Keep
