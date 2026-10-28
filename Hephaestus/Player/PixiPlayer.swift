@@ -147,6 +147,17 @@ enum PlayerLifecyclePolicy {
     }
 }
 
+/// Bounds automatic WKWebView recovery so a repeatedly crashing game cannot
+/// create an unbounded reload loop. Explicit user retry resets the counter.
+enum PlayerWebContentTerminationPolicy {
+    static let maximumAutomaticReloads = 2
+    static let repeatedTerminationMessage = "The player kept stopping — its web process ended repeatedly. Close and reopen the game."
+
+    static func shouldAutomaticallyReload(completedReloads: Int) -> Bool {
+        completedReloads >= 0 && completedReloads < maximumAutomaticReloads
+    }
+}
+
 // MARK: - Telemetry (monitoring)
 
 /// Fire-and-forget reports to the backend's telemetry endpoint — the
@@ -537,7 +548,7 @@ struct PixiPlayerSheet: View {
                             // The web content process died (usually
                             // memory pressure): the page is a white
                             // void unless we reload it ourselves.
-                            if autoReloads < 2 {
+                            if PlayerWebContentTerminationPolicy.shouldAutomaticallyReload(completedReloads: autoReloads) {
                                 autoReloads += 1
                                 DevLog.warn(.player, "web content process terminated for \(gameID); auto-reload \(autoReloads)/2")
                                 PlayerTelemetry.report(gameID: gameID, kind: "ios-webview-terminated",
@@ -551,7 +562,7 @@ struct PixiPlayerSheet: View {
                                 attempt += 1
                             } else {
                                 isLoading = false
-                                loadError = "The player kept stopping — its web process ended repeatedly. Close and reopen the game."
+                                loadError = PlayerWebContentTerminationPolicy.repeatedTerminationMessage
                                 DevLog.error(.player, "web content process terminated repeatedly for \(gameID)")
                                 PlayerTelemetry.report(gameID: gameID, kind: "ios-webview-terminated",
                                                        name: "WebContentProcessTerminated",
