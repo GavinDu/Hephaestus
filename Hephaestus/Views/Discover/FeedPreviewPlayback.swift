@@ -115,6 +115,10 @@ final class FeedPreviewPlayback: ObservableObject {
     }
 
     func schedule(gameID: String, urlString: String?, reduceMotion: Bool) {
+        // A reused feed cell can become ineligible after it scheduled a
+        // preview (for example, Reduce Motion or Low Power Mode changes).
+        // Always cancel old work when the new request cannot autoplay, or
+        // a stale game's clip can start after the user has moved on.
         guard let urlString, let url = URL(string: urlString),
               url.scheme == "https" || url.scheme == "http",
               FeedPreviewPolicy.shouldAutoplay(
@@ -122,14 +126,27 @@ final class FeedPreviewPlayback: ObservableObject {
                 reduceMotion: reduceMotion,
                 lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
                 constrainedNetwork: isConstrained
-              ) else { return }
-        pendingTask?.cancel()
+              ) else {
+            stop()
+            return
+        }
+        // SwiftUI may call schedule repeatedly as a card re-renders. Keep
+        // the active preview stable and avoid resetting its 700ms delay.
+        if activeGameID == gameID || (pendingGameID == gameID && pendingTask != nil) {
+            return
+        }
+        // Switching cards must stop the previous item and cancel its delay
+        // before installing the new request.
+        stop()
         pendingGameID = gameID
         pendingTask = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
             guard !Task.isCancelled, let self,
                   !ProcessInfo.processInfo.isLowPowerModeEnabled,
-                  !self.isConstrained else { return }
+                  !self.isConstrained else {
+                self?.stop(gameID: gameID)
+                return
+            }
             self.start(gameID: gameID, url: url)
         }
     }
