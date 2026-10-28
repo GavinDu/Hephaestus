@@ -282,6 +282,15 @@ enum PlayerWebViewPool {
     }
 }
 
+/// Keeps gameplay portrait-shaped on regular-width devices while allowing
+/// compact iPhone layouts to use the entire available width.
+enum PlayerStageLayout {
+    static func width(containerWidth: CGFloat, containerHeight: CGFloat, isRegular: Bool) -> CGFloat {
+        guard isRegular else { return containerWidth }
+        return min(containerWidth, min(containerHeight * 9 / 16, 560))
+    }
+}
+
 /// Shared chrome for the player sheet's state cards (loading, offline,
 /// error). One place owns the padding, width cap, background, and border
 /// so the three states cannot drift apart again — the loading card used
@@ -324,6 +333,7 @@ struct PixiPlayerSheet: View {
     var tappedAt: Date? = nil
     var onFinish: (VerifiedRunResult) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Handoff state (#58): the hold fades out once, on the first
@@ -655,7 +665,25 @@ struct PixiPlayerSheet: View {
 
     var body: some View {
         NavigationStack {
-            playerContent
+            GeometryReader { proxy in
+                Group {
+                    if horizontalSizeClass == .regular {
+                        playerContent
+                            .frame(
+                                width: PlayerStageLayout.width(
+                                    containerWidth: proxy.size.width,
+                                    containerHeight: proxy.size.height,
+                                    isRegular: true
+                                ),
+                                height: proxy.size.height
+                            )
+                    } else {
+                        playerContent
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(HephaestusDesign.pageBackground)
+            }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
