@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A game-first social card. Until the API returns real preview assets and creator
 /// metadata, the cover is a branded visual rather than fabricated artwork.
-private struct GameFeedCardSkeleton: View {
+struct GameFeedCardSkeleton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -31,7 +31,7 @@ private struct GameFeedCardSkeleton: View {
     }
 }
 
-private struct GameFeedCard: View {
+struct GameFeedCard: View {
     @ScaledMetric(relativeTo: .largeTitle) private var coverHeight: CGFloat = 220
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
