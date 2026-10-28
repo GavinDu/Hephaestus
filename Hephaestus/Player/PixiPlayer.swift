@@ -85,10 +85,24 @@ enum GameplayTelemetryPolicy {
 /// generic message. Both states offer Retry and Return to feed, so a
 /// failed load never leaves a blank player with no next action.
 enum PlayerLoadFailure {
-    enum Category { case network, unknown }
+    enum Category { case network, unavailable, incompatible, accessDenied, unknown }
+
+    static let httpErrorDomain = "Hephaestus.PlayerHTTP"
+
+    static func httpError(statusCode: Int) -> NSError {
+        NSError(domain: httpErrorDomain, code: statusCode)
+    }
 
     static func category(for error: Error) -> Category {
         let ns = error as NSError
+        if ns.domain == httpErrorDomain {
+            switch ns.code {
+            case 401, 403: return .accessDenied
+            case 404, 410: return .unavailable
+            case 426: return .incompatible
+            default: return .unknown
+            }
+        }
         guard ns.domain == NSURLErrorDomain else { return .unknown }
         switch ns.code {
         case NSURLErrorNotConnectedToInternet,
@@ -107,6 +121,12 @@ enum PlayerLoadFailure {
         switch category(for: error) {
         case .network:
             return "Check your connection and try again."
+        case .unavailable:
+            return "This game is no longer available. Return to the feed to try another game."
+        case .incompatible:
+            return "This game needs a newer version of the app. Update the app and try again."
+        case .accessDenied:
+            return "You don't have access to this game. Return to the feed or sign in again."
         case .unknown:
             return "The player couldn't load this game."
         }
@@ -1067,6 +1087,17 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             onProgress(0)
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            guard navigationResponse.isForMainFrame,
+                  let response = navigationResponse.response as? HTTPURLResponse,
+                  response.statusCode >= 400 else {
+                decisionHandler(.allow)
+                return
+            }
+            onLoadFail(PlayerLoadFailure.httpError(statusCode: response.statusCode))
+            decisionHandler(.cancel)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
