@@ -1252,7 +1252,7 @@ private struct ForYouGamePage: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let pageWidth = horizontalSizeClass == .regular ? min(proxy.size.width, 560) : proxy.size.width
+            let pageWidth = horizontalSizeClass == .regular ? min(proxy.size.width, min(proxy.size.height * 9 / 16, 560)) : proxy.size.width
             ZStack {
                 Color(uiColor: .systemBackground).ignoresSafeArea()
                 HStack(spacing: 0) {
