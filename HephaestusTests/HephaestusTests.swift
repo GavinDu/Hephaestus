@@ -301,3 +301,13 @@ struct HephaestusTests {
     #expect(PlayerLoadFailure.userMessage(for: malformedPackage) == "The player couldn't load this game.")
     #expect(!PlayerLoadFailure.userMessage(for: malformedPackage).contains("GamePackage"))
 }
+
+
+@Test func playerWebContentTerminationRecoveryIsBounded() {
+    #expect(PlayerWebContentTerminationPolicy.shouldAutomaticallyReload(completedReloads: 0))
+    #expect(PlayerWebContentTerminationPolicy.shouldAutomaticallyReload(completedReloads: 1))
+    #expect(!PlayerWebContentTerminationPolicy.shouldAutomaticallyReload(completedReloads: 2))
+    #expect(!PlayerWebContentTerminationPolicy.shouldAutomaticallyReload(completedReloads: 3))
+    #expect(!PlayerWebContentTerminationPolicy.shouldAutomaticallyReload(completedReloads: -1))
+    #expect(PlayerWebContentTerminationPolicy.repeatedTerminationMessage.contains("Close and reopen the game"))
+}
