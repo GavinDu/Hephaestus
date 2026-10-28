@@ -1038,6 +1038,13 @@ private struct GameFeedCard: View {
     }
 }
 
+enum ForYouPageLayout {
+    static func stageWidth(containerWidth: CGFloat, containerHeight: CGFloat, isRegular: Bool) -> CGFloat {
+        guard isRegular else { return containerWidth }
+        return min(containerWidth, min(containerHeight * 9 / 16, 560))
+    }
+}
+
 private struct ForYouGamePage: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1252,7 +1259,7 @@ private struct ForYouGamePage: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let pageWidth = horizontalSizeClass == .regular ? min(proxy.size.width, min(proxy.size.height * 9 / 16, 560)) : proxy.size.width
+            let pageWidth = ForYouPageLayout.stageWidth(containerWidth: proxy.size.width, containerHeight: proxy.size.height, isRegular: horizontalSizeClass == .regular)
             ZStack {
                 Color(uiColor: .systemBackground).ignoresSafeArea()
                 HStack(spacing: 0) {
