@@ -267,6 +267,14 @@ struct HephaestusTests {
     #expect(ForYouPageLayout.stageWidth(containerWidth: 768, containerHeight: 1024, isRegular: true) == 560)
 }
 
+@Test func forYouPagerSelectionReconcilesRefreshAndPaginationChanges() {
+    #expect(ForYouPageLayout.reconciledSelection(currentID: "game-2", availableIDs: ["game-1", "game-2"]) == "game-2")
+    #expect(ForYouPageLayout.reconciledSelection(currentID: "removed-game", availableIDs: ["game-3", "game-4"]) == "game-3")
+    #expect(ForYouPageLayout.reconciledSelection(currentID: nil, availableIDs: ["game-5"]) == "game-5")
+    #expect(ForYouPageLayout.reconciledSelection(currentID: "game-5", availableIDs: []) == nil)
+}
+
+
 
 @Test func playerStageLayoutUsesFullWidthOnPhoneAndPortraitStageOnIPad() {
     #expect(PlayerStageLayout.width(containerWidth: 390, containerHeight: 844, isRegular: false) == 390)
