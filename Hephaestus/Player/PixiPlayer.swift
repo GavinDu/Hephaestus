@@ -99,6 +99,7 @@ enum PlayerLoadFailure {
             switch ns.code {
             case 401, 403: return .accessDenied
             case 404, 410: return .unavailable
+            case 408, 425, 429, 500, 502, 503, 504: return .network
             case 426: return .incompatible
             default: return .unknown
             }
