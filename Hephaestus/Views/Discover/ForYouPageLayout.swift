@@ -8,4 +8,12 @@ enum ForYouPageLayout {
         guard isRegular else { return containerWidth }
         return min(containerWidth, min(containerHeight * 9 / 16, 560))
     }
+
+    /// Keep the current page when it still exists; otherwise select the first
+    /// available page. An empty feed intentionally has no selected page.
+    static func reconciledSelection(currentID: String?, availableIDs: [String]) -> String? {
+        guard !availableIDs.isEmpty else { return nil }
+        if let currentID, availableIDs.contains(currentID) { return currentID }
+        return availableIDs.first
+    }
 }
