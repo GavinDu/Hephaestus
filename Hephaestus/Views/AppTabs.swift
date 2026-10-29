@@ -888,7 +888,19 @@ private struct ForYouPagerView: View {
         .scrollTargetBehavior(.paging)
         .scrollPosition(id: $settledGameID)
         .onAppear {
-            if settledGameID == nil { settledGameID = games.first?.id }
+            settledGameID = ForYouPageLayout.reconciledSelection(
+                currentID: settledGameID,
+                availableIDs: games.map(\.id)
+            )
+        }
+        .onChange(of: games.map(\.id)) { _, ids in
+            // Refreshes and pagination can remove the currently selected game.
+            // Never leave the scroll-position binding pointing at a stale page.
+            let reconciled = ForYouPageLayout.reconciledSelection(
+                currentID: settledGameID,
+                availableIDs: ids
+            )
+            if reconciled != settledGameID { settledGameID = reconciled }
         }
         .onChange(of: settledGameID) { _, id in
             guard let id, let index = games.firstIndex(where: { $0.id == id }) else { return }
