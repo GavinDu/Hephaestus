@@ -567,13 +567,6 @@ private struct SocialFeedUnavailableView: View {
     }
 }
 
-enum ForYouPageLayout {
-    static func stageWidth(containerWidth: CGFloat, containerHeight: CGFloat, isRegular: Bool) -> CGFloat {
-        guard isRegular else { return containerWidth }
-        return min(containerWidth, min(containerHeight * 9 / 16, 560))
-    }
-}
-
 private struct ForYouGamePage: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
