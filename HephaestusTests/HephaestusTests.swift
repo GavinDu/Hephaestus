@@ -322,3 +322,31 @@ struct HephaestusTests {
     #expect(!PlayerWebContentTerminationPolicy.shouldAutomaticallyReload(completedReloads: -1))
     #expect(PlayerWebContentTerminationPolicy.repeatedTerminationMessage.contains("Close and reopen the game"))
 }
+
+
+@Test func playerHTTPErrorCategoryMatrixCoversRecoveryContracts() {
+    let cases: [(status: Int, category: PlayerLoadFailure.Category, action: String)] = [
+        (401, .accessDenied, "sign in again"),
+        (403, .accessDenied, "sign in again"),
+        (404, .unavailable, "Return to the feed"),
+        (410, .unavailable, "Return to the feed"),
+        (408, .network, "try again"),
+        (425, .network, "try again"),
+        (429, .network, "try again"),
+        (500, .network, "try again"),
+        (502, .network, "try again"),
+        (503, .network, "try again"),
+        (504, .network, "try again"),
+        (426, .incompatible, "Update the app")
+    ]
+
+    for item in cases {
+        let error = PlayerLoadFailure.httpError(statusCode: item.status)
+        #expect(PlayerLoadFailure.category(for: error) == item.category)
+        #expect(PlayerLoadFailure.userMessage(for: error).contains(item.action))
+    }
+
+    let unexpected = PlayerLoadFailure.httpError(statusCode: 418)
+    #expect(PlayerLoadFailure.category(for: unexpected) == .unknown)
+    #expect(PlayerLoadFailure.userMessage(for: unexpected) == "The player couldn't load this game.")
+}
