@@ -84,6 +84,15 @@ enum GameplayTelemetryPolicy {
 /// Network failures get a retry-first message; anything else gets the
 /// generic message. Both states offer Retry and Return to feed, so a
 /// failed load never leaves a blank player with no next action.
+enum PlayerPrewarmResponsePolicy {
+    /// A prewarmed page is reusable only when the main document did not
+    /// return an HTTP error. Otherwise the attached player must retry and
+    /// surface the normal actionable load-failure state.
+    static func shouldCacheResponse(statusCode: Int) -> Bool {
+        statusCode < 400
+    }
+}
+
 enum PlayerLoadFailure {
     enum Category { case network, unavailable, incompatible, accessDenied, unknown }
 
@@ -279,6 +288,12 @@ enum PlayerWebViewPool {
 
     static func markFailed(_ webView: WKWebView) {
         guard let currentURL, webView.url == currentURL else { return }
+        markFailed(webView, responseURL: currentURL)
+    }
+
+    static func markFailed(_ webView: WKWebView, responseURL: URL?) {
+        guard pooledView === webView, let currentURL,
+              responseURL == currentURL else { return }
         loadedURL = nil
         self.currentURL = nil
     }
@@ -308,6 +323,20 @@ enum PlayerWebViewPool {
     }
 
     private final class WarmupDelegate: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            guard navigationResponse.isForMainFrame,
+                  let response = navigationResponse.response as? HTTPURLResponse,
+                  !PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: response.statusCode) else {
+                decisionHandler(.allow)
+                return
+            }
+            // A 4xx/5xx HTML error page is not a successfully prewarmed
+            // game. Clear the pool entry before cancelling so take(url:)
+            // starts a fresh attached navigation and can show its error UI.
+            PlayerWebViewPool.markFailed(webView, responseURL: response.url)
+            decisionHandler(.cancel)
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             PlayerWebViewPool.markLoaded(webView)
         }
