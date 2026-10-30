@@ -412,3 +412,23 @@ struct HephaestusTests {
     #expect(PlayerLoadFailure.category(for: unexpected) == .unknown)
     #expect(PlayerLoadFailure.userMessage(for: unexpected) == "The player couldn't load this game.")
 }
+
+
+@Test func playableExpressionRejectsDuplicateClaimIdentifiersAcrossCategories() throws {
+    let json = """
+    {
+      "schemaVersion":"1.0",
+      "status":"draft",
+      "source":{"type":"text","reference":"source-ref"},
+      "creator":{"ownerId":"creator-1","consent":true,"visibility":"private"},
+      "mode":"what_if",
+      "generation":{"seed":1},
+      "interpretation":{
+        "preserved":[{"id":"same","text":"castle","confidence":0.9}],
+        "invented":[{"id":"same","text":"moon","confidence":0.7}]
+      }
+    }
+    """.data(using: .utf8)!
+    let expression = try JSONDecoder().decode(PlayableExpression.self, from: json)
+    #expect(expression.validationError() == "Interpretation claim identifiers must be unique.")
+}
