@@ -105,6 +105,60 @@ struct HephaestusTests {
         #expect(!GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: 12_000))
         #expect(!GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: -1))
     }
+    @Test func playableExpressionDecodesAndRoundTripsBackendContract() throws {
+        let json = """
+        {
+          "schemaVersion":"1.0",
+          "status":"ready",
+          "source":{"type":"image","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+          "creator":{"ownerId":"apple:creator-1","consent":true,"visibility":"private"},
+          "mode":"what_if",
+          "intent":"A quiet world",
+          "anchors":[{"id":"a1","kind":"place","value":"garden","preserve":true}],
+          "evidence":[{"id":"e1","kind":"image_region","start":0,"end":1}],
+          "chosenInterpretation":"A moon garden",
+          "interpretation":{"preserved":[{"id":"p1","text":"garden","confidence":0.9,"evidenceIds":["e1"]}],"invented":[{"id":"i1","text":"moon flowers","confidence":0.7}],"uncertain":[]},
+          "generation":{"seed":42,"gameIrVersion":"1.2","packageVersion":"2.0","modelVersion":"model-1","promptVersion":"prompt-1"}
+        }
+        """.data(using: .utf8)!
+        let expression = try JSONDecoder().decode(PlayableExpression.self, from: json)
+        #expect(expression.validationError() == nil)
+        let encoded = try JSONEncoder().encode(expression)
+        let decoded = try JSONDecoder().decode(PlayableExpression.self, from: encoded)
+        #expect(decoded == expression)
+        #expect(decoded.interpretation?.preserved?.first?.text == "garden")
+        #expect(decoded.interpretation?.invented?.first?.text == "moon flowers")
+    }
+
+    @Test func playableExpressionRejectsUnknownEvidenceAndMissingRemixParent() throws {
+        let json = """
+        {
+          "schemaVersion":"1.0","status":"draft",
+          "source":{"type":"text","reference":"source-ref"},
+          "creator":{"ownerId":"creator-1","consent":true,"visibility":"private"},
+          "mode":"remix",
+          "interpretation":{"preserved":[{"id":"claim-1","text":"castle","confidence":0.8,"evidenceIds":["missing"]}]},
+          "generation":{"seed":1}
+        }
+        """.data(using: .utf8)!
+        let expression = try JSONDecoder().decode(PlayableExpression.self, from: json)
+        #expect(expression.validationError() != nil)
+    }
+
+    @Test func playableExpressionRejectsUnconsentedSourceAndInvalidDigest() throws {
+        let json = """
+        {
+          "schemaVersion":"1.0","status":"draft",
+          "source":{"type":"image","sha256":"not-a-digest"},
+          "creator":{"ownerId":"creator-1","consent":false,"visibility":"private"},
+          "mode":"make_playable",
+          "generation":{"seed":1}
+        }
+        """.data(using: .utf8)!
+        let expression = try JSONDecoder().decode(PlayableExpression.self, from: json)
+        #expect(expression.validationError() != nil)
+    }
+
 }
 
 
