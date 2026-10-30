@@ -111,7 +111,7 @@ struct PlayableExpression: Codable, Equatable {
         }
         let evidenceIDs = Set(evidence.map(\.id))
         let claims = (interpretation?.preserved ?? []) + (interpretation?.invented ?? []) + (interpretation?.uncertain ?? [])
-        guard Set(claims.map(\\.id)).count == claims.count else {
+        guard Set(claims.map(\.id)).count == claims.count else {
             return "Interpretation claim identifiers must be unique."
         }
         guard claims.allSatisfy({
