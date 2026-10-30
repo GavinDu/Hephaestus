@@ -365,6 +365,14 @@ struct HephaestusTests {
 }
 
 
+@Test func playerPrewarmDoesNotCacheHTTPErrorPages() {
+    #expect(PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: 200))
+    #expect(PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: 304))
+    #expect(!PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: 400))
+    #expect(!PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: 404))
+    #expect(!PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: 503))
+}
+
 @Test func playerHTTPFailuresDistinguishRetryableServerErrorsFromPermanentErrors() {
     for status in [408, 425, 429, 500, 502, 503, 504] {
         let error = PlayerLoadFailure.httpError(statusCode: status)
