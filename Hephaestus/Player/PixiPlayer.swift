@@ -93,6 +93,24 @@ enum PlayerPrewarmResponsePolicy {
     }
 }
 
+/// A single failed main-frame navigation can surface through both
+/// decidePolicyFor(response) and didFailProvisionalNavigation (the latter
+/// commonly reports NSURLErrorCancelled after an HTTP error response is
+/// rejected). Emit one UI/telemetry failure per navigation attempt.
+struct PlayerNavigationFailureGate {
+    private(set) var hasReportedFailure = false
+
+    mutating func beginNavigation() {
+        hasReportedFailure = false
+    }
+
+    mutating func shouldReportFailure() -> Bool {
+        guard !hasReportedFailure else { return false }
+        hasReportedFailure = true
+        return true
+    }
+}
+
 enum PlayerLoadFailure {
     enum Category { case network, unavailable, incompatible, accessDenied, unknown }
 
@@ -1021,6 +1039,7 @@ private struct PlayerWebView: UIViewRepresentable {
     let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
         private var acceptedRunIDs = Set<String>()
+        private var navigationFailureGate = PlayerNavigationFailureGate()
         private var acceptedMetricIDs = Set<String>()
         private var runtimeSessionID: String?
         private var isActive = true
@@ -1127,7 +1146,13 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            navigationFailureGate.beginNavigation()
             onProgress(0)
+        }
+
+        private func reportNavigationFailure(_ error: Error) {
+            guard navigationFailureGate.shouldReportFailure() else { return }
+            onLoadFail(error)
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
@@ -1137,7 +1162,7 @@ private struct PlayerWebView: UIViewRepresentable {
                 decisionHandler(.allow)
                 return
             }
-            onLoadFail(PlayerLoadFailure.httpError(statusCode: response.statusCode))
+            reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: response.statusCode))
             decisionHandler(.cancel)
         }
 
@@ -1147,11 +1172,11 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            onLoadFail(error)
+            reportNavigationFailure(error)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            onLoadFail(error)
+            reportNavigationFailure(error)
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
