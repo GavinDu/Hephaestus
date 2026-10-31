@@ -365,6 +365,16 @@ struct HephaestusTests {
 }
 
 
+@Test func playerNavigationFailureIsReportedOnlyOncePerAttempt() {
+    var gate = PlayerNavigationFailureGate()
+    #expect(gate.shouldReportFailure())
+    #expect(!gate.shouldReportFailure())
+
+    gate.beginNavigation()
+    #expect(gate.shouldReportFailure())
+    #expect(!gate.shouldReportFailure())
+}
+
 @Test func playerPrewarmDoesNotCacheHTTPErrorPages() {
     #expect(PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: 200))
     #expect(PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: 304))
