@@ -391,7 +391,6 @@ struct HephaestusTests {
     }
     #expect(PlayerLoadFailure.category(for: PlayerLoadFailure.httpError(statusCode: 404)) == .unavailable)
     #expect(PlayerLoadFailure.category(for: PlayerLoadFailure.httpError(statusCode: 426)) == .incompatible)
-    #expect(PlayerLoadFailure.category(for: PlayerLoadFailure.httpError(statusCode: 400)) == .unknown)
 }
 
 @Test func playerWebContentTerminationRecoveryIsBounded() {
@@ -406,10 +405,14 @@ struct HephaestusTests {
 
 @Test func playerHTTPErrorCategoryMatrixCoversRecoveryContracts() {
     let cases: [(status: Int, category: PlayerLoadFailure.Category, action: String)] = [
+        (400, .invalidPackage, "resource limits"),
         (401, .accessDenied, "sign in again"),
         (403, .accessDenied, "sign in again"),
         (404, .unavailable, "Return to the feed"),
+        (409, .invalidPackage, "resource limits"),
         (410, .unavailable, "Return to the feed"),
+        (413, .invalidPackage, "resource limits"),
+        (422, .invalidPackage, "resource limits"),
         (408, .network, "try again"),
         (425, .network, "try again"),
         (429, .network, "try again"),
