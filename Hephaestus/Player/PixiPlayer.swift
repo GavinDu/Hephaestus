@@ -97,14 +97,14 @@ enum PlayerPrewarmResponsePolicy {
 /// decidePolicyFor(response) and didFailProvisionalNavigation (the latter
 /// commonly reports NSURLErrorCancelled after an HTTP error response is
 /// rejected). Emit one UI/telemetry failure per navigation attempt.
-struct PlayerNavigationFailureGate {
+final class PlayerNavigationFailureGate {
     private(set) var hasReportedFailure = false
 
-    mutating func beginNavigation() {
+    func beginNavigation() {
         hasReportedFailure = false
     }
 
-    mutating func shouldReportFailure() -> Bool {
+    func shouldReportFailure() -> Bool {
         guard !hasReportedFailure else { return false }
         hasReportedFailure = true
         return true
