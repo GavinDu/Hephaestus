@@ -93,8 +93,26 @@ enum PlayerPrewarmResponsePolicy {
     }
 }
 
+/// A single failed main-frame navigation can surface through both
+/// decidePolicyFor(response) and didFailProvisionalNavigation (the latter
+/// commonly reports NSURLErrorCancelled after an HTTP error response is
+/// rejected). Emit one UI/telemetry failure per navigation attempt.
+final class PlayerNavigationFailureGate {
+    private(set) var hasReportedFailure = false
+
+    func beginNavigation() {
+        hasReportedFailure = false
+    }
+
+    func shouldReportFailure() -> Bool {
+        guard !hasReportedFailure else { return false }
+        hasReportedFailure = true
+        return true
+    }
+}
+
 enum PlayerLoadFailure {
-    enum Category { case network, unavailable, incompatible, accessDenied, unknown }
+    enum Category { case network, unavailable, invalidPackage, incompatible, accessDenied, unknown }
 
     static let httpErrorDomain = "Hephaestus.PlayerHTTP"
 
@@ -108,6 +126,7 @@ enum PlayerLoadFailure {
             switch ns.code {
             case 401, 403: return .accessDenied
             case 404, 410: return .unavailable
+            case 400, 409, 413, 422: return .invalidPackage
             case 408, 425, 429, 500, 502, 503, 504: return .network
             case 426: return .incompatible
             default: return .unknown
@@ -133,6 +152,8 @@ enum PlayerLoadFailure {
             return "Check your connection and try again."
         case .unavailable:
             return "This game is no longer available. Return to the feed to try another game."
+        case .invalidPackage:
+            return "This game package is invalid or exceeds its resource limits. Return to the feed to try another game."
         case .incompatible:
             return "This game needs a newer version of the app. Update the app and try again."
         case .accessDenied:
@@ -1021,6 +1042,7 @@ private struct PlayerWebView: UIViewRepresentable {
     let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
         private var acceptedRunIDs = Set<String>()
+        private var navigationFailureGate = PlayerNavigationFailureGate()
         private var acceptedMetricIDs = Set<String>()
         private var runtimeSessionID: String?
         private var isActive = true
@@ -1127,7 +1149,13 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            navigationFailureGate.beginNavigation()
             onProgress(0)
+        }
+
+        private func reportNavigationFailure(_ error: Error) {
+            guard navigationFailureGate.shouldReportFailure() else { return }
+            onLoadFail(error)
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
@@ -1137,7 +1165,7 @@ private struct PlayerWebView: UIViewRepresentable {
                 decisionHandler(.allow)
                 return
             }
-            onLoadFail(PlayerLoadFailure.httpError(statusCode: response.statusCode))
+            reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: response.statusCode))
             decisionHandler(.cancel)
         }
 
@@ -1147,11 +1175,11 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            onLoadFail(error)
+            reportNavigationFailure(error)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            onLoadFail(error)
+            reportNavigationFailure(error)
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
