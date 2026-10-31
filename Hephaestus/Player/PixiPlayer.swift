@@ -112,7 +112,7 @@ final class PlayerNavigationFailureGate {
 }
 
 enum PlayerLoadFailure {
-    enum Category { case network, unavailable, incompatible, accessDenied, unknown }
+    enum Category { case network, unavailable, invalidPackage, incompatible, accessDenied, unknown }
 
     static let httpErrorDomain = "Hephaestus.PlayerHTTP"
 
@@ -126,6 +126,7 @@ enum PlayerLoadFailure {
             switch ns.code {
             case 401, 403: return .accessDenied
             case 404, 410: return .unavailable
+            case 400, 409, 413, 422: return .invalidPackage
             case 408, 425, 429, 500, 502, 503, 504: return .network
             case 426: return .incompatible
             default: return .unknown
@@ -151,6 +152,8 @@ enum PlayerLoadFailure {
             return "Check your connection and try again."
         case .unavailable:
             return "This game is no longer available. Return to the feed to try another game."
+        case .invalidPackage:
+            return "This game package is invalid or exceeds its resource limits. Return to the feed to try another game."
         case .incompatible:
             return "This game needs a newer version of the app. Update the app and try again."
         case .accessDenied:
