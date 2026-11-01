@@ -69,6 +69,10 @@ enum FeedPreviewPolicy {
     static func shouldAutoplay(hasClip: Bool, reduceMotion: Bool, lowPowerMode: Bool, constrainedNetwork: Bool) -> Bool {
         hasClip && !reduceMotion && !lowPowerMode && !constrainedNetwork
     }
+
+    static func shouldStopOnFailure(_ status: AVPlayerItem.Status) -> Bool {
+        status == .failed
+    }
 }
 
 /// Measured preview dwell for Hephaestus #61. The previous code reported
@@ -90,6 +94,7 @@ final class FeedPreviewPlayback: ObservableObject {
     @Published private(set) var activeGameID: String?
     let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
+    private var itemStatusObservation: NSKeyValueObservation?
     private var pendingTask: Task<Void, Never>?
     private var pendingGameID: String?
     private var clipStartedAt: Date?
@@ -158,6 +163,14 @@ final class FeedPreviewPlayback: ObservableObject {
         activeGameID = gameID
         clipStartedAt = Date()
         let item = AVPlayerItem(url: url)
+        itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
+            guard FeedPreviewPolicy.shouldStopOnFailure(observedItem.status) else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.activeGameID == gameID else { return }
+                // Keep the poster visible when a clip fails to load or decode.
+                self.stop(gameID: gameID)
+            }
+        }
         looper = AVPlayerLooper(player: player, templateItem: item)
         player.isMuted = true
         player.play()
@@ -180,6 +193,8 @@ final class FeedPreviewPlayback: ObservableObject {
         }
         let stoppedGameID = activeGameID
         let startedAt = clipStartedAt
+        itemStatusObservation?.invalidate()
+        itemStatusObservation = nil
         player.pause()
         player.removeAllItems()
         looper = nil
