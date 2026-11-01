@@ -52,8 +52,17 @@ final class PlayerSmokeTests: XCTestCase {
         // Use a stable identifier instead of matching visible copy ("Play now"),
         // which can change as the social-feed card design evolves.
         let play = app.buttons["game.play"].firstMatch
-        XCTAssertTrue(play.waitForExistence(timeout: 120),
-                      "Discover feed should offer at least one playable game card. UI: \(app.debugDescription)")
+        let retry = app.buttons["Try again"].firstMatch
+        let feedDeadline = Date().addingTimeInterval(120)
+        while !play.exists && Date() < feedDeadline {
+            if retry.waitForExistence(timeout: 5) {
+                print("SMOKE: feed unavailable; retrying live request")
+                retry.tap()
+            }
+            _ = play.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(play.exists,
+                      "Discover feed should offer at least one playable game card after bounded retries. UI: \(app.debugDescription)")
         print("SMOKE: Play button visible")
         play.tap()
 
