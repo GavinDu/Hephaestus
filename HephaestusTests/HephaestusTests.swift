@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Testing
 @testable import Hephaestus
@@ -452,4 +453,11 @@ struct HephaestusTests {
     """.data(using: .utf8)!
     let expression = try JSONDecoder().decode(PlayableExpression.self, from: json)
     #expect(expression.validationError() == "Interpretation claim identifiers must be unique.")
+}
+
+
+@Test func previewPlaybackFailureReturnsToPoster() {
+    #expect(FeedPreviewPolicy.shouldStopOnFailure(.failed))
+    #expect(!FeedPreviewPolicy.shouldStopOnFailure(.readyToPlay))
+    #expect(!FeedPreviewPolicy.shouldStopOnFailure(.unknown))
 }
