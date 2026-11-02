@@ -796,12 +796,19 @@ private struct ForYouGamePage: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear {
-            onImpression()
+            if ForYouPageLayout.shouldTrackImpression(isSettled: isSettled) {
+                onImpression()
+            }
             if isSettled && !reduceMotion && scenePhase == .active {
                 FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
             }
         }
         .onDisappear { FeedPreviewPlayback.shared.stop(gameID: game.id) }
+        .onChange(of: isSettled) { _, settled in
+            if ForYouPageLayout.shouldTrackImpression(isSettled: settled) {
+                onImpression()
+            }
+        }
         .onChange(of: reduceMotion) { _, shouldReduceMotion in
             if shouldReduceMotion || !isSettled {
                 FeedPreviewPlayback.shared.stop(gameID: game.id)
