@@ -464,3 +464,11 @@ struct HephaestusTests {
     #expect(!FeedPreviewPolicy.shouldStopOnFailure(.readyToPlay))
     #expect(!FeedPreviewPolicy.shouldStopOnFailure(.unknown))
 }
+
+
+@Test func sourceUploadRequiresAnImageAndExplicitCreatorConsent() {
+    #expect(!PlayableExpression.canSubmitSource(hasImage: false, hasConsent: false))
+    #expect(!PlayableExpression.canSubmitSource(hasImage: true, hasConsent: false))
+    #expect(!PlayableExpression.canSubmitSource(hasImage: false, hasConsent: true))
+    #expect(PlayableExpression.canSubmitSource(hasImage: true, hasConsent: true))
+}
