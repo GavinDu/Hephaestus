@@ -19,6 +19,7 @@ struct CreateView: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var imageData: Data?
     @State private var previewImage: UIImage?
+    @State private var hasSourceConsent = false
     @State private var keywordsText = ""
     @State private var intentText = ""
     @State private var publishCaption = ""
@@ -97,6 +98,13 @@ struct CreateView: View {
                 }
             }
 
+            Toggle("I have permission to use this image and agree to upload it for game generation", isOn: $hasSourceConsent)
+                .accessibilityIdentifier("create.sourceConsent")
+            Text("Your image is sent to the service for analysis and generation. Publishing the resulting game is a separate action.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             TextField("Keywords (comma separated)", text: $keywordsText)
                 .textFieldStyle(.roundedBorder)
                 .padding(.horizontal)
@@ -105,7 +113,7 @@ struct CreateView: View {
                 Task { await analyze() }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(imageData == nil)
+            .disabled(!PlayableExpression.canSubmitSource(hasImage: imageData != nil, hasConsent: hasSourceConsent))
 
             Spacer()
         }
@@ -325,10 +333,12 @@ struct CreateView: View {
         publishCaption = ""
         publishTopics = ""
         publishMessage = nil
+        hasSourceConsent = false
     }
 
     private func analyze() async {
-        guard let imageData else { return }
+        guard PlayableExpression.canSubmitSource(hasImage: imageData != nil, hasConsent: hasSourceConsent),
+              let imageData else { return }
         phase = .analyzing
         let keywords = keywordsText
             .split(separator: ",")
