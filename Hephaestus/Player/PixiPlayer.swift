@@ -139,7 +139,10 @@ enum PlayerLoadFailure {
              NSURLErrorNetworkConnectionLost,
              NSURLErrorCannotFindHost,
              NSURLErrorCannotConnectToHost,
-             NSURLErrorDNSLookupFailed:
+             NSURLErrorDNSLookupFailed,
+             // TLS handshake failures are transient transport failures from
+             // the player's perspective; use the retry-first recovery path.
+             NSURLErrorSecureConnectionFailed:
             return .network
         default:
             return .unknown
