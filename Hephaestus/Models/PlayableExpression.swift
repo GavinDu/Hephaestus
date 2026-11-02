@@ -85,6 +85,11 @@ struct PlayableExpression: Codable, Equatable {
     var generation: Generation
     var lineage: Lineage?
 
+    /// Source bytes must never be uploaded until the creator explicitly opts in.
+    static func canSubmitSource(hasImage: Bool, hasConsent: Bool) -> Bool {
+        hasImage && hasConsent
+    }
+
     func validationError() -> String? {
         guard schemaVersion == "1.0" else { return "Unsupported playable expression schema version." }
         guard !creator.ownerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, creator.consent else {
