@@ -16,4 +16,9 @@ enum ForYouPageLayout {
         if let currentID, availableIDs.contains(currentID) { return currentID }
         return availableIDs.first
     }
+
+    /// Prefetched/offscreen pages must not count as viewed until they settle.
+    static func shouldTrackImpression(isSettled: Bool) -> Bool {
+        isSettled
+    }
 }

@@ -332,6 +332,11 @@ struct HephaestusTests {
     #expect(ForYouPageLayout.reconciledSelection(currentID: "game-5", availableIDs: []) == nil)
 }
 
+@Test func forYouPagerTracksImpressionsOnlyAfterPageSettles() {
+    #expect(!ForYouPageLayout.shouldTrackImpression(isSettled: false))
+    #expect(ForYouPageLayout.shouldTrackImpression(isSettled: true))
+}
+
 
 
 @Test func playerStageLayoutUsesFullWidthOnPhoneAndPortraitStageOnIPad() {
