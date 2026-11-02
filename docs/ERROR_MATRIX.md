@@ -62,8 +62,8 @@ Raw detail goes to DevLog/telemetry, never the UI.
 
 | Failure | Shell category | User-facing message | Next action |
 | --- | --- | --- | --- |
-| Not connected, timed out, connection lost, cannot find/connect host, DNS lookup failed | `network` | "Check your connection and try again." | Retry; the error card offers Return to feed and covers the full screen |
-| Any other load error (incl. TLS, cancelled, unknown) | `unknown` | "The player couldn't load this game." | Retry or Return to feed |
+| Not connected, timed out, connection lost, cannot find/connect host, DNS lookup failed, TLS handshake failure (`NSURLErrorSecureConnectionFailed`) | `network` | "Check your connection and try again." | Retry; the error card offers Return to feed and covers the full screen |
+| Cancelled or other unclassified load error | `unknown` | "The player couldn't load this game." | Retry or Return to feed |
 
 Lifecycle rules around these rows (already implemented, stated here
 so the matrix is complete):
