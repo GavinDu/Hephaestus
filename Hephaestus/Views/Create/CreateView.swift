@@ -20,6 +20,7 @@ struct CreateView: View {
     @State private var imageData: Data?
     @State private var previewImage: UIImage?
     @State private var hasSourceConsent = false
+    @State private var hasPublicPublishConsent = false
     @State private var keywordsText = ""
     @State private var intentText = ""
     @State private var publishCaption = ""
@@ -291,8 +292,10 @@ struct CreateView: View {
                     .textFieldStyle(.roundedBorder)
                 TextField("Topics, separated by commas", text: $publishTopics)
                     .textFieldStyle(.roundedBorder)
-                Text("Published games enter moderation before appearing in public feeds.")
+                Text("Publishing submits this game, caption, and topics for public distribution. It enters moderation before appearing in feeds.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("I agree to submit this game for public sharing and moderation", isOn: $hasPublicPublishConsent)
+                    .accessibilityIdentifier("create.publicPublishConsent")
                 if let publishMessage {
                     Text(publishMessage).font(.footnote).foregroundStyle(.secondary)
                 }
@@ -303,7 +306,7 @@ struct CreateView: View {
                     else { Label("Publish game", systemImage: "paperplane.fill") }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isPublishing)
+                 .disabled(!PlayableExpression.canPublishPublicly(hasConsent: hasPublicPublishConsent, isPublishing: isPublishing))
             }
             .frame(maxWidth: 420)
             Button("Make another") { reset() }
@@ -312,6 +315,7 @@ struct CreateView: View {
     }
 
     private func publish(gameID: String) async {
+        guard PlayableExpression.canPublishPublicly(hasConsent: hasPublicPublishConsent, isPublishing: isPublishing) else { return }
         isPublishing = true
         defer { isPublishing = false }
         let topics = publishTopics.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
@@ -334,6 +338,7 @@ struct CreateView: View {
         publishTopics = ""
         publishMessage = nil
         hasSourceConsent = false
+        hasPublicPublishConsent = false
     }
 
     private func analyze() async {

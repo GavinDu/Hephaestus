@@ -85,6 +85,11 @@ struct PlayableExpression: Codable, Equatable {
     var generation: Generation
     var lineage: Lineage?
 
+    /// Public distribution is a separate, explicit action from source upload.
+    static func canPublishPublicly(hasConsent: Bool, isPublishing: Bool) -> Bool {
+        hasConsent && !isPublishing
+    }
+
     /// Source bytes must never be uploaded until the creator explicitly opts in.
     static func canSubmitSource(hasImage: Bool, hasConsent: Bool) -> Bool {
         hasImage && hasConsent

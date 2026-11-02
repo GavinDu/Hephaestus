@@ -477,3 +477,10 @@ struct HephaestusTests {
     #expect(!PlayableExpression.canSubmitSource(hasImage: false, hasConsent: true))
     #expect(PlayableExpression.canSubmitSource(hasImage: true, hasConsent: true))
 }
+
+
+@Test func publicPublishingRequiresSeparateConsentAndRejectsDuplicateSubmission() {
+    #expect(!PlayableExpression.canPublishPublicly(hasConsent: false, isPublishing: false))
+    #expect(!PlayableExpression.canPublishPublicly(hasConsent: true, isPublishing: true))
+    #expect(PlayableExpression.canPublishPublicly(hasConsent: true, isPublishing: false))
+}
