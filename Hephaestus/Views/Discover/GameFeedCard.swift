@@ -107,10 +107,20 @@ struct GameFeedCard: View {
                     .accessibilityHidden(true)
                 }
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("COMMUNITY GAME")
-                        .font(.caption2.weight(.bold))
-                        .tracking(1.2)
-                        .foregroundStyle(.white.opacity(0.82))
+                    HStack(spacing: 8) {
+                        Text("COMMUNITY GAME")
+                            .font(.caption2.weight(.bold))
+                            .tracking(1.2)
+                            .foregroundStyle(.white.opacity(0.82))
+                        if let parentID = game.remixParentID, !parentID.isEmpty {
+                            Label("REMIX", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.white.opacity(0.18), in: Capsule())
+                                .accessibilityLabel("Remix of another game")
+                        }
+                    }
                     Text(game.title)
                         .font(.system(.title2, design: .rounded).weight(.bold))
                         .foregroundStyle(.white)
@@ -118,6 +128,13 @@ struct GameFeedCard: View {
                         .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
                     if let caption = game.caption, !caption.isEmpty {
                         Text(caption).font(.subheadline).foregroundStyle(.white.opacity(0.94)).lineLimit(3)
+                    }
+                    if let topics = game.topics, !topics.isEmpty {
+                        Text(topics.prefix(3).map { "#\\($0)" }.joined(separator: "  "))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(1)
+                            .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
                     }
                 }
                 .padding(18)
