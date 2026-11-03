@@ -117,9 +117,9 @@ final class PlayerSmokeTests: XCTestCase {
         }
 
         assertTouchTarget(play, named: "Play")
-        assertTouchTarget(app.buttons["Save game"], named: "Save")
-        assertTouchTarget(app.buttons["Like game"], named: "Like")
-        assertTouchTarget(app.buttons["View comments"], named: "Comments")
+        assertTouchTarget(app.buttons["Save game"].firstMatch, named: "Save")
+        assertTouchTarget(app.buttons["Like game"].firstMatch, named: "Like")
+        assertTouchTarget(app.buttons["View comments"].firstMatch, named: "Comments")
 
         let beforeSwipe = XCTAttachment(screenshot: app.screenshot())
         beforeSwipe.name = "feed-ui-evaluator-before-swipe"
