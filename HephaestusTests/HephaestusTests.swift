@@ -188,6 +188,36 @@ struct HephaestusTests {
         #expect(game.publishedVersion == 1)
     }
 
+    @Test func publicFeedDecodesRedactedPlayableExpressionSummary() throws {
+        let json = """
+        {
+          "game_id": "expression-game",
+          "title": "Moon Garden",
+          "playable_expression": {
+            "source_type": "image",
+            "source_visibility": "public",
+            "intent": "A quiet garden in the moonlight",
+            "chosen_interpretation": "Moon garden",
+            "preserved": [{"text": "garden", "confidence": 0.95}],
+            "invented": [{"text": "moon flowers", "confidence": 0.7}],
+            "uncertain": [],
+            "parent_game_id": "parent-game",
+            "parent_version": 2
+          }
+        }
+        """.data(using: .utf8)!
+        let game = try JSONDecoder().decode(FeedGame.self, from: json)
+        #expect(game.playableExpression?.source_visibility == "public")
+        #expect(game.playableExpression?.intent == "A quiet garden in the moonlight")
+        #expect(game.playableExpression?.chosen_interpretation == "Moon garden")
+        #expect(game.playableExpression?.preserved?.first?.text == "garden")
+        #expect(game.playableExpression?.invented?.first?.text == "moon flowers")
+        #expect(game.playableExpression?.parent_game_id == "parent-game")
+        let encoded = try JSONEncoder().encode(game)
+        let roundTrip = try JSONDecoder().decode(FeedGame.self, from: encoded)
+        #expect(roundTrip.playableExpression == game.playableExpression)
+    }
+
     @Test func creatorDiscoveryDecodesSearchResultsAndCursor() throws {
         let json = """
         {
