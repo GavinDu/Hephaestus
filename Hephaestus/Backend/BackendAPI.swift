@@ -18,6 +18,23 @@ struct Element: Codable {
     var role: String
 }
 
+struct FeedExpressionClaim: Codable, Equatable {
+    var text: String
+    var confidence: Double
+}
+
+struct FeedPlayableExpression: Codable, Equatable {
+    var source_type: String
+    var source_visibility: String
+    var intent: String?
+    var chosen_interpretation: String?
+    var preserved: [FeedExpressionClaim]?
+    var invented: [FeedExpressionClaim]?
+    var uncertain: [FeedExpressionClaim]?
+    var parent_game_id: String?
+    var parent_version: Int?
+}
+
 struct FeedGame: Codable, Identifiable {
     var id: String
     var title: String
@@ -45,6 +62,7 @@ struct FeedGame: Codable, Identifiable {
     var viewerLiked: Bool?
     var viewerSaved: Bool?
     var viewerFollowing: Bool?
+    var playableExpression: FeedPlayableExpression?
 
     enum CodingKeys: String, CodingKey {
         case id, game_id, title, owner_id, caption, topics, published_at, published_version, remix_parent_id, moderation_status, created_at
@@ -52,6 +70,7 @@ struct FeedGame: Codable, Identifiable {
         case previewPosterURL = "preview_poster_url", previewClipURL = "preview_clip_url", previewAspect = "preview_aspect"
         case previewDurationMS = "preview_duration_ms", previewDominantColor = "preview_dominant_color", previewStatus = "preview_status"
         case likeCount = "like_count", playStarts = "play_starts", completions, replays, shares
+        case playableExpression = "playable_expression"
         case viewerLiked = "viewer_liked", viewerSaved = "viewer_saved", viewerFollowing = "viewer_following"
     }
 
@@ -88,6 +107,7 @@ struct FeedGame: Codable, Identifiable {
         viewerLiked = try? c.decode(Bool.self, forKey: .viewerLiked)
         viewerSaved = try? c.decode(Bool.self, forKey: .viewerSaved)
         viewerFollowing = try? c.decode(Bool.self, forKey: .viewerFollowing)
+        playableExpression = try? c.decode(FeedPlayableExpression.self, forKey: .playableExpression)
     }
 
     mutating func apply(card: FeedCard) {
@@ -110,6 +130,7 @@ struct FeedGame: Codable, Identifiable {
         viewerLiked = card.viewer.liked
         viewerSaved = card.viewer.saved
         viewerFollowing = card.viewer.following
+        playableExpression = card.playable_expression ?? playableExpression
     }
 
     func encode(to encoder: Encoder) throws {
@@ -140,6 +161,7 @@ struct FeedGame: Codable, Identifiable {
         try c.encodeIfPresent(viewerLiked, forKey: .viewerLiked)
         try c.encodeIfPresent(viewerSaved, forKey: .viewerSaved)
         try c.encodeIfPresent(viewerFollowing, forKey: .viewerFollowing)
+        try c.encodeIfPresent(playableExpression, forKey: .playableExpression)
     }
 }
 
@@ -159,6 +181,7 @@ struct FeedCard: Decodable {
     var preview: Preview
     var stats: Stats?
     var viewer: Viewer
+    var playable_expression: FeedPlayableExpression?
 }
 
 struct FeedResponse: Codable {
