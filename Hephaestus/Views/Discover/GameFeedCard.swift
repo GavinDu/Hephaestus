@@ -113,7 +113,7 @@ struct GameFeedCard: View {
                             .tracking(1.2)
                             .foregroundStyle(.white.opacity(0.82))
                         if let parentID = game.remixParentID, !parentID.isEmpty {
-                            Label("REMIX", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
+                            Label("REMIX", systemImage: "arrow.triangle.2.circlepath")
                                 .font(.caption2.weight(.bold))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
@@ -130,7 +130,7 @@ struct GameFeedCard: View {
                         Text(caption).font(.subheadline).foregroundStyle(.white.opacity(0.94)).lineLimit(3)
                     }
                     if let topics = game.topics, !topics.isEmpty {
-                        Text(topics.prefix(3).map { "#\\($0)" }.joined(separator: "  "))
+                        Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.9))
                             .lineLimit(1)
