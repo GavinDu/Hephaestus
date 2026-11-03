@@ -325,6 +325,10 @@ struct HephaestusTests {
     #expect(ForYouPageLayout.stageWidth(containerWidth: 390, containerHeight: 844, isRegular: false) == 390)
     #expect(ForYouPageLayout.stageWidth(containerWidth: 1024, containerHeight: 768, isRegular: true) == 432)
     #expect(ForYouPageLayout.stageWidth(containerWidth: 768, containerHeight: 1024, isRegular: true) == 560)
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 1024, containerHeight: 768, isRegular: true, isLandscape: true) == 1024)
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 1366, containerHeight: 1024, isRegular: true, isLandscape: true) == 1120)
+    #expect(ForYouPageLayout.contentMaxWidth(isRegular: true) == 760)
+    #expect(ForYouPageLayout.contentMaxWidth(isRegular: false).isInfinite)
 }
 
 @Test func forYouPagerSelectionReconcilesRefreshAndPaginationChanges() {
