@@ -99,7 +99,7 @@ final class PlayerSmokeTests: XCTestCase {
 
         let play = app.buttons["game.play"].firstMatch
         XCTAssertTrue(play.waitForExistence(timeout: 120),
-                      "For You should expose a playable feed page. UI: \\(app.debugDescription)")
+                      "For You should expose a playable feed page. UI: \(app.debugDescription)")
 
         let swipeCue = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", "SWIPE TO EXPLORE"))
@@ -108,12 +108,12 @@ final class PlayerSmokeTests: XCTestCase {
                       "The feed should communicate its vertical swipe interaction.")
 
         func assertTouchTarget(_ element: XCUIElement, named name: String) {
-            XCTAssertTrue(element.exists, "\\(name) should be present on the feed page.")
+            XCTAssertTrue(element.exists, "\(name) should be present on the feed page.")
             guard element.exists else { return }
             let frame = element.frame
-            XCTAssertGreaterThanOrEqual(frame.width, 44, "\\(name) should be at least 44pt wide.")
-            XCTAssertGreaterThanOrEqual(frame.height, 44, "\\(name) should be at least 44pt tall.")
-            XCTAssertTrue(element.isHittable, "\\(name) should be reachable without scrolling.")
+            XCTAssertGreaterThanOrEqual(frame.width, 44, "\(name) should be at least 44pt wide.")
+            XCTAssertGreaterThanOrEqual(frame.height, 44, "\(name) should be at least 44pt tall.")
+            XCTAssertTrue(element.isHittable, "\(name) should be reachable without scrolling.")
         }
 
         assertTouchTarget(play, named: "Play")
