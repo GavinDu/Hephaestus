@@ -692,7 +692,7 @@ private struct ForYouGamePage: View {
                     .lineLimit(3)
             }
             if let topics = game.topics, !topics.isEmpty {
-                Text(topics.prefix(3).map { "#\\($0)" }.joined(separator: "  "))
+                Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
