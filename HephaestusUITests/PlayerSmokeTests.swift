@@ -98,8 +98,17 @@ final class PlayerSmokeTests: XCTestCase {
         app.launch()
 
         let play = app.buttons["game.play"].firstMatch
-        XCTAssertTrue(play.waitForExistence(timeout: 120),
-                      "For You should expose a playable feed page. UI: \(app.debugDescription)")
+        let retry = app.buttons["Try again"].firstMatch
+        let feedDeadline = Date().addingTimeInterval(150)
+        while !play.exists && Date() < feedDeadline {
+            if retry.waitForExistence(timeout: 5) {
+                print("UI EVALUATOR: feed unavailable; retrying live request")
+                retry.tap()
+            }
+            _ = play.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(play.exists,
+                      "For You should expose a playable feed page after bounded retries. UI: \(app.debugDescription)")
 
         let swipeCue = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", "SWIPE TO EXPLORE"))
