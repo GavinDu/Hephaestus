@@ -4,9 +4,16 @@ import SwiftUI
 /// Compact layouts fill the available width; regular layouts preserve a
 /// portrait 9:16 stage with a readable maximum width.
 enum ForYouPageLayout {
-    static func stageWidth(containerWidth: CGFloat, containerHeight: CGFloat, isRegular: Bool) -> CGFloat {
+    static func stageWidth(containerWidth: CGFloat, containerHeight: CGFloat, isRegular: Bool, isLandscape: Bool = false) -> CGFloat {
         guard isRegular else { return containerWidth }
+        // iPad portrait keeps a focused 9:16 viewer; landscape uses the
+        // available canvas so the feed feels intentional in either posture.
+        if isLandscape { return min(containerWidth, 1_120) }
         return min(containerWidth, min(containerHeight * 9 / 16, 560))
+    }
+
+    static func contentMaxWidth(isRegular: Bool) -> CGFloat {
+        isRegular ? 760 : .infinity
     }
 
     /// Keep the current page when it still exists; otherwise select the first

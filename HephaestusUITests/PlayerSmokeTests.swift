@@ -87,4 +87,56 @@ final class PlayerSmokeTests: XCTestCase {
         shot.lifetime = .keepAlways
         add(shot)
     }
+
+    /// Lightweight UI evaluator for the swipe-first feed. This runs in the
+    /// existing iPhone smoke job and the optional iPad simulator job, so the
+    /// same layout and touch-target checks are exercised at both size classes.
+    @MainActor
+    func testDiscoverFeedUIEvaluationAndSwipe() throws {
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+
+        let play = app.buttons["game.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 120),
+                      "For You should expose a playable feed page. UI: \(app.debugDescription)")
+
+        let swipeCue = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "SWIPE TO EXPLORE"))
+            .firstMatch
+        XCTAssertTrue(swipeCue.waitForExistence(timeout: 10),
+                      "The feed should communicate its vertical swipe interaction.")
+
+        func assertTouchTarget(_ element: XCUIElement, named name: String) {
+            XCTAssertTrue(element.exists, "\(name) should be present on the feed page.")
+            guard element.exists else { return }
+            let frame = element.frame
+            XCTAssertGreaterThanOrEqual(frame.width, 44, "\(name) should be at least 44pt wide.")
+            XCTAssertGreaterThanOrEqual(frame.height, 44, "\(name) should be at least 44pt tall.")
+            XCTAssertTrue(element.isHittable, "\(name) should be reachable without scrolling.")
+        }
+
+        assertTouchTarget(play, named: "Play")
+        assertTouchTarget(app.buttons["Save game"].firstMatch, named: "Save")
+        assertTouchTarget(app.buttons["Like game"].firstMatch, named: "Like")
+        assertTouchTarget(app.buttons["View comments"].firstMatch, named: "Comments")
+
+        let beforeSwipe = XCTAttachment(screenshot: app.screenshot())
+        beforeSwipe.name = "feed-ui-evaluator-before-swipe"
+        beforeSwipe.lifetime = .keepAlways
+        add(beforeSwipe)
+
+        // Exercise the primary browsing gesture and ensure the feed remains
+        // interactive after the transition. This is intentionally tolerant
+        // of a one-item live feed, where the current page remains selected.
+        app.swipeUp()
+        XCTAssertTrue(play.waitForExistence(timeout: 10),
+                      "The feed should remain playable after a vertical swipe.")
+
+        let afterSwipe = XCTAttachment(screenshot: app.screenshot())
+        afterSwipe.name = "feed-ui-evaluator-after-swipe"
+        afterSwipe.lifetime = .keepAlways
+        add(afterSwipe)
+    }
+
 }
