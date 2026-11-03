@@ -135,3 +135,63 @@ jobs:
             /tmp/smoke.xcresult
             /tmp/test-feedback.json
           if-no-files-found: ignore
+
+  # Real iPad UI evaluation at a regular-width size class.
+  ipad-feed-ui-evaluator:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find an available iPad simulator
+        id: ipad
+        run: |
+          UDID=$(xcrun simctl list devices available | grep -E 'iPad' | head -n 1 | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}')
+          if [ -z "$UDID" ]; then
+            echo "No available iPad simulator found on this runner"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Evaluating feed UI on iPad simulator $UDID"
+      - name: Warm the live feed backend
+        run: |
+          for i in $(seq 1 18); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://html-5-game-generator.replit.app/v1/feed || true)
+            echo "backend warm-up attempt $i: HTTP $code"
+            [ "$code" = "200" ] && break
+            sleep 5
+          done
+      - name: Boot iPad simulator
+        run: |
+          xcrun simctl boot "${{ steps.ipad.outputs.udid }}" || true
+          xcrun simctl bootstatus "${{ steps.ipad.outputs.udid }}" -b
+      - name: Run iPad feed UI evaluator
+        run: |
+          set -o pipefail
+          xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus \
+            -destination "platform=iOS Simulator,id=${{ steps.ipad.outputs.udid }}" \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedUIEvaluationAndSwipe \
+            -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/ipad-feed-ui.log || {
+              grep -E "error:|XCTAssert" /tmp/ipad-feed-ui.log | sort -u | head -30 | while read -r l; do
+                echo "::error title=ipad-feed-ui::$l"
+              done
+              exit 1
+            }
+      - name: Build iPad UI test-feedback artifact
+        if: always()
+        run: |
+          python3 tools/test-feedback/xcresult-to-feedback.py \
+            --log /tmp/ipad-feed-ui.log --out /tmp/test-feedback-ipad.json \
+            --run-id "ipad-feed-${{ github.run_id }}-${{ github.run_attempt }}" \
+            --commit "${{ github.sha }}" --layer 1 --prefix ipad-feed || true
+      - name: Upload iPad UI evaluation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipad-feed-ui-evaluator
+          path: |
+            /tmp/ipad-feed-ui.log
+            /tmp/ipad-feed-ui.xcresult
+            /tmp/test-feedback-ipad.json
+          if-no-files-found: ignore
