@@ -175,6 +175,7 @@ struct HephaestusTests {
           "caption": "A small story",
           "topics": ["puzzle", "family"],
           "published_version": 1,
+          "remix_parent_id": "parent-game",
           "moderation_status": "approved"
         }
         """.data(using: .utf8)!
@@ -183,6 +184,7 @@ struct HephaestusTests {
         #expect(game.ownerID == "creator-1")
         #expect(game.caption == "A small story")
         #expect(game.topics == ["puzzle", "family"])
+        #expect(game.remixParentID == "parent-game")
         #expect(game.publishedVersion == 1)
     }
 
