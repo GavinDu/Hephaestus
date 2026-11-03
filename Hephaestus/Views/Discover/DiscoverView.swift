@@ -666,10 +666,20 @@ private struct ForYouGamePage: View {
     private func detailsOverlay(bottomInset: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Spacer(minLength: 100)
-            Text("COMMUNITY GAME")
-                .font(.caption2.weight(.bold))
-                .tracking(1.2)
-                .foregroundStyle(.white.opacity(0.82))
+            HStack(spacing: 8) {
+                Text("FOR YOU")
+                    .font(.caption2.weight(.bold))
+                    .tracking(1.2)
+                    .foregroundStyle(.white.opacity(0.82))
+                if let parentID = game.remixParentID, !parentID.isEmpty {
+                    Label("REMIX", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.white.opacity(0.18), in: Capsule())
+                        .accessibilityLabel("Remix of another game")
+                }
+            }
             Text(game.title)
                 .font(.system(.title, design: .rounded).weight(.bold))
                 .foregroundStyle(.white)
@@ -680,6 +690,13 @@ private struct ForYouGamePage: View {
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.94))
                     .lineLimit(3)
+            }
+            if let topics = game.topics, !topics.isEmpty {
+                Text(topics.prefix(3).map { "#\\($0)" }.joined(separator: "  "))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+                    .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
             }
             HStack(spacing: 8) {
                 Button(action: onOpenCreator) {
@@ -770,7 +787,7 @@ private struct ForYouGamePage: View {
         .padding(.horizontal, 20)
         .padding(.top, 24)
         .padding(.bottom, max(24, bottomInset + 12))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .frame(maxWidth: ForYouPageLayout.contentMaxWidth(isRegular: horizontalSizeClass == .regular), maxHeight: .infinity, alignment: .bottomLeading)
         .background(
             LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
                 .allowsHitTesting(false)
@@ -779,17 +796,35 @@ private struct ForYouGamePage: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let pageWidth = ForYouPageLayout.stageWidth(containerWidth: proxy.size.width, containerHeight: proxy.size.height, isRegular: horizontalSizeClass == .regular)
+            let isRegular = horizontalSizeClass == .regular
+            let isLandscape = proxy.size.width > proxy.size.height
+            let pageWidth = ForYouPageLayout.stageWidth(containerWidth: proxy.size.width, containerHeight: proxy.size.height, isRegular: isRegular, isLandscape: isLandscape)
             ZStack {
                 Color(uiColor: .systemBackground).ignoresSafeArea()
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
                     ZStack(alignment: .bottom) {
                         mediaLayer
+                        VStack {
+                            HStack {
+                                Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
+                                    .font(.caption2.weight(.bold))
+                                    .tracking(0.8)
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .padding(.horizontal, 11)
+                                    .padding(.vertical, 8)
+                                    .background(.black.opacity(0.28), in: Capsule())
+                                Spacer()
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 18)
+                        .allowsHitTesting(false)
                         detailsOverlay(bottomInset: proxy.safeAreaInsets.bottom)
                     }
                     .frame(width: pageWidth, height: proxy.size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: horizontalSizeClass == .regular ? 24 : 0, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: isRegular ? 24 : 0, style: .continuous))
                     Spacer(minLength: 0)
                 }
             }
