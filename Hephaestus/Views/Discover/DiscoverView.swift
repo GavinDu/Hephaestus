@@ -567,6 +567,7 @@ private struct SocialFeedUnavailableView: View {
 
 private struct ForYouGamePage: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var previewPlayback = FeedPreviewPlayback.shared
@@ -663,6 +664,73 @@ private struct ForYouGamePage: View {
         .accessibilityLabel(label)
     }
 
+
+    private func expressionTag(_ title: String, count: Int) -> some View {
+        Text("\(title) · \(count)")
+            .font(.system(size: 10, weight: .semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
+            .background(.white.opacity(0.16), in: Capsule())
+    }
+
+    private func expressionAccessibilityLabel(_ expression: FeedPlayableExpression) -> String {
+        let preserved = expression.preserved?.count ?? 0
+        let invented = expression.invented?.count ?? 0
+        let uncertain = expression.uncertain?.count ?? 0
+        return [
+            "Playable expression",
+            expression.intent,
+            expression.chosen_interpretation.map { "Interpretation: \($0)" },
+            "Source shared",
+            "Preserved claims: \(preserved)",
+            "Invented claims: \(invented)",
+            "Uncertain claims: \(uncertain)"
+        ].compactMap { $0 }.joined(separator: ". ")
+    }
+
+    private func playableExpressionSummary(_ expression: FeedPlayableExpression) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Label("PLAYABLE EXPRESSION", systemImage: "sparkles")
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.8)
+                Text("SOURCE SHARED")
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(.white.opacity(0.18), in: Capsule())
+            }
+            if verticalSizeClass == .compact {
+                HStack(spacing: 6) {
+                    expressionTag("P", count: expression.preserved?.count ?? 0)
+                    expressionTag("I", count: expression.invented?.count ?? 0)
+                    expressionTag("U", count: expression.uncertain?.count ?? 0)
+                    if let interpretation = expression.chosen_interpretation, !interpretation.isEmpty {
+                        Text(interpretation).font(.caption).lineLimit(1)
+                    }
+                }
+            } else {
+                if let intent = expression.intent, !intent.isEmpty {
+                    Text(intent).font(.subheadline.weight(.medium)).lineLimit(2)
+                }
+                if let interpretation = expression.chosen_interpretation, !interpretation.isEmpty {
+                    Text("Interpretation · " + interpretation)
+                        .font(.caption).foregroundStyle(.white.opacity(0.9)).lineLimit(2)
+                }
+                HStack(spacing: 6) {
+                    expressionTag("Preserved", count: expression.preserved?.count ?? 0)
+                    expressionTag("Invented", count: expression.invented?.count ?? 0)
+                    expressionTag("Uncertain", count: expression.uncertain?.count ?? 0)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(expressionAccessibilityLabel(expression))
+    }
+
     private func detailsOverlay(bottomInset: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Spacer(minLength: 100)
@@ -697,6 +765,9 @@ private struct ForYouGamePage: View {
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
                     .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
+            }
+            if let expression = game.playableExpression, expression.source_visibility == "public" {
+                playableExpressionSummary(expression)
             }
             HStack(spacing: 8) {
                 Button(action: onOpenCreator) {
