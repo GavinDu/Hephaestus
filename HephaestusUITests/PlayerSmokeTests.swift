@@ -161,10 +161,13 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertNotNil(beforePage, "The current feed page should intersect the app viewport.")
         let beforePageID = beforePage?.identifier
 
-        // Exercise the primary browsing gesture and require the settled page
-        // identity to change; merely retaining a visible Play button is not
-        // evidence that vertical paging works.
-        app.swipeUp()
+        // Scope the gesture to the feed's actual vertical ScrollView. A swipe
+        // synthesized on the app root can be routed to navigation chrome or a
+        // nested control instead of the pager, producing a false paging failure.
+        let pager = app.scrollViews.firstMatch
+        XCTAssertTrue(pager.waitForExistence(timeout: 5),
+                      "For You should expose its vertical paging scroll view.")
+        pager.swipeUp()
         let pageChanged = NSPredicate { _, _ in
             pages.allElementsBoundByIndex.contains {
                 $0.frame.intersects(app.frame) && $0.identifier != beforePageID
