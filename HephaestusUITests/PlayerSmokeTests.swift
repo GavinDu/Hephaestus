@@ -135,12 +135,31 @@ final class PlayerSmokeTests: XCTestCase {
         beforeSwipe.lifetime = .keepAlways
         add(beforeSwipe)
 
-        // Exercise the primary browsing gesture and ensure the feed remains
-        // interactive after the transition. This is intentionally tolerant
-        // of a one-item live feed, where the current page remains selected.
+        // Require a real next page in the fixture-backed CI feed. A one-card
+        // feed can validate launch and controls, but cannot prove paging works.
+        let pages = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed.page."))
+        XCTAssertGreaterThanOrEqual(pages.count, 2,
+                                    "The UI evaluator needs at least two feed pages to verify paging.")
+
+        let beforePage = pages.allElementsBoundByIndex.first(where: { $0.isHittable })
+        XCTAssertNotNil(beforePage, "The current feed page should be visible and hittable.")
+        let beforePageID = beforePage?.identifier
+
+        // Exercise the primary browsing gesture and require the settled page
+        // identity to change; merely retaining a visible Play button is not
+        // evidence that vertical paging works.
         app.swipeUp()
-        XCTAssertTrue(play.waitForExistence(timeout: 10),
-                      "The feed should remain playable after a vertical swipe.")
+        let pageChanged = NSPredicate { _, _ in
+            pages.allElementsBoundByIndex.contains {
+                $0.isHittable && $0.identifier != beforePageID
+            }
+        }
+        expectation(for: pageChanged, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(pages.allElementsBoundByIndex.contains {
+            $0.isHittable && $0.identifier != beforePageID
+        }, "Swiping up should settle on a different game page.")
 
         let afterSwipe = XCTAttachment(screenshot: app.screenshot())
         afterSwipe.name = "feed-ui-evaluator-after-swipe"
