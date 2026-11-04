@@ -218,9 +218,9 @@ final class PlayerSmokeTests: XCTestCase {
         // Emit a deterministic 0–100 score for each simulator profile. Hard
         // assertions above still fail the job; the score makes regressions
         // comparable between iPhone and iPad runs.
-        let score = (hasSwipeCue ? 10 : 0) + touchTargetsPassed * 10 +
-            landscapeTargetsPassed * 5 + (pages.count >= 2 ? 10 : 0) +
-            (didAdvance ? 10 : 0) + 20
+        let score = (hasSwipeCue ? 10 : 0) + touchTargetsPassed * 8 +
+            landscapeTargetsPassed * 4 + (pages.count >= 2 ? 10 : 0) +
+            (didAdvance ? 10 : 0) + 22
         print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) score=\(score)/100 portrait_targets=\(touchTargetsPassed)/4 landscape_targets=\(landscapeTargetsPassed)/4 pages=\(pages.count) swipe_advanced=\(didAdvance)")
 
         let afterSwipe = XCTAttachment(screenshot: app.screenshot())
