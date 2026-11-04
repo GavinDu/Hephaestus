@@ -11,6 +11,7 @@
 //
 
 import XCTest
+import UIKit
 
 final class PlayerSmokeTests: XCTestCase {
 
@@ -113,34 +114,78 @@ final class PlayerSmokeTests: XCTestCase {
         let swipeCue = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", "SWIPE TO EXPLORE"))
             .firstMatch
-        XCTAssertTrue(swipeCue.waitForExistence(timeout: 10),
+        let hasSwipeCue = swipeCue.waitForExistence(timeout: 10)
+        XCTAssertTrue(hasSwipeCue,
                       "The feed should communicate its vertical swipe interaction.")
 
-        func assertTouchTarget(_ element: XCUIElement, named name: String) {
+        @discardableResult
+        func assertTouchTarget(_ element: XCUIElement, named name: String) -> Bool {
             XCTAssertTrue(element.exists, "\(name) should be present on the feed page.")
-            guard element.exists else { return }
+            guard element.exists else { return false }
             let frame = element.frame
+            let sized = frame.width >= 44 && frame.height >= 44
             XCTAssertGreaterThanOrEqual(frame.width, 44, "\(name) should be at least 44pt wide.")
             XCTAssertGreaterThanOrEqual(frame.height, 44, "\(name) should be at least 44pt tall.")
-            XCTAssertTrue(element.isHittable, "\(name) should be reachable without scrolling.")
+            let reachable = element.isHittable
+            XCTAssertTrue(reachable, "\(name) should be reachable without scrolling.")
+            return sized && reachable
         }
 
-        assertTouchTarget(play, named: "Play")
-        assertTouchTarget(app.buttons["Save game"].firstMatch, named: "Save")
-        assertTouchTarget(app.buttons["Like game"].firstMatch, named: "Like")
-        assertTouchTarget(app.buttons["View comments"].firstMatch, named: "Comments")
+        let touchTargetsPassed = [
+            assertTouchTarget(play, named: "Play"),
+            assertTouchTarget(app.buttons["Save game"].firstMatch, named: "Save"),
+            assertTouchTarget(app.buttons["Like game"].firstMatch, named: "Like"),
+            assertTouchTarget(app.buttons["View comments"].firstMatch, named: "Comments")
+        ].filter { $0 }.count
 
         let beforeSwipe = XCTAttachment(screenshot: app.screenshot())
         beforeSwipe.name = "feed-ui-evaluator-before-swipe"
         beforeSwipe.lifetime = .keepAlways
         add(beforeSwipe)
 
-        // Exercise the primary browsing gesture and ensure the feed remains
-        // interactive after the transition. This is intentionally tolerant
-        // of a one-item live feed, where the current page remains selected.
-        app.swipeUp()
-        XCTAssertTrue(play.waitForExistence(timeout: 10),
-                      "The feed should remain playable after a vertical swipe.")
+        // Require a real next page in the fixture-backed CI feed. A one-card
+        // feed can validate launch and controls, but cannot prove paging works.
+        let pages = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title."))
+        XCTAssertGreaterThanOrEqual(pages.count, 2,
+                                    "The UI evaluator needs at least two feed pages to verify paging.")
+
+        // SwiftUI's title accessibility nodes can have an invalid activation
+        // point even while their containing page is visibly rendered. Use
+        // viewport intersection for page visibility instead of asking XCTest
+        // to synthesize a tap target for a non-interactive title label.
+        let visiblePages = pages.allElementsBoundByIndex.filter {
+            $0.frame.intersects(app.frame)
+        }
+        let beforePage = visiblePages.first
+        XCTAssertNotNil(beforePage, "The current feed page should intersect the app viewport.")
+        let beforePageID = beforePage?.identifier
+
+        // Scope the gesture to the feed's actual vertical ScrollView. A swipe
+        // synthesized on the app root can be routed to navigation chrome or a
+        // nested control instead of the pager, producing a false paging failure.
+        let pager = app.scrollViews.firstMatch
+        XCTAssertTrue(pager.waitForExistence(timeout: 5),
+                      "For You should expose its vertical paging scroll view.")
+        pager.swipeUp()
+        let pageChanged = NSPredicate { _, _ in
+            pages.allElementsBoundByIndex.contains {
+                $0.frame.intersects(app.frame) && $0.identifier != beforePageID
+            }
+        }
+        expectation(for: pageChanged, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        let didAdvance = pages.allElementsBoundByIndex.contains {
+            $0.frame.intersects(app.frame) && $0.identifier != beforePageID
+        }
+        XCTAssertTrue(didAdvance, "Swiping up should settle on a different game page.")
+
+        // Emit a deterministic 0–100 score for each simulator profile. Hard
+        // assertions above still fail the job; the score makes regressions
+        // comparable between iPhone and iPad runs.
+        let score = (hasSwipeCue ? 10 : 0) + touchTargetsPassed * 15 +
+            (pages.count >= 2 ? 15 : 0) + (didAdvance ? 15 : 0)
+        print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) score=\(score)/100 touch_targets=\(touchTargetsPassed)/4 pages=\(pages.count) swipe_advanced=\(didAdvance)")
 
         let afterSwipe = XCTAttachment(screenshot: app.screenshot())
         afterSwipe.name = "feed-ui-evaluator-after-swipe"
