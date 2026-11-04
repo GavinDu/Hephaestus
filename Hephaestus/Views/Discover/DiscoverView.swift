@@ -18,6 +18,7 @@ private struct PlayerResultPresentation: Identifiable {
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedFeed: SocialFeedScope = .forYou
     @State private var games: [FeedGame] = []
@@ -699,17 +700,28 @@ private struct ForYouGamePage: View {
                     .padding(.vertical, 4)
                     .background(.white.opacity(0.18), in: Capsule())
             }
-            if let intent = expression.intent, !intent.isEmpty {
-                Text(intent).font(.subheadline.weight(.medium)).lineLimit(2)
-            }
-            if let interpretation = expression.chosen_interpretation, !interpretation.isEmpty {
-                Text("Interpretation · " + interpretation)
-                    .font(.caption).foregroundStyle(.white.opacity(0.9)).lineLimit(2)
-            }
-            HStack(spacing: 6) {
-                expressionTag("Preserved", count: expression.preserved?.count ?? 0)
-                expressionTag("Invented", count: expression.invented?.count ?? 0)
-                expressionTag("Uncertain", count: expression.uncertain?.count ?? 0)
+            if verticalSizeClass == .compact {
+                HStack(spacing: 6) {
+                    expressionTag("P", count: expression.preserved?.count ?? 0)
+                    expressionTag("I", count: expression.invented?.count ?? 0)
+                    expressionTag("U", count: expression.uncertain?.count ?? 0)
+                    if let interpretation = expression.chosen_interpretation, !interpretation.isEmpty {
+                        Text(interpretation).font(.caption).lineLimit(1)
+                    }
+                }
+            } else {
+                if let intent = expression.intent, !intent.isEmpty {
+                    Text(intent).font(.subheadline.weight(.medium)).lineLimit(2)
+                }
+                if let interpretation = expression.chosen_interpretation, !interpretation.isEmpty {
+                    Text("Interpretation · " + interpretation)
+                        .font(.caption).foregroundStyle(.white.opacity(0.9)).lineLimit(2)
+                }
+                HStack(spacing: 6) {
+                    expressionTag("Preserved", count: expression.preserved?.count ?? 0)
+                    expressionTag("Invented", count: expression.invented?.count ?? 0)
+                    expressionTag("Uncertain", count: expression.uncertain?.count ?? 0)
+                }
             }
         }
         .padding(10)
