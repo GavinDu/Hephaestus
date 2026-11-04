@@ -732,8 +732,9 @@ private struct ForYouGamePage: View {
     }
 
     private func detailsOverlay(bottomInset: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Spacer(minLength: 100)
+        let isCompact = verticalSizeClass == .compact
+        return VStack(alignment: .leading, spacing: isCompact ? 6 : 14) {
+            Spacer(minLength: isCompact ? 0 : 100)
             HStack(spacing: 8) {
                 Text("FOR YOU")
                     .font(.caption2.weight(.bold))
@@ -749,18 +750,18 @@ private struct ForYouGamePage: View {
                 }
             }
             Text(game.title)
-                .font(.system(.title, design: .rounded).weight(.bold))
+                .font(.system(isCompact ? .title2 : .title, design: .rounded).weight(.bold))
                 .foregroundStyle(.white)
-                .lineLimit(2)
+                .lineLimit(isCompact ? 1 : 2)
                 .accessibilityIdentifier("feed.page.title.\(game.id)")
                 .accessibilitySortPriority(90)
             if let caption = game.caption, !caption.isEmpty {
                 Text(caption)
-                    .font(.subheadline)
+                    .font(isCompact ? .caption : .subheadline)
                     .foregroundStyle(.white.opacity(0.94))
-                    .lineLimit(3)
+                    .lineLimit(isCompact ? 1 : 3)
             }
-            if let topics = game.topics, !topics.isEmpty {
+            if !isCompact, let topics = game.topics, !topics.isEmpty {
                 Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
@@ -778,7 +779,7 @@ private struct ForYouGamePage: View {
                                 if let image = phase.image { image.resizable().scaledToFill() }
                                 else { Image(systemName: "person.crop.circle.fill").resizable().scaledToFit() }
                             }
-                            .frame(width: 28, height: 28)
+                            .frame(width: isCompact ? 24 : 28, height: isCompact ? 24 : 28)
                             .clipShape(Circle())
                             .accessibilityHidden(true)
                         } else {
@@ -856,9 +857,9 @@ private struct ForYouGamePage: View {
             }
             .accessibilitySortPriority(60)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-        .padding(.bottom, max(24, bottomInset + 12))
+        .padding(.horizontal, isCompact ? 14 : 20)
+        .padding(.top, isCompact ? 8 : 24)
+        .padding(.bottom, isCompact ? max(8, bottomInset + 4) : max(24, bottomInset + 12))
         .frame(maxWidth: ForYouPageLayout.contentMaxWidth(isRegular: horizontalSizeClass == .regular), maxHeight: .infinity, alignment: .bottomLeading)
         .background(
             LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
@@ -997,6 +998,7 @@ private struct ForYouPagerView: View {
             }
             .scrollTargetLayout()
         }
+        .accessibilityIdentifier("feed.forYou.pager")
         .scrollIndicators(.hidden)
         .scrollTargetBehavior(.paging)
         .scrollPosition(id: $settledGameID)

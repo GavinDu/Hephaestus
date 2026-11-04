@@ -164,19 +164,22 @@ final class PlayerSmokeTests: XCTestCase {
         // Scope the gesture to the feed's actual vertical ScrollView. A swipe
         // synthesized on the app root can be routed to navigation chrome or a
         // nested control instead of the pager, producing a false paging failure.
-        let pager = app.scrollViews.firstMatch
+        let pager = app.scrollViews.matching(identifier: "feed.forYou.pager").firstMatch
         XCTAssertTrue(pager.waitForExistence(timeout: 5),
-                      "For You should expose its vertical paging scroll view.")
+                      "For You should expose its identified vertical paging scroll view.")
         pager.swipeUp()
-        let pageChanged = NSPredicate { _, _ in
-            pages.allElementsBoundByIndex.contains {
+
+        // Poll the visible page directly instead of XCTest's app-idle
+        // expectation, which can time out while SwiftUI is settling the
+        // scroll animation even though the swipe gesture was delivered.
+        let pageDeadline = Date().addingTimeInterval(8)
+        var didAdvance = false
+        while Date() < pageDeadline {
+            didAdvance = pages.allElementsBoundByIndex.contains {
                 $0.frame.intersects(app.frame) && $0.identifier != beforePageID
             }
-        }
-        expectation(for: pageChanged, evaluatedWith: app)
-        waitForExpectations(timeout: 10)
-        let didAdvance = pages.allElementsBoundByIndex.contains {
-            $0.frame.intersects(app.frame) && $0.identifier != beforePageID
+            if didAdvance { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         }
         XCTAssertTrue(didAdvance, "Swiping up should settle on a different game page.")
 
