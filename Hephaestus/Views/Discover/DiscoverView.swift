@@ -766,7 +766,7 @@ private struct ForYouGamePage: View {
                     .lineLimit(1)
                     .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
             }
-            if let expression = game.playableExpression {
+            if let expression = game.playableExpression, expression.source_visibility == "public" {
                 playableExpressionSummary(expression)
             }
             HStack(spacing: 8) {
