@@ -989,6 +989,7 @@ private struct ForYouPagerView: View {
                         .frame(maxWidth: .infinity)
                         .containerRelativeFrame(.vertical)
                     .id(game.id)
+                    .accessibilityIdentifier("feed.page.\\(game.id)")
                     .accessibilityElement(children: .contain)
                     .accessibilityHint("Swipe up for the next game")
                 }
