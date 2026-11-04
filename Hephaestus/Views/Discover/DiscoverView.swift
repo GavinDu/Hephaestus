@@ -18,7 +18,6 @@ private struct PlayerResultPresentation: Identifiable {
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedFeed: SocialFeedScope = .forYou
     @State private var games: [FeedGame] = []
@@ -568,6 +567,7 @@ private struct SocialFeedUnavailableView: View {
 
 private struct ForYouGamePage: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var previewPlayback = FeedPreviewPlayback.shared
