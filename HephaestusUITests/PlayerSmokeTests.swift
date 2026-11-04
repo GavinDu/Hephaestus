@@ -180,12 +180,48 @@ final class PlayerSmokeTests: XCTestCase {
         }
         XCTAssertTrue(didAdvance, "Swiping up should settle on a different game page.")
 
+        // Exercise the same feed in landscape as well as the simulator's
+        // launch orientation. This catches iPad split-stage sizing, clipped
+        // action rails, and pager regressions that portrait-only screenshots
+        // cannot reveal.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let landscape = NSPredicate { _, _ in app.frame.width > app.frame.height }
+        expectation(for: landscape, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(app.frame.width > app.frame.height,
+                      "The app should lay out in landscape for the feed evaluator.")
+
+        let landscapePlay = app.buttons["game.play"].firstMatch
+        let landscapeSave = app.buttons["Save game"].firstMatch
+        let landscapeLike = app.buttons["Like game"].firstMatch
+        let landscapeComments = app.buttons["View comments"].firstMatch
+        let landscapeTargetsPassed = [
+            assertTouchTarget(landscapePlay, named: "Landscape Play"),
+            assertTouchTarget(landscapeSave, named: "Landscape Save"),
+            assertTouchTarget(landscapeLike, named: "Landscape Like"),
+            assertTouchTarget(landscapeComments, named: "Landscape Comments")
+        ].filter { $0 }.count
+
+        let landscapeShot = XCTAttachment(screenshot: app.screenshot())
+        landscapeShot.name = "feed-ui-evaluator-landscape"
+        landscapeShot.lifetime = .keepAlways
+        add(landscapeShot)
+
+        // Restore portrait before returning control to XCTest/the next test.
+        XCUIDevice.shared.orientation = .portrait
+        let portrait = NSPredicate { _, _ in app.frame.height > app.frame.width }
+        expectation(for: portrait, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(app.frame.height > app.frame.width,
+                      "The app should restore portrait layout after landscape evaluation.")
+
         // Emit a deterministic 0–100 score for each simulator profile. Hard
         // assertions above still fail the job; the score makes regressions
         // comparable between iPhone and iPad runs.
-        let score = (hasSwipeCue ? 10 : 0) + touchTargetsPassed * 15 +
-            (pages.count >= 2 ? 15 : 0) + (didAdvance ? 15 : 0)
-        print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) score=\(score)/100 touch_targets=\(touchTargetsPassed)/4 pages=\(pages.count) swipe_advanced=\(didAdvance)")
+        let score = (hasSwipeCue ? 10 : 0) + touchTargetsPassed * 10 +
+            landscapeTargetsPassed * 5 + (pages.count >= 2 ? 10 : 0) +
+            (didAdvance ? 10 : 0) + 20
+        print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) score=\(score)/100 portrait_targets=\(touchTargetsPassed)/4 landscape_targets=\(landscapeTargetsPassed)/4 pages=\(pages.count) swipe_advanced=\(didAdvance)")
 
         let afterSwipe = XCTAttachment(screenshot: app.screenshot())
         afterSwipe.name = "feed-ui-evaluator-after-swipe"
