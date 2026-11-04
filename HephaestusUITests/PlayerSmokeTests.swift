@@ -138,7 +138,7 @@ final class PlayerSmokeTests: XCTestCase {
         // Require a real next page in the fixture-backed CI feed. A one-card
         // feed can validate launch and controls, but cannot prove paging works.
         let pages = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed.page."))
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title."))
         XCTAssertGreaterThanOrEqual(pages.count, 2,
                                     "The UI evaluator needs at least two feed pages to verify paging.")
 
