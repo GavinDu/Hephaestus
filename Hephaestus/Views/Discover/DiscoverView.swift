@@ -752,7 +752,7 @@ private struct ForYouGamePage: View {
                 .font(.system(.title, design: .rounded).weight(.bold))
                 .foregroundStyle(.white)
                 .lineLimit(2)
-                .accessibilityIdentifier("feed.page.title.\\(game.id)")
+                .accessibilityIdentifier("feed.page.title.\(game.id)")
                 .accessibilitySortPriority(90)
             if let caption = game.caption, !caption.isEmpty {
                 Text(caption)
