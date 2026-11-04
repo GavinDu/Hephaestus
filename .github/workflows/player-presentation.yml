@@ -176,11 +176,10 @@ jobs:
           if-no-files-found: ignore
 
   ios-ipad-smoke:
-    name: Optional iPad regular-width smoke
+    name: Required iPad feed and player smoke
     runs-on: macos-latest
     timeout-minutes: 30
     needs: ios-build-and-unit
-    continue-on-error: true
     steps:
       - name: Check out iOS app
         uses: actions/checkout@v4
@@ -195,17 +194,15 @@ jobs:
             | head -n 1 \
             | grep -Eo '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' || true)"
           if [[ -z "$UDID" ]]; then
-            echo "No iPad simulator is installed; recording this optional job as skipped"
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "No available iPad simulator found; iPad feed evaluation is required"
+            xcrun simctl list devices available
+            exit 1
           fi
           xcrun simctl boot "$UDID" || true
           xcrun simctl bootstatus "$UDID" -b
-          echo "available=true" >> "$GITHUB_OUTPUT"
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
 
       - name: Run iPad player smoke test
-        if: steps.ipad.outputs.available == 'true'
         shell: bash
         run: |
           set -o pipefail
