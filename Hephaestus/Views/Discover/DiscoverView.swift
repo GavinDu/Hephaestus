@@ -998,6 +998,7 @@ private struct ForYouPagerView: View {
             }
             .scrollTargetLayout()
         }
+        .accessibilityIdentifier("feed.forYou.pager")
         .scrollIndicators(.hidden)
         .scrollTargetBehavior(.paging)
         .scrollPosition(id: $settledGameID)
