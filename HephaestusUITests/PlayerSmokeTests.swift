@@ -11,6 +11,7 @@
 //
 
 import XCTest
+import UIKit
 
 final class PlayerSmokeTests: XCTestCase {
 
