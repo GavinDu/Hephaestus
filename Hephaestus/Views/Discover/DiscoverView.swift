@@ -753,7 +753,7 @@ private struct ForYouGamePage: View {
                 .font(.system(isCompact ? .title2 : .title, design: .rounded).weight(.bold))
                 .foregroundStyle(.white)
                 .lineLimit(isCompact ? 1 : 2)
-                .accessibilityIdentifier("feed.page.title.\\(game.id)")
+                .accessibilityIdentifier("feed.page.title.\(game.id)")
                 .accessibilitySortPriority(90)
             if let caption = game.caption, !caption.isEmpty {
                 Text(caption)
@@ -762,7 +762,7 @@ private struct ForYouGamePage: View {
                     .lineLimit(isCompact ? 1 : 3)
             }
             if !isCompact, let topics = game.topics, !topics.isEmpty {
-                Text(topics.prefix(3).map { "#\\($0)" }.joined(separator: "  "))
+                Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
@@ -793,7 +793,7 @@ private struct ForYouGamePage: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.white)
-                .accessibilityLabel("View profile for \\(creatorName)")
+                .accessibilityLabel("View profile for \(creatorName)")
                 .accessibilitySortPriority(80)
                 Spacer(minLength: 4)
                 if canFollowCreator {
@@ -838,7 +838,7 @@ private struct ForYouGamePage: View {
                     Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
                 })
                 .foregroundStyle(.white)
-                .accessibilityLabel("Share \\(game.title)")
+                .accessibilityLabel("Share \(game.title)")
             }
             HStack(spacing: 10) {
                 Button(action: onPlay) {
