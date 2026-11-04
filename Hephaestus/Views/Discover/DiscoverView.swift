@@ -752,6 +752,7 @@ private struct ForYouGamePage: View {
                 .font(.system(.title, design: .rounded).weight(.bold))
                 .foregroundStyle(.white)
                 .lineLimit(2)
+                .accessibilityIdentifier("feed.page.title.\\(game.id)")
                 .accessibilitySortPriority(90)
             if let caption = game.caption, !caption.isEmpty {
                 Text(caption)
@@ -989,7 +990,7 @@ private struct ForYouPagerView: View {
                         .frame(maxWidth: .infinity)
                         .containerRelativeFrame(.vertical)
                     .id(game.id)
-                    .accessibilityIdentifier("feed.page.\(game.id)")
+
                     .accessibilityElement(children: .contain)
                     .accessibilityHint("Swipe up for the next game")
                 }
