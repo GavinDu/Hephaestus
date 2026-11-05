@@ -764,11 +764,11 @@ private struct ForYouGamePage: View {
                 .lineLimit(isCompact ? 1 : 2)
                 .accessibilityIdentifier("feed.page.title.\(game.id)")
                 .accessibilitySortPriority(90)
-            if let caption = game.caption, !caption.isEmpty {
+            if !isCompact, let caption = game.caption, !caption.isEmpty {
                 Text(caption)
-                    .font(isCompact ? .caption : .subheadline)
+                    .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.94))
-                    .lineLimit(isCompact ? 1 : 3)
+                    .lineLimit(3)
             }
             if !isCompact, let topics = game.topics, !topics.isEmpty {
                 Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
@@ -777,9 +777,10 @@ private struct ForYouGamePage: View {
                     .lineLimit(1)
                     .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
             }
-            if let expression = game.playableExpression, expression.source_visibility == "public" {
+            if !isCompact, let expression = game.playableExpression, expression.source_visibility == "public" {
                 playableExpressionSummary(expression)
             }
+            if !isCompact {
             HStack(spacing: 8) {
                 Button(action: onOpenCreator) {
                     HStack(spacing: 7) {
@@ -817,6 +818,7 @@ private struct ForYouGamePage: View {
                     .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
                     .accessibilitySortPriority(70)
                 }
+            }
             }
             HStack(spacing: 8) {
                 iconAction(isSaved ? "bookmark.fill" : "bookmark", label: isSaved ? "Remove from library" : "Save game", action: onToggleSaved)
@@ -866,9 +868,9 @@ private struct ForYouGamePage: View {
             }
             .accessibilitySortPriority(60)
         }
-        .padding(.horizontal, isCompact ? 14 : 20)
-        .padding(.top, isCompact ? 8 : 24)
-        .padding(.bottom, isCompact ? max(8, bottomInset + 4) : max(24, bottomInset + 12))
+        .padding(.horizontal, isCompact ? 10 : 20)
+        .padding(.top, isCompact ? 4 : 24)
+        .padding(.bottom, isCompact ? max(4, bottomInset) : max(24, bottomInset + 12))
         .frame(maxWidth: ForYouPageLayout.contentMaxWidth(isRegular: horizontalSizeClass == .regular), maxHeight: .infinity, alignment: .bottomLeading)
         .background(
             LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
