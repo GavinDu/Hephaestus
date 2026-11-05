@@ -1009,10 +1009,10 @@ private struct ForYouPagerView: View {
             .onAppear {
                 settledGameID = ForYouPageLayout.reconciledSelection(
                     currentID: settledGameID,
-                    availableIDs: games.map(\\.id)
+                    availableIDs: games.map(\.id)
                 )
             }
-            .onChange(of: games.map(\\.id)) { _, ids in
+            .onChange(of: games.map(\.id)) { _, ids in
                 // Refreshes and pagination can remove the currently selected game.
                 // Never leave the scroll-position binding pointing at a stale page.
                 let reconciled = ForYouPageLayout.reconciledSelection(
@@ -1027,7 +1027,8 @@ private struct ForYouPagerView: View {
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settledGameID)
         }
-    }}
+    }
+}
 
 private struct CreatorProfileRequest: Identifiable {
     let id: String
