@@ -992,6 +992,19 @@ private struct ForYouPagerView: View {
         )
     }
 
+    /// Move one page for both direct touch gestures and VoiceOver scroll actions.
+    private func movePage(by offset: Int, using scrollProxy: ScrollViewProxy) {
+        guard !games.isEmpty else { return }
+        let currentIndex = games.firstIndex(where: { $0.id == settledGameID }) ?? 0
+        let targetIndex = min(max(currentIndex + offset, 0), games.count - 1)
+        guard targetIndex != currentIndex else { return }
+        let targetID = games[targetIndex].id
+        settledGameID = targetID
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
+            scrollProxy.scrollTo(targetID, anchor: .top)
+        }
+    }
+
     var body: some View {
         // The feed selector and search controls sit above this pager. Use the
         // actual remaining viewport height instead of the outer device height.
@@ -1015,6 +1028,16 @@ private struct ForYouPagerView: View {
                 .accessibilityIdentifier("feed.forYou.pager")
                 .scrollIndicators(.hidden)
                 .scrollDisabled(true)
+                .accessibilityLabel("For You game feed")
+                .accessibilityHint("Scroll up for the next game, or down for the previous game")
+                .accessibilityAddTraits(.isScrollable)
+                .accessibilityScrollAction { edge in
+                    if edge == .top {
+                        movePage(by: 1, using: scrollProxy)
+                    } else if edge == .bottom {
+                        movePage(by: -1, using: scrollProxy)
+                    }
+                }
                 .scrollTargetBehavior(.paging)
                 .scrollPosition(id: $settledGameID)
                 .onAppear {
@@ -1051,14 +1074,7 @@ private struct ForYouPagerView: View {
                         guard abs(vertical) >= 80,
                               abs(vertical) > abs(horizontal) * 1.2,
                               !games.isEmpty else { return }
-                        let currentIndex = games.firstIndex(where: { $0.id == settledGameID }) ?? 0
-                        let targetIndex = min(max(currentIndex + (vertical < 0 ? 1 : -1), 0), games.count - 1)
-                        guard targetIndex != currentIndex else { return }
-                        let targetID = games[targetIndex].id
-                        settledGameID = targetID
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
-                            scrollProxy.scrollTo(targetID, anchor: .top)
-                        }
+                        movePage(by: vertical < 0 ? 1 : -1, using: scrollProxy)
                     }
             )
         }
