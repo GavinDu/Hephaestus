@@ -984,46 +984,50 @@ private struct ForYouPagerView: View {
     }
 
     var body: some View {
-        ScrollView(.vertical) {
-            LazyVStack(spacing: 0) {
-                ForEach(games) { game in
-                    card(for: game)
-                        .frame(maxWidth: .infinity)
-                        .containerRelativeFrame(.vertical)
-                    .id(game.id)
-
-                    .accessibilityElement(children: .contain)
-                    .accessibilityHint("Swipe up for the next game")
+        // The feed selector sits above this pager, so its viewport is shorter
+        // than the device container. Size pages from the actual viewport;
+        // containerRelativeFrame(.vertical) uses the outer device height and
+        // makes a normal swipe too short to cross the paging threshold.
+        GeometryReader { viewport in
+            ScrollView(.vertical) {
+                LazyVStack(spacing: 0) {
+                    ForEach(games) { game in
+                        card(for: game)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: viewport.size.height)
+                            .id(game.id)
+                            .accessibilityElement(children: .contain)
+                            .accessibilityHint("Swipe up for the next game")
+                    }
                 }
+                .scrollTargetLayout()
             }
-            .scrollTargetLayout()
+            .accessibilityIdentifier("feed.forYou.pager")
+            .scrollIndicators(.hidden)
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $settledGameID)
+            .onAppear {
+                settledGameID = ForYouPageLayout.reconciledSelection(
+                    currentID: settledGameID,
+                    availableIDs: games.map(\\.id)
+                )
+            }
+            .onChange(of: games.map(\\.id)) { _, ids in
+                // Refreshes and pagination can remove the currently selected game.
+                // Never leave the scroll-position binding pointing at a stale page.
+                let reconciled = ForYouPageLayout.reconciledSelection(
+                    currentID: settledGameID,
+                    availableIDs: ids
+                )
+                if reconciled != settledGameID { settledGameID = reconciled }
+            }
+            .onChange(of: settledGameID) { _, id in
+                guard let id, let index = games.firstIndex(where: { $0.id == id }) else { return }
+                if index >= max(0, games.count - 2) { onNearEnd() }
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settledGameID)
         }
-        .accessibilityIdentifier("feed.forYou.pager")
-        .scrollIndicators(.hidden)
-        .scrollTargetBehavior(.paging)
-        .scrollPosition(id: $settledGameID)
-        .onAppear {
-            settledGameID = ForYouPageLayout.reconciledSelection(
-                currentID: settledGameID,
-                availableIDs: games.map(\.id)
-            )
-        }
-        .onChange(of: games.map(\.id)) { _, ids in
-            // Refreshes and pagination can remove the currently selected game.
-            // Never leave the scroll-position binding pointing at a stale page.
-            let reconciled = ForYouPageLayout.reconciledSelection(
-                currentID: settledGameID,
-                availableIDs: ids
-            )
-            if reconciled != settledGameID { settledGameID = reconciled }
-        }
-        .onChange(of: settledGameID) { _, id in
-            guard let id, let index = games.firstIndex(where: { $0.id == id }) else { return }
-            if index >= max(0, games.count - 2) { onNearEnd() }
-        }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settledGameID)
-    }
-}
+    }}
 
 private struct CreatorProfileRequest: Identifiable {
     let id: String
