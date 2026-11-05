@@ -1033,7 +1033,8 @@ private struct ForYouPagerView: View {
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settledGameID)
         }
-    }}
+    }
+}
 
 private struct CreatorProfileRequest: Identifiable {
     let id: String
