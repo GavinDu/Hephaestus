@@ -1062,7 +1062,8 @@ private struct ForYouPagerView: View {
                     }
             )
         }
-    }}
+    }
+}
 
 private struct CreatorProfileRequest: Identifiable {
     let id: String
