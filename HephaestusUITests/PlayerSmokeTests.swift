@@ -164,7 +164,8 @@ final class PlayerSmokeTests: XCTestCase {
         // Scope the gesture to the feed's actual vertical ScrollView. A swipe
         // synthesized on the app root can be routed to navigation chrome or a
         // nested control instead of the pager, producing a false paging failure.
-        let pager = app.scrollViews.matching(identifier: "feed.forYou.pager").firstMatch
+        let pager = app.descendants(matching: .any)
+            .matching(identifier: "feed.forYou.pager").firstMatch
         XCTAssertTrue(pager.waitForExistence(timeout: 5),
                       "For You should expose its identified vertical paging scroll view.")
         // Use an explicit long drag rather than XCTest's device-dependent swipeUp
