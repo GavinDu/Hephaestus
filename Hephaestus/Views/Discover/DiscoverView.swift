@@ -1030,7 +1030,8 @@ private struct ForYouPagerView: View {
                 .scrollDisabled(true)
                 .accessibilityLabel("For You game feed")
                 .accessibilityHint("Scroll up for the next game, or down for the previous game")
-                .accessibilityAddTraits(.isScrollable)
+                // ScrollView supplies its own accessibility container semantics;
+                // the explicit scroll action below provides VoiceOver paging.
                 .accessibilityScrollAction { edge in
                     if edge == .top {
                         movePage(by: 1, using: scrollProxy)
