@@ -90,6 +90,50 @@ final class PlayerSmokeTests: XCTestCase {
         add(shot)
     }
 
+
+    /// Downsample two captured screenshots and report the fraction of
+    /// pixels whose RGB distance exceeds a small threshold. The evaluator
+    /// uses this as a visual evidence signal alongside semantic page IDs.
+    private func screenshotDifferenceRatio(_ first: UIImage, _ second: UIImage) -> Double? {
+        func pixels(_ image: UIImage) -> [UInt8]? {
+            guard let cgImage = image.cgImage else { return nil }
+            let width = 64
+            let height = 64
+            var bytes = [UInt8](repeating: 0, count: width * height * 4)
+            var rendered = false
+            bytes.withUnsafeMutableBytes { rawBuffer in
+                guard let baseAddress = rawBuffer.baseAddress,
+                      let context = CGContext(
+                        data: baseAddress,
+                        width: width,
+                        height: height,
+                        bitsPerComponent: 8,
+                        bytesPerRow: width * 4,
+                        space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                      ) else { return }
+                context.interpolationQuality = .low
+                context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+                rendered = true
+            }
+            return rendered ? bytes : nil
+        }
+
+        guard let a = pixels(first), let b = pixels(second), a.count == b.count else {
+            return nil
+        }
+        var changed = 0
+        let pixelCount = a.count / 4
+        for pixel in 0..<pixelCount {
+            let offset = pixel * 4
+            let distance = abs(Int(a[offset]) - Int(b[offset])) +
+                abs(Int(a[offset + 1]) - Int(b[offset + 1])) +
+                abs(Int(a[offset + 2]) - Int(b[offset + 2]))
+            if distance > 36 { changed += 1 }
+        }
+        return Double(changed) / Double(pixelCount)
+    }
+
     /// Evaluate the native feed on both phone/tablet size classes and both
     /// orientations. Each profile launches from the first page so a swipe must
     /// prove a real page transition rather than inheriting a previous scroll.
@@ -155,7 +199,8 @@ final class PlayerSmokeTests: XCTestCase {
                 assertTouchTarget(app.buttons["View comments"].firstMatch, named: "Comments")
             ].filter { $0 }.count
 
-            let beforeSwipe = XCTAttachment(screenshot: app.screenshot())
+            let beforeCapture = app.screenshot()
+            let beforeSwipe = XCTAttachment(screenshot: beforeCapture)
             beforeSwipe.name = "feed-ui-evaluator-before-swipe-\(profile.1)"
             beforeSwipe.lifetime = .keepAlways
             add(beforeSwipe)
@@ -198,10 +243,21 @@ final class PlayerSmokeTests: XCTestCase {
                 (pages.count >= 2 ? 15 : 0) + (didAdvance ? 15 : 0)
             print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1) score=\(score)/100 touch_targets=\(touchTargetsPassed)/4 pages=\(pages.count) swipe_advanced=\(didAdvance)")
 
-            let afterSwipe = XCTAttachment(screenshot: app.screenshot())
+            let afterCapture = app.screenshot()
+            let afterSwipe = XCTAttachment(screenshot: afterCapture)
             afterSwipe.name = "feed-ui-evaluator-after-swipe-\(profile.1)"
             afterSwipe.lifetime = .keepAlways
             add(afterSwipe)
+
+            // Treat the captured screenshots as evaluator inputs, not just
+            // attachments: a successful page transition must produce a
+            // measurable visual change in the rendered feed viewport.
+            let visualDelta = screenshotDifferenceRatio(beforeCapture.image, afterCapture.image)
+            XCTAssertNotNil(visualDelta,
+                            "The \(profile.1) evaluator screenshots should be decodable.")
+            XCTAssertGreaterThan(visualDelta ?? 0, 0.005,
+                                 "The feed should visibly change after paging in \(profile.1).")
+            print("UI_EVALUATOR_SCREENSHOT device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1) changed_pixel_ratio=\(String(format: "%.4f", visualDelta ?? 0))")
         }
 
         XCUIDevice.shared.orientation = .portrait
