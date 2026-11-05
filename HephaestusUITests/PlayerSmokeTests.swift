@@ -28,6 +28,7 @@ final class PlayerSmokeTests: XCTestCase {
     /// the test body as the baseline. Verified by the Hephaestus CI
     /// xcode job — this VM has no Xcode to compile Swift locally.
     override func tearDownWithError() throws {
+        XCUIDevice.shared.orientation = .portrait
         if let run = testRun, run.totalFailureCount > 0, let app {
             let shot = XCTAttachment(screenshot: app.screenshot())
             shot.name = "player-on-failure"
@@ -89,111 +90,120 @@ final class PlayerSmokeTests: XCTestCase {
         add(shot)
     }
 
-    /// Lightweight UI evaluator for the swipe-first feed. This runs in the
-    /// existing iPhone smoke job and the optional iPad simulator job, so the
-    /// same layout and touch-target checks are exercised at both size classes.
+    /// Evaluate the native feed on both phone/tablet size classes and both
+    /// orientations. Each profile launches from the first page so a swipe must
+    /// prove a real page transition rather than inheriting a previous scroll.
     @MainActor
     func testDiscoverFeedUIEvaluationAndSwipe() throws {
         let app = XCUIApplication()
         self.app = app
-        app.launch()
+        let profiles: [(UIDeviceOrientation, String)] = [
+            (.portrait, "portrait"),
+            (.landscapeLeft, "landscape")
+        ]
 
-        let play = app.buttons["game.play"].firstMatch
-        let retry = app.buttons["Try again"].firstMatch
-        let feedDeadline = Date().addingTimeInterval(150)
-        while !play.exists && Date() < feedDeadline {
-            if retry.waitForExistence(timeout: 5) {
-                print("UI EVALUATOR: feed unavailable; retrying live request")
-                retry.tap()
+        for (index, profile) in profiles.enumerated() {
+            if index > 0 {
+                app.terminate()
             }
-            _ = play.waitForExistence(timeout: 5)
-        }
-        XCTAssertTrue(play.exists,
-                      "For You should expose a playable feed page after bounded retries. UI: \(app.debugDescription)")
+            XCUIDevice.shared.orientation = profile.0
+            app.launch()
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15),
+                          "The app should launch for the \(profile.1) feed evaluation.")
 
-        let swipeCue = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "SWIPE TO EXPLORE"))
-            .firstMatch
-        let hasSwipeCue = swipeCue.waitForExistence(timeout: 10)
-        XCTAssertTrue(hasSwipeCue,
-                      "The feed should communicate its vertical swipe interaction.")
+            let expectedLandscape = profile.1 == "landscape"
+            XCTAssertEqual(app.frame.width > app.frame.height, expectedLandscape,
+                           "The simulator viewport should actually be \(profile.1).")
 
-        @discardableResult
-        func assertTouchTarget(_ element: XCUIElement, named name: String) -> Bool {
-            XCTAssertTrue(element.exists, "\(name) should be present on the feed page.")
-            guard element.exists else { return false }
-            let frame = element.frame
-            let sized = frame.width >= 44 && frame.height >= 44
-            XCTAssertGreaterThanOrEqual(frame.width, 44, "\(name) should be at least 44pt wide.")
-            XCTAssertGreaterThanOrEqual(frame.height, 44, "\(name) should be at least 44pt tall.")
-            let reachable = element.isHittable
-            XCTAssertTrue(reachable, "\(name) should be reachable without scrolling.")
-            return sized && reachable
-        }
-
-        let touchTargetsPassed = [
-            assertTouchTarget(play, named: "Play"),
-            assertTouchTarget(app.buttons["Save game"].firstMatch, named: "Save"),
-            assertTouchTarget(app.buttons["Like game"].firstMatch, named: "Like"),
-            assertTouchTarget(app.buttons["View comments"].firstMatch, named: "Comments")
-        ].filter { $0 }.count
-
-        let beforeSwipe = XCTAttachment(screenshot: app.screenshot())
-        beforeSwipe.name = "feed-ui-evaluator-before-swipe"
-        beforeSwipe.lifetime = .keepAlways
-        add(beforeSwipe)
-
-        // Require a real next page in the fixture-backed CI feed. A one-card
-        // feed can validate launch and controls, but cannot prove paging works.
-        let pages = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title."))
-        XCTAssertGreaterThanOrEqual(pages.count, 2,
-                                    "The UI evaluator needs at least two feed pages to verify paging.")
-
-        // SwiftUI's title accessibility nodes can have an invalid activation
-        // point even while their containing page is visibly rendered. Use
-        // viewport intersection for page visibility instead of asking XCTest
-        // to synthesize a tap target for a non-interactive title label.
-        let visiblePages = pages.allElementsBoundByIndex.filter {
-            $0.frame.intersects(app.frame)
-        }
-        let beforePage = visiblePages.first
-        XCTAssertNotNil(beforePage, "The current feed page should intersect the app viewport.")
-        let beforePageID = beforePage?.identifier
-
-        // Scope the gesture to the feed's actual vertical ScrollView. A swipe
-        // synthesized on the app root can be routed to navigation chrome or a
-        // nested control instead of the pager, producing a false paging failure.
-        let pager = app.scrollViews.matching(identifier: "feed.forYou.pager").firstMatch
-        XCTAssertTrue(pager.waitForExistence(timeout: 5),
-                      "For You should expose its identified vertical paging scroll view.")
-        pager.swipeUp()
-
-        // Poll the visible page directly instead of XCTest's app-idle
-        // expectation, which can time out while SwiftUI is settling the
-        // scroll animation even though the swipe gesture was delivered.
-        let pageDeadline = Date().addingTimeInterval(8)
-        var didAdvance = false
-        while Date() < pageDeadline {
-            didAdvance = pages.allElementsBoundByIndex.contains {
-                $0.frame.intersects(app.frame) && $0.identifier != beforePageID
+            let play = app.buttons["game.play"].firstMatch
+            let retry = app.buttons["Try again"].firstMatch
+            let feedDeadline = Date().addingTimeInterval(120)
+            while !play.exists && Date() < feedDeadline {
+                if retry.waitForExistence(timeout: 5) {
+                    print("UI EVALUATOR: feed unavailable in \(profile.1); retrying live request")
+                    retry.tap()
+                }
+                _ = play.waitForExistence(timeout: 5)
             }
-            if didAdvance { break }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+            XCTAssertTrue(play.exists,
+                          "For You should expose a playable feed page in \(profile.1) after bounded retries. UI: \(app.debugDescription)")
+
+            let swipeCue = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label CONTAINS %@", "SWIPE TO EXPLORE"))
+                .firstMatch
+            let hasSwipeCue = swipeCue.waitForExistence(timeout: 10)
+            XCTAssertTrue(hasSwipeCue,
+                          "The feed should communicate its vertical swipe interaction in \(profile.1).")
+
+            @discardableResult
+            func assertTouchTarget(_ element: XCUIElement, named name: String) -> Bool {
+                XCTAssertTrue(element.exists, "\(name) should be present on the \(profile.1) feed page.")
+                guard element.exists else { return false }
+                let frame = element.frame
+                let sized = frame.width >= 44 && frame.height >= 44
+                XCTAssertGreaterThanOrEqual(frame.width, 44, "\(name) should be at least 44pt wide in \(profile.1).")
+                XCTAssertGreaterThanOrEqual(frame.height, 44, "\(name) should be at least 44pt tall in \(profile.1).")
+                let reachable = element.isHittable
+                XCTAssertTrue(reachable, "\(name) should be reachable without scrolling in \(profile.1).")
+                return sized && reachable
+            }
+
+            let touchTargetsPassed = [
+                assertTouchTarget(play, named: "Play"),
+                assertTouchTarget(app.buttons["Save game"].firstMatch, named: "Save"),
+                assertTouchTarget(app.buttons["Like game"].firstMatch, named: "Like"),
+                assertTouchTarget(app.buttons["View comments"].firstMatch, named: "Comments")
+            ].filter { $0 }.count
+
+            let beforeSwipe = XCTAttachment(screenshot: app.screenshot())
+            beforeSwipe.name = "feed-ui-evaluator-before-swipe-\(profile.1)"
+            beforeSwipe.lifetime = .keepAlways
+            add(beforeSwipe)
+
+            let pages = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title."))
+            XCTAssertGreaterThanOrEqual(pages.count, 2,
+                                        "The UI evaluator needs at least two feed pages in \(profile.1) to verify paging.")
+
+            // SwiftUI title nodes can have invalid activation points even
+            // while their page is rendered. Use viewport intersection.
+            let visiblePages = pages.allElementsBoundByIndex.filter {
+                $0.frame.intersects(app.frame)
+            }
+            let beforePage = visiblePages.first
+            XCTAssertNotNil(beforePage, "The current \(profile.1) feed page should intersect the app viewport.")
+            let beforePageID = beforePage?.identifier
+
+            // Scope the swipe to the first scroll view in the feed hierarchy;
+            // the custom identifier is not consistently surfaced by XCTest.
+            let pager = app.scrollViews.firstMatch
+            XCTAssertTrue(pager.waitForExistence(timeout: 5),
+                          "For You should expose a scrollable \(profile.1) feed viewport.")
+            print("UI EVALUATOR pager frame orientation=\(profile.1): \(pager.frame)")
+            pager.swipeUp()
+
+            let pageDeadline = Date().addingTimeInterval(8)
+            var didAdvance = false
+            while Date() < pageDeadline {
+                didAdvance = pages.allElementsBoundByIndex.contains {
+                    $0.frame.intersects(app.frame) && $0.identifier != beforePageID
+                }
+                if didAdvance { break }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+            }
+            XCTAssertTrue(didAdvance,
+                          "Swiping up should settle on a different game page in \(profile.1).")
+
+            let score = (hasSwipeCue ? 10 : 0) + touchTargetsPassed * 15 +
+                (pages.count >= 2 ? 15 : 0) + (didAdvance ? 15 : 0)
+            print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1) score=\(score)/100 touch_targets=\(touchTargetsPassed)/4 pages=\(pages.count) swipe_advanced=\(didAdvance)")
+
+            let afterSwipe = XCTAttachment(screenshot: app.screenshot())
+            afterSwipe.name = "feed-ui-evaluator-after-swipe-\(profile.1)"
+            afterSwipe.lifetime = .keepAlways
+            add(afterSwipe)
         }
-        XCTAssertTrue(didAdvance, "Swiping up should settle on a different game page.")
 
-        // Emit a deterministic 0–100 score for each simulator profile. Hard
-        // assertions above still fail the job; the score makes regressions
-        // comparable between iPhone and iPad runs.
-        let score = (hasSwipeCue ? 10 : 0) + touchTargetsPassed * 15 +
-            (pages.count >= 2 ? 15 : 0) + (didAdvance ? 15 : 0)
-        print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) score=\(score)/100 touch_targets=\(touchTargetsPassed)/4 pages=\(pages.count) swipe_advanced=\(didAdvance)")
-
-        let afterSwipe = XCTAttachment(screenshot: app.screenshot())
-        afterSwipe.name = "feed-ui-evaluator-after-swipe"
-        afterSwipe.lifetime = .keepAlways
-        add(afterSwipe)
+        XCUIDevice.shared.orientation = .portrait
     }
-
 }

@@ -490,6 +490,13 @@ struct DiscoverView: View {
             games = loadedGames.games
             nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
             repairPagerSelection()
+
+            // The public game list is the critical path for rendering Discover.
+            // Viewer metadata (following, saved games, preferences) is optional;
+            // do not keep the entire feed behind its loading skeleton while those
+            // secondary endpoints respond or recover from a transient outage.
+            isLoading = false
+
             let hasServerViewerState = loadedGames.games.contains {
                 $0.viewerLiked != nil || $0.viewerSaved != nil || $0.viewerFollowing != nil
             }
@@ -650,6 +657,8 @@ private struct ForYouGamePage: View {
         .accessibilityLabel("Preview of \(game.title)")
         .accessibilityAddTraits(.isImage)
         .accessibilitySortPriority(100)
+        // Preview media is decorative; it must not intercept vertical pager swipes.
+        .allowsHitTesting(false)
     }
 
     private func iconAction(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
@@ -755,11 +764,11 @@ private struct ForYouGamePage: View {
                 .lineLimit(isCompact ? 1 : 2)
                 .accessibilityIdentifier("feed.page.title.\(game.id)")
                 .accessibilitySortPriority(90)
-            if let caption = game.caption, !caption.isEmpty {
+            if !isCompact, let caption = game.caption, !caption.isEmpty {
                 Text(caption)
-                    .font(isCompact ? .caption : .subheadline)
+                    .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.94))
-                    .lineLimit(isCompact ? 1 : 3)
+                    .lineLimit(3)
             }
             if !isCompact, let topics = game.topics, !topics.isEmpty {
                 Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
@@ -768,9 +777,10 @@ private struct ForYouGamePage: View {
                     .lineLimit(1)
                     .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
             }
-            if let expression = game.playableExpression, expression.source_visibility == "public" {
+            if !isCompact, let expression = game.playableExpression, expression.source_visibility == "public" {
                 playableExpressionSummary(expression)
             }
+            if !isCompact {
             HStack(spacing: 8) {
                 Button(action: onOpenCreator) {
                     HStack(spacing: 7) {
@@ -808,6 +818,7 @@ private struct ForYouGamePage: View {
                     .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
                     .accessibilitySortPriority(70)
                 }
+            }
             }
             HStack(spacing: 8) {
                 iconAction(isSaved ? "bookmark.fill" : "bookmark", label: isSaved ? "Remove from library" : "Save game", action: onToggleSaved)
@@ -857,9 +868,9 @@ private struct ForYouGamePage: View {
             }
             .accessibilitySortPriority(60)
         }
-        .padding(.horizontal, isCompact ? 14 : 20)
-        .padding(.top, isCompact ? 8 : 24)
-        .padding(.bottom, isCompact ? max(8, bottomInset + 4) : max(24, bottomInset + 12))
+        .padding(.horizontal, isCompact ? 10 : 20)
+        .padding(.top, isCompact ? 4 : 24)
+        .padding(.bottom, isCompact ? max(4, bottomInset) : max(24, bottomInset + 12))
         .frame(maxWidth: ForYouPageLayout.contentMaxWidth(isRegular: horizontalSizeClass == .regular), maxHeight: .infinity, alignment: .bottomLeading)
         .background(
             LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
@@ -983,45 +994,93 @@ private struct ForYouPagerView: View {
         )
     }
 
-    var body: some View {
-        ScrollView(.vertical) {
-            LazyVStack(spacing: 0) {
-                ForEach(games) { game in
-                    card(for: game)
-                        .frame(maxWidth: .infinity)
-                        .containerRelativeFrame(.vertical)
-                    .id(game.id)
+    /// Move one page for both direct touch gestures and VoiceOver scroll actions.
+    private func movePage(by offset: Int, using scrollProxy: ScrollViewProxy) {
+        guard !games.isEmpty else { return }
+        let currentIndex = games.firstIndex(where: { $0.id == settledGameID }) ?? 0
+        let targetIndex = min(max(currentIndex + offset, 0), games.count - 1)
+        guard targetIndex != currentIndex else { return }
+        let targetID = games[targetIndex].id
+        settledGameID = targetID
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
+            scrollProxy.scrollTo(targetID, anchor: .top)
+        }
+    }
 
-                    .accessibilityElement(children: .contain)
-                    .accessibilityHint("Swipe up for the next game")
+    var body: some View {
+        // The feed selector and search controls sit above this pager. Use the
+        // actual remaining viewport height instead of the outer device height.
+        // A small explicit swipe recognizer advances exactly one page; relying
+        // on nested SwiftUI paging gestures was inconsistent on iPhone.
+        ScrollViewReader { scrollProxy in
+            GeometryReader { viewport in
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(games) { game in
+                            card(for: game)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: viewport.size.height)
+                                .id(game.id)
+                                .accessibilityElement(children: .contain)
+                                .accessibilityHint("Swipe up for the next game")
+                        }
+                    }
+                    .scrollTargetLayout()
                 }
+                .accessibilityIdentifier("feed.forYou.pager")
+                .scrollIndicators(.hidden)
+                .scrollDisabled(true)
+                .accessibilityLabel("For You game feed")
+                .accessibilityHint("Scroll up for the next game, or down for the previous game")
+                // ScrollView supplies its own accessibility container semantics;
+                // the explicit scroll action below provides VoiceOver paging.
+                .accessibilityScrollAction { edge in
+                    if edge == .top {
+                        movePage(by: 1, using: scrollProxy)
+                    } else if edge == .bottom {
+                        movePage(by: -1, using: scrollProxy)
+                    }
+                }
+                .scrollTargetBehavior(.paging)
+                .scrollPosition(id: $settledGameID)
+                .onAppear {
+                    settledGameID = ForYouPageLayout.reconciledSelection(
+                        currentID: settledGameID,
+                        availableIDs: games.map(\.id)
+                    )
+                }
+                .onChange(of: games.map(\.id)) { _, ids in
+                    // Refreshes and pagination can remove the currently selected game.
+                    // Never leave the scroll-position binding pointing at a stale page.
+                    let reconciled = ForYouPageLayout.reconciledSelection(
+                        currentID: settledGameID,
+                        availableIDs: ids
+                    )
+                    if reconciled != settledGameID {
+                        settledGameID = reconciled
+                        if let reconciled {
+                            scrollProxy.scrollTo(reconciled, anchor: .top)
+                        }
+                    }
+                }
+                .onChange(of: settledGameID) { _, id in
+                    guard let id, let index = games.firstIndex(where: { $0.id == id }) else { return }
+                    if index >= max(0, games.count - 2) { onNearEnd() }
+                }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settledGameID)
             }
-            .scrollTargetLayout()
-        }
-        .accessibilityIdentifier("feed.forYou.pager")
-        .scrollIndicators(.hidden)
-        .scrollTargetBehavior(.paging)
-        .scrollPosition(id: $settledGameID)
-        .onAppear {
-            settledGameID = ForYouPageLayout.reconciledSelection(
-                currentID: settledGameID,
-                availableIDs: games.map(\.id)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 35)
+                    .onEnded { value in
+                        let vertical = value.translation.height
+                        let horizontal = value.translation.width
+                        guard abs(vertical) >= 80,
+                              abs(vertical) > abs(horizontal) * 1.2,
+                              !games.isEmpty else { return }
+                        movePage(by: vertical < 0 ? 1 : -1, using: scrollProxy)
+                    }
             )
         }
-        .onChange(of: games.map(\.id)) { _, ids in
-            // Refreshes and pagination can remove the currently selected game.
-            // Never leave the scroll-position binding pointing at a stale page.
-            let reconciled = ForYouPageLayout.reconciledSelection(
-                currentID: settledGameID,
-                availableIDs: ids
-            )
-            if reconciled != settledGameID { settledGameID = reconciled }
-        }
-        .onChange(of: settledGameID) { _, id in
-            guard let id, let index = games.firstIndex(where: { $0.id == id }) else { return }
-            if index >= max(0, games.count - 2) { onNearEnd() }
-        }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settledGameID)
     }
 }
 
