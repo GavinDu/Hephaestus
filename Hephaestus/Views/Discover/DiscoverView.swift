@@ -1004,7 +1004,7 @@ private struct ForYouPagerView: View {
             }
             .accessibilityIdentifier("feed.forYou.pager")
             .scrollIndicators(.hidden)
-            .scrollTargetBehavior(.viewAligned)
+            .scrollTargetBehavior(.paging)
             .scrollPosition(id: $settledGameID)
             .onAppear {
                 settledGameID = ForYouPageLayout.reconciledSelection(
