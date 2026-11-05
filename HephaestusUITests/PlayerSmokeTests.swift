@@ -161,14 +161,12 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertNotNil(beforePage, "The current feed page should intersect the app viewport.")
         let beforePageID = beforePage?.identifier
 
-        // Drive the gesture through the visible feed viewport. SwiftUI does
-        // not consistently expose the ScrollView's accessibilityIdentifier
-        // on iPhone simulators, even though its child page nodes are present.
-        // The center of the app viewport is inside the active For You page
-        // and avoids the top feed selector and bottom navigation controls.
-        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.84))
-        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.16))
-        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+        // Keep the complete drag inside feed content. The app root includes
+        // the bottom tab bar; starting at 84% can land on navigation chrome
+        // on compact iPhones, where the pager never receives the gesture.
+        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70))
+        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32))
+        dragStart.press(forDuration: 0.1, thenDragTo: dragEnd)
         print("UI EVALUATOR: app=\\(app.frame) before=\\(beforePageID ?? \"nil\")")
 
         // Poll the visible page directly instead of XCTest's app-idle
