@@ -113,7 +113,7 @@ final class PlayerSmokeTests: XCTestCase {
 
             let expectedLandscape = profile.1 == "landscape"
             XCTAssertEqual(app.frame.width > app.frame.height, expectedLandscape,
-                           "The simulator viewport should actually be (profile.1).")
+                           "The simulator viewport should actually be \(profile.1).")
 
             let play = app.buttons["game.play"].firstMatch
             let retry = app.buttons["Try again"].firstMatch
