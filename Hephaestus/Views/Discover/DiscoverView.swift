@@ -657,6 +657,8 @@ private struct ForYouGamePage: View {
         .accessibilityLabel("Preview of \(game.title)")
         .accessibilityAddTraits(.isImage)
         .accessibilitySortPriority(100)
+        // Preview media is decorative; it must not intercept vertical pager swipes.
+        .allowsHitTesting(false)
     }
 
     private func iconAction(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
