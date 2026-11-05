@@ -490,6 +490,13 @@ struct DiscoverView: View {
             games = loadedGames.games
             nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
             repairPagerSelection()
+
+            // The public game list is the critical path for rendering Discover.
+            // Viewer metadata (following, saved games, preferences) is optional;
+            // do not keep the entire feed behind its loading skeleton while those
+            // secondary endpoints respond or recover from a transient outage.
+            isLoading = false
+
             let hasServerViewerState = loadedGames.games.contains {
                 $0.viewerLiked != nil || $0.viewerSaved != nil || $0.viewerFollowing != nil
             }
