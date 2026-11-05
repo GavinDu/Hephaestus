@@ -167,7 +167,13 @@ final class PlayerSmokeTests: XCTestCase {
         let pager = app.scrollViews.matching(identifier: "feed.forYou.pager").firstMatch
         XCTAssertTrue(pager.waitForExistence(timeout: 5),
                       "For You should expose its identified vertical paging scroll view.")
-        pager.swipeUp()
+        // Use an explicit long drag rather than XCTest's device-dependent swipeUp
+        // heuristic. On iPad the synthesized swipe can be too short to cross a
+        // full-page paging threshold even though the scroll view is hittable.
+        let dragStart = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
+        let dragEnd = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+        print("UI EVALUATOR: pager=\(pager.frame) app=\(app.frame) before=\(beforePageID ?? "nil")")
 
         // Poll the visible page directly instead of XCTest's app-idle
         // expectation, which can time out while SwiftUI is settling the
