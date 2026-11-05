@@ -66,8 +66,8 @@ enum RecentGames {
 
 // A single shared queue/player keeps feed scrolling from starting multiple decoders.
 enum FeedPreviewPolicy {
-    static func shouldAutoplay(hasClip: Bool, reduceMotion: Bool, lowPowerMode: Bool, constrainedNetwork: Bool) -> Bool {
-        hasClip && !reduceMotion && !lowPowerMode && !constrainedNetwork
+    static func shouldAutoplay(hasClip: Bool, reduceMotion: Bool, lowPowerMode: Bool, constrainedNetwork: Bool, isOnline: Bool = true) -> Bool {
+        hasClip && isOnline && !reduceMotion && !lowPowerMode && !constrainedNetwork
     }
 
     static func shouldStopOnFailure(_ status: AVPlayerItem.Status) -> Bool {
@@ -101,6 +101,7 @@ final class FeedPreviewPlayback: ObservableObject {
     private let networkMonitor = NWPathMonitor()
     private let networkQueue = DispatchQueue(label: "hephaestus.feed-preview.network")
     private(set) var isConstrained = false
+    private(set) var isOnline = true
 
     private init() {
         player.isMuted = true
@@ -108,7 +109,8 @@ final class FeedPreviewPlayback: ObservableObject {
         networkMonitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor in
                 self?.isConstrained = path.isConstrained
-                if path.isConstrained { self?.stop() }
+                self?.isOnline = path.status == .satisfied
+                if path.isConstrained || path.status != .satisfied { self?.stop() }
             }
         }
         networkMonitor.start(queue: networkQueue)
@@ -130,7 +132,8 @@ final class FeedPreviewPlayback: ObservableObject {
                 hasClip: true,
                 reduceMotion: reduceMotion,
                 lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
-                constrainedNetwork: isConstrained
+                constrainedNetwork: isConstrained,
+                isOnline: isOnline
               ) else {
             stop(gameID: gameID)
             return

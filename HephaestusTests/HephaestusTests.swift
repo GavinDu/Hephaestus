@@ -301,6 +301,8 @@ struct HephaestusTests {
     #expect(!FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: true, lowPowerMode: false, constrainedNetwork: false))
     #expect(!FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: true, constrainedNetwork: false))
     #expect(!FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: false, constrainedNetwork: true))
+    #expect(!FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: false, constrainedNetwork: false, isOnline: false))
+    #expect(FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: false, constrainedNetwork: false, isOnline: true))
 }
 
 @Test func verifiedRunResultDecodesOutcomeAndRank() throws {
