@@ -171,7 +171,7 @@ final class PlayerSmokeTests: XCTestCase {
                       "For You should expose a scrollable feed viewport.")
         let dragStart = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.80))
         let dragEnd = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
-        print("UI EVALUATOR: pager=\\(pager.frame) before=\\(beforePageID ?? \\"nil\\")")
+        print("UI EVALUATOR: pager swipe dispatched")
         dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
 
         // Poll the visible page directly instead of XCTest's app-idle
