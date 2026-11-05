@@ -169,7 +169,7 @@ final class PlayerSmokeTests: XCTestCase {
         let pager = app.scrollViews.firstMatch
         XCTAssertTrue(pager.waitForExistence(timeout: 5),
                       "For You should expose a scrollable feed viewport.")
-        print("UI EVALUATOR pager frame: \\(pager.frame)")
+        print("UI EVALUATOR pager frame: \(pager.frame)")
         pager.swipeUp()
 
         // Poll the visible page directly instead of XCTest's app-idle
