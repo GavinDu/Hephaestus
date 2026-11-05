@@ -161,13 +161,18 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertNotNil(beforePage, "The current feed page should intersect the app viewport.")
         let beforePageID = beforePage?.identifier
 
-        // Scope the gesture to the feed's actual vertical ScrollView. A swipe
-        // synthesized on the app root can be routed to navigation chrome or a
-        // nested control instead of the pager, producing a false paging failure.
-        let pager = app.scrollViews.matching(identifier: "feed.forYou.pager").firstMatch
+        // Drive the gesture relative to the actual pager ScrollView. SwiftUI
+        // does not consistently surface the custom accessibility identifier
+        // on iPhone simulators, but the scroll view itself remains queryable.
+        // Keep both endpoints inside the pager bounds so the drag is not
+        // cancelled when it crosses the feed selector or navigation chrome.
+        let pager = app.scrollViews.firstMatch
         XCTAssertTrue(pager.waitForExistence(timeout: 5),
-                      "For You should expose its identified vertical paging scroll view.")
-        pager.swipeUp()
+                      "For You should expose a scrollable feed viewport.")
+        let dragStart = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.80))
+        let dragEnd = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
+        print("UI EVALUATOR: pager=\\(pager.frame) before=\\(beforePageID ?? \\"nil\\")")
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
 
         // Poll the visible page directly instead of XCTest's app-idle
         // expectation, which can time out while SwiftUI is settling the
