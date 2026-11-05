@@ -169,10 +169,8 @@ final class PlayerSmokeTests: XCTestCase {
         let pager = app.scrollViews.firstMatch
         XCTAssertTrue(pager.waitForExistence(timeout: 5),
                       "For You should expose a scrollable feed viewport.")
-        let dragStart = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.80))
-        let dragEnd = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
-        print("UI EVALUATOR: pager swipe dispatched")
-        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+        print("UI EVALUATOR pager frame: \\(pager.frame)")
+        pager.swipeUp()
 
         // Poll the visible page directly instead of XCTest's app-idle
         // expectation, which can time out while SwiftUI is settling the
