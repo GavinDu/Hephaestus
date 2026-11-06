@@ -262,4 +262,52 @@ final class PlayerSmokeTests: XCTestCase {
 
         XCUIDevice.shared.orientation = .portrait
     }
+
+    /// Large accessibility text must not push the primary feed actions off-screen
+    /// or make the Play/Save/Like/Comments targets unreachable.
+    @MainActor
+    func testDiscoverFeedSupportsAccessibilityDynamicType() throws {
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+
+        let play = app.buttons["game.play"].firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let feedDeadline = Date().addingTimeInterval(120)
+        while !play.exists && Date() < feedDeadline {
+            if retry.waitForExistence(timeout: 5) {
+                retry.tap()
+            }
+            _ = play.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(play.exists,
+                      "The feed should remain playable at accessibility text size. UI: \\(app.debugDescription)")
+
+        let targets: [(String, XCUIElement)] = [
+            ("Play", play),
+            ("Save", app.buttons["Save game"].firstMatch),
+            ("Like", app.buttons["Like game"].firstMatch),
+            ("Comments", app.buttons["View comments"].firstMatch)
+        ]
+        for (name, target) in targets {
+            XCTAssertTrue(target.exists, "\\(name) should remain present at accessibility text size.")
+            guard target.exists else { continue }
+            XCTAssertGreaterThanOrEqual(target.frame.width, 44,
+                                        "\\(name) should remain at least 44pt wide.")
+            XCTAssertGreaterThanOrEqual(target.frame.height, 44,
+                                        "\\(name) should remain at least 44pt tall.")
+            XCTAssertTrue(target.isHittable,
+                          "\\(name) should remain reachable at accessibility text size.")
+        }
+
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "feed-accessibility-dynamic-type-xxxl"
+        shot.lifetime = .keepAlways
+        add(shot)
+        print("UI_EVALUATOR_ACCESSIBILITY dynamic_type=accessibility-xxxl primary_targets=4")
+    }
 }
