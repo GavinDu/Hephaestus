@@ -93,8 +93,8 @@ struct FeedGame: Codable, Identifiable {
         createdAt = try? c.decode(String.self, forKey: .created_at)
         creatorDisplayName = try? c.decode(String.self, forKey: .creatorDisplayName)
         creatorAvatarURL = try? c.decode(String.self, forKey: .creatorAvatarURL)
-        previewPosterURL = try? c.decode(String.self, forKey: .previewPosterURL)
-        previewClipURL = try? c.decode(String.self, forKey: .previewClipURL)
+        previewPosterURL = Self.resolvePreviewURL(try? c.decode(String.self, forKey: .previewPosterURL))
+        previewClipURL = Self.resolvePreviewURL(try? c.decode(String.self, forKey: .previewClipURL))
         previewAspect = try? c.decode(Double.self, forKey: .previewAspect)
         previewDurationMS = try? c.decode(Int.self, forKey: .previewDurationMS)
         previewDominantColor = try? c.decode(String.self, forKey: .previewDominantColor)
@@ -110,14 +110,24 @@ struct FeedGame: Codable, Identifiable {
         playableExpression = try? c.decode(FeedPlayableExpression.self, forKey: .playableExpression)
     }
 
+    /// The feed serves same-origin relative asset paths. Resolve those before
+    /// handing them to AsyncImage/AVPlayer; accept only HTTPS media URLs.
+    static func resolvePreviewURL(_ value: String?) -> String? {
+        guard let value, !value.isEmpty,
+              let url = URL(string: value, relativeTo: BackendConfig.baseURL)?.absoluteURL,
+              url.scheme?.lowercased() == "https", url.host != nil,
+              url.user == nil, url.password == nil else { return nil }
+        return url.absoluteString
+    }
+
     mutating func apply(card: FeedCard) {
         ownerID = card.creator.id.isEmpty ? ownerID : card.creator.id
         caption = card.caption ?? caption
         topics = card.topics ?? topics
         creatorDisplayName = card.creator.display_name
         creatorAvatarURL = card.creator.avatar_url
-        previewPosterURL = card.preview.poster_url
-        previewClipURL = card.preview.clip_url
+        previewPosterURL = Self.resolvePreviewURL(card.preview.poster_url)
+        previewClipURL = Self.resolvePreviewURL(card.preview.clip_url)
         previewAspect = card.preview.aspect
         previewDurationMS = card.preview.duration_ms
         previewDominantColor = card.preview.dominant_color
