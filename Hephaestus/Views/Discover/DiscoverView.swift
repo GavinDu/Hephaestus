@@ -627,7 +627,7 @@ private struct ForYouGamePage: View {
             if let poster = game.previewPosterURL, let url = URL(string: poster) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
-                        image.resizable().scaledToFill()
+                        image.resizable().scaledToFit()
                     } else {
                         LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
                     }

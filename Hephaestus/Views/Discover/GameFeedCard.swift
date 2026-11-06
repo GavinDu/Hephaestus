@@ -132,7 +132,7 @@ struct GameFeedCard: View {
                 LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
                 if let poster = game.previewPosterURL, let url = URL(string: poster) {
                     AsyncImage(url: url) { phase in
-                        if let image = phase.image { image.resizable().scaledToFill() }
+                        if let image = phase.image { image.resizable().scaledToFit() }
                         else { LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing) }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
