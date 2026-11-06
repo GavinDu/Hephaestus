@@ -358,6 +358,16 @@ final class BackendAPI: ObservableObject {
     @Published private(set) var isHealthy = false
 
     private let session = URLSession.shared
+    // A public feed must leave loading with an actionable retry even when a
+    // connection stays open without completing. Do not apply these budgets to
+    // creator uploads or generation requests.
+    private let feedSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 20
+        configuration.timeoutIntervalForResource = 30
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }()
 
     private func url(_ path: String) -> URL {
         URL(string: BackendConfig.baseURL.absoluteString + "/" + path)!
@@ -374,12 +384,12 @@ final class BackendAPI: ObservableObject {
         return req
     }
 
-    private func send<T: Decodable>(_ type: T.Type, _ req: URLRequest) async throws -> T {
+    private func send<T: Decodable>(_ type: T.Type, _ req: URLRequest, using transport: URLSession? = nil) async throws -> T {
         let method = req.httpMethod ?? "GET"
         let path = req.url?.path ?? "?"
         let started = Date()
         do {
-            let (data, resp) = try await session.data(for: req)
+            let (data, resp) = try await (transport ?? session).data(for: req)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
             guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
@@ -483,7 +493,7 @@ final class BackendAPI: ObservableObject {
         var path = "v1/feed?scope=\(scope.rawValue)&limit=20"
         if let cursor, !cursor.isEmpty { path += "&cursor=\(cursor)" }
         let req = try makeRequest(path)
-        return try await send(FeedResponse.self, req)
+        return try await send(FeedResponse.self, req, using: feedSession)
     }
 
     func fetchVerifiedRunResult(runID: String) async throws -> VerifiedRunResult {
