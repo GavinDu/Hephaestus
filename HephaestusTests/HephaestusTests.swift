@@ -522,3 +522,16 @@ struct HephaestusTests {
     #expect(!PlayableExpression.canPublishPublicly(hasConsent: true, isPublishing: true))
     #expect(PlayableExpression.canPublishPublicly(hasConsent: true, isPublishing: false))
 }
+
+@Test func feedPreviewPathsResolveToBackendBeforeMediaLoading() throws {
+    let data = """
+    {"games":[{"game_id":"poster-game","title":"A drawing","preview_poster_url":"/v1/games/poster-game/previews/1/poster.png"}]}
+    """.data(using: .utf8)!
+    let response = try JSONDecoder().decode(FeedResponse.self, from: data)
+    #expect(response.games[0].previewPosterURL == BackendConfig.baseURL.absoluteString + "/v1/games/poster-game/previews/1/poster.png")
+    #expect(FeedGame.resolvePreviewURL("/v1/games/game/clip.mp4") == BackendConfig.baseURL.absoluteString + "/v1/games/game/clip.mp4")
+    #expect(FeedGame.resolvePreviewURL("https://cdn.example.test/poster.png") == "https://cdn.example.test/poster.png")
+    #expect(FeedGame.resolvePreviewURL("javascript:alert(1)") == nil)
+    #expect(FeedGame.resolvePreviewURL("http://insecure.example.test/poster.png") == nil)
+    #expect(FeedGame.resolvePreviewURL(nil) == nil)
+}
