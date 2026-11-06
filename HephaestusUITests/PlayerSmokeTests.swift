@@ -199,6 +199,17 @@ final class PlayerSmokeTests: XCTestCase {
                 assertTouchTarget(app.buttons["View comments"].firstMatch, named: "Comments")
             ].filter { $0 }.count
 
+            if !expectedLandscape {
+                let rail = app.descendants(matching: .any)["feed.actionRail"].firstMatch
+                XCTAssertTrue(rail.exists, "Portrait feed should expose the social action rail.")
+                let saveFrame = app.buttons["Save game"].firstMatch.frame
+                let likeFrame = app.buttons["Like game"].firstMatch.frame
+                XCTAssertLessThan(abs(saveFrame.midX - likeFrame.midX), 4,
+                                  "Portrait social actions should align vertically.")
+                XCTAssertGreaterThan(abs(saveFrame.midY - likeFrame.midY), 40,
+                                     "Portrait rail targets should not overlap.")
+            }
+
             let beforeCapture = app.screenshot()
             let beforeSwipe = XCTAttachment(screenshot: beforeCapture)
             beforeSwipe.name = "feed-ui-evaluator-before-swipe-\(profile.1)"

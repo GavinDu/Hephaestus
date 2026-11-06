@@ -577,6 +577,8 @@ private struct ForYouGamePage: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var showsExpressionDetails = false
     @ObservedObject private var previewPlayback = FeedPreviewPlayback.shared
 
     let game: FeedGame
@@ -674,74 +676,60 @@ private struct ForYouGamePage: View {
     }
 
 
-    private func expressionTag(_ title: String, count: Int) -> some View {
-        Text("\(title) · \(count)")
-            .font(.system(size: 10, weight: .semibold))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 5)
-            .background(.white.opacity(0.16), in: Capsule())
-    }
-
-    private func expressionAccessibilityLabel(_ expression: FeedPlayableExpression) -> String {
-        let preserved = expression.preserved?.count ?? 0
-        let invented = expression.invented?.count ?? 0
-        let uncertain = expression.uncertain?.count ?? 0
-        return [
-            "Playable expression",
-            expression.intent,
-            expression.chosen_interpretation.map { "Interpretation: \($0)" },
-            "Source shared",
-            "Preserved claims: \(preserved)",
-            "Invented claims: \(invented)",
-            "Uncertain claims: \(uncertain)"
-        ].compactMap { $0 }.joined(separator: ". ")
-    }
-
-    private func playableExpressionSummary(_ expression: FeedPlayableExpression) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Label("PLAYABLE EXPRESSION", systemImage: "sparkles")
-                    .font(.caption2.weight(.bold))
-                    .tracking(0.8)
-                Text("SOURCE SHARED")
-                    .font(.system(size: 9, weight: .bold))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(.white.opacity(0.18), in: Capsule())
-            }
-            if verticalSizeClass == .compact {
-                HStack(spacing: 6) {
-                    expressionTag("P", count: expression.preserved?.count ?? 0)
-                    expressionTag("I", count: expression.invented?.count ?? 0)
-                    expressionTag("U", count: expression.uncertain?.count ?? 0)
-                    if let interpretation = expression.chosen_interpretation, !interpretation.isEmpty {
-                        Text(interpretation).font(.caption).lineLimit(1)
-                    }
-                }
-            } else {
-                if let intent = expression.intent, !intent.isEmpty {
-                    Text(intent).font(.subheadline.weight(.medium)).lineLimit(2)
-                }
-                if let interpretation = expression.chosen_interpretation, !interpretation.isEmpty {
-                    Text("Interpretation · " + interpretation)
-                        .font(.caption).foregroundStyle(.white.opacity(0.9)).lineLimit(2)
-                }
-                HStack(spacing: 6) {
-                    expressionTag("Preserved", count: expression.preserved?.count ?? 0)
-                    expressionTag("Invented", count: expression.invented?.count ?? 0)
-                    expressionTag("Uncertain", count: expression.uncertain?.count ?? 0)
-                }
-            }
+    private func sourceLabel(_ type: String) -> String {
+        switch type {
+        case "drawing": "a drawing"
+        case "image": "a photo"
+        case "video": "a video"
+        case "audio": "a voice note"
+        default: "a story"
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(expressionAccessibilityLabel(expression))
+    }
+
+    @ViewBuilder private var socialActionButtons: some View {
+                iconAction(isSaved ? "bookmark.fill" : "bookmark", label: isSaved ? "Remove from library" : "Save game", action: onToggleSaved)
+                iconAction(isLiked ? "heart.fill" : "heart", label: isLiked ? "Unlike game" : "Like game", action: onToggleLike)
+                iconAction("bubble.right", label: "View comments", action: onOpenComments)
+                Menu {
+                    Button("Report game", role: .destructive, action: onReport)
+                    Button("Not interested", action: onNotInterested)
+                    if game.ownerID != nil {
+                        Button("Block creator", role: .destructive, action: onBlockCreator)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .foregroundStyle(.white)
+                .accessibilityLabel("More game actions")
+                .accessibilitySortPriority(70)
+                ShareLink(item: shareURL) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .simultaneousGesture(TapGesture().onEnded {
+                    Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
+                })
+                .foregroundStyle(.white)
+                .accessibilityLabel("Share \(game.title)")
+    }
+
+    @ViewBuilder private func socialActions(vertical: Bool) -> some View {
+        if vertical {
+            VStack(spacing: 8) { socialActionButtons }
+                .padding(4)
+                .background(.black.opacity(0.3), in: Capsule())
+                .accessibilityIdentifier("feed.actionRail")
+        } else {
+            HStack(spacing: 8) { socialActionButtons }
+        }
     }
 
     private func detailsOverlay(bottomInset: CGFloat) -> some View {
-        let isCompact = verticalSizeClass == .compact
+        let isCompact = verticalSizeClass == .compact || dynamicTypeSize.isAccessibilitySize
         return VStack(alignment: .leading, spacing: isCompact ? 6 : 14) {
             Spacer(minLength: isCompact ? 0 : 100)
             HStack(spacing: 8) {
@@ -768,7 +756,7 @@ private struct ForYouGamePage: View {
                 Text(caption)
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.94))
-                    .lineLimit(3)
+                    .lineLimit(2)
             }
             if !isCompact, let topics = game.topics, !topics.isEmpty {
                 Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
@@ -778,7 +766,13 @@ private struct ForYouGamePage: View {
                     .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
             }
             if !isCompact, let expression = game.playableExpression, expression.source_visibility == "public" {
-                playableExpressionSummary(expression)
+                Button { showsExpressionDetails = true } label: {
+                    Label("Made from " + sourceLabel(expression.source_type), systemImage: "sparkles")
+                        .font(.caption.weight(.semibold))
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("feed.expression.details")
             }
             if !isCompact {
             HStack(spacing: 8) {
@@ -820,37 +814,7 @@ private struct ForYouGamePage: View {
                 }
             }
             }
-            HStack(spacing: 8) {
-                iconAction(isSaved ? "bookmark.fill" : "bookmark", label: isSaved ? "Remove from library" : "Save game", action: onToggleSaved)
-                iconAction(isLiked ? "heart.fill" : "heart", label: isLiked ? "Unlike game" : "Like game", action: onToggleLike)
-                iconAction("bubble.right", label: "View comments", action: onOpenComments)
-                Menu {
-                    Button("Report game", role: .destructive, action: onReport)
-                    Button("Not interested", action: onNotInterested)
-                    if game.ownerID != nil {
-                        Button("Block creator", role: .destructive, action: onBlockCreator)
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .foregroundStyle(.white)
-                .accessibilityLabel("More game actions")
-                .accessibilitySortPriority(70)
-                Spacer(minLength: 0)
-                ShareLink(item: shareURL) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                }
-                .simultaneousGesture(TapGesture().onEnded {
-                    Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
-                })
-                .foregroundStyle(.white)
-                .accessibilityLabel("Share \(game.title)")
-            }
+            if isCompact { socialActions(vertical: false) }
             HStack(spacing: 10) {
                 Button(action: onPlay) {
                     Label("Play now", systemImage: "play.fill")
@@ -876,6 +840,17 @@ private struct ForYouGamePage: View {
             LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
                 .allowsHitTesting(false)
         )
+    }
+
+    @ViewBuilder private func claimSection(_ title: String, claims: [FeedExpressionClaim]?) -> some View {
+        if let claims, !claims.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(.headline)
+                ForEach(Array(claims.enumerated()), id: \.offset) { _, claim in
+                    Text(claim.text).font(.body)
+                }
+            }
+        }
     }
 
     var body: some View {
@@ -905,7 +880,14 @@ private struct ForYouGamePage: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 18)
                         .allowsHitTesting(false)
-                        detailsOverlay(bottomInset: proxy.safeAreaInsets.bottom)
+                        HStack(alignment: .bottom, spacing: 0) {
+                            detailsOverlay(bottomInset: proxy.safeAreaInsets.bottom)
+                            if verticalSizeClass != .compact && !dynamicTypeSize.isAccessibilitySize {
+                                socialActions(vertical: true)
+                                    .padding(.trailing, 12)
+                                    .padding(.bottom, max(24, proxy.safeAreaInsets.bottom + 12))
+                            }
+                        }
                     }
                     .frame(width: pageWidth, height: proxy.size.height)
                     .clipShape(RoundedRectangle(cornerRadius: isRegular ? 24 : 0, style: .continuous))
@@ -913,6 +895,27 @@ private struct ForYouGamePage: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .sheet(isPresented: $showsExpressionDetails) {
+            NavigationStack {
+                ScrollView {
+                    if let expression = game.playableExpression, expression.source_visibility == "public" {
+                        VStack(alignment: .leading, spacing: 20) {
+                            Text(expression.intent ?? game.title).font(.title2.bold())
+                            if let interpretation = expression.chosen_interpretation {
+                                Text("Game interpretation").font(.headline)
+                                Text(interpretation)
+                            }
+                            claimSection("Preserved from the source", claims: expression.preserved)
+                            claimSection("Invented for the game", claims: expression.invented)
+                            claimSection("Uncertain interpretation", claims: expression.uncertain)
+                        }.padding(24)
+                    }
+                }
+                .navigationTitle("Behind this game")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showsExpressionDetails = false } } }
+            }
         }
         .onAppear {
             if ForYouPageLayout.shouldTrackImpression(isSettled: isSettled) {
