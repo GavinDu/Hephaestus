@@ -874,6 +874,15 @@ private struct ForYouGamePage: View {
                                     .padding(.vertical, 8)
                                     .background(.black.opacity(0.28), in: Capsule())
                                 Spacer()
+                                if !dynamicTypeSize.isAccessibilitySize, let orientation = game.orientationLabel {
+                                    Text(orientation)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 8)
+                                        .background(.black.opacity(0.4), in: Capsule())
+                                        .accessibilityIdentifier("feed.orientation")
+                                }
                             }
                             Spacer()
                         }

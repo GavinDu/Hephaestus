@@ -167,6 +167,9 @@ struct GameFeedCard: View {
                             .font(.caption2.weight(.bold))
                             .tracking(1.2)
                             .foregroundStyle(.white.opacity(0.82))
+                        if let orientation = game.orientationLabel {
+                            Text(orientation).font(.caption2.weight(.semibold))
+                        }
                         if let parentID = game.remixParentID, !parentID.isEmpty {
                             Label("REMIX", systemImage: "arrow.triangle.2.circlepath")
                                 .font(.caption2.weight(.bold))

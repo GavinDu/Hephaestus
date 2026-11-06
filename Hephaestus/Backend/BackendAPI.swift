@@ -38,6 +38,7 @@ struct FeedPlayableExpression: Codable, Equatable {
 struct FeedGame: Codable, Identifiable {
     var id: String
     var title: String
+    var orientation: String?
     var ownerID: String?
     var caption: String?
     var topics: [String]?
@@ -65,12 +66,13 @@ struct FeedGame: Codable, Identifiable {
     var playableExpression: FeedPlayableExpression?
 
     enum CodingKeys: String, CodingKey {
-        case id, game_id, title, owner_id, caption, topics, published_at, published_version, remix_parent_id, moderation_status, created_at
+        case id, game_id, title, orientation, owner_id, caption, topics, published_at, published_version, remix_parent_id, moderation_status, created_at
         case creatorDisplayName = "creator_display_name", creatorAvatarURL = "creator_avatar_url"
         case previewPosterURL = "preview_poster_url", previewClipURL = "preview_clip_url", previewAspect = "preview_aspect"
         case previewDurationMS = "preview_duration_ms", previewDominantColor = "preview_dominant_color", previewStatus = "preview_status"
         case likeCount = "like_count", playStarts = "play_starts", completions, replays, shares
         case playableExpression = "playable_expression"
+        case gameIR = "game_ir"
         case viewerLiked = "viewer_liked", viewerSaved = "viewer_saved", viewerFollowing = "viewer_following"
     }
 
@@ -83,6 +85,9 @@ struct FeedGame: Codable, Identifiable {
             id = try c.decode(String.self, forKey: .game_id)
         }
         title = (try? c.decode(String.self, forKey: .title)) ?? "Untitled Game"
+        struct OrientationIR: Decodable { struct Game: Decodable { var orientation: String }; var game: Game }
+        orientation = (try? c.decode(String.self, forKey: .orientation))
+            ?? (try? c.decode(OrientationIR.self, forKey: .gameIR).game.orientation)
         ownerID = try? c.decode(String.self, forKey: .owner_id)
         caption = try? c.decode(String.self, forKey: .caption)
         topics = try? c.decode([String].self, forKey: .topics)
@@ -120,7 +125,17 @@ struct FeedGame: Codable, Identifiable {
         return url.absoluteString
     }
 
+    var orientationLabel: String? {
+        switch orientation {
+        case "portrait": "Portrait game"
+        case "landscape": "Landscape game"
+        case "any": "Play in either orientation"
+        default: nil
+        }
+    }
+
     mutating func apply(card: FeedCard) {
+        orientation = card.orientation ?? orientation
         ownerID = card.creator.id.isEmpty ? ownerID : card.creator.id
         caption = card.caption ?? caption
         topics = card.topics ?? topics
@@ -147,6 +162,7 @@ struct FeedGame: Codable, Identifiable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .game_id)
         try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(orientation, forKey: .orientation)
         try c.encodeIfPresent(ownerID, forKey: .owner_id)
         try c.encodeIfPresent(caption, forKey: .caption)
         try c.encodeIfPresent(topics, forKey: .topics)
@@ -185,6 +201,7 @@ struct FeedCard: Decodable {
     struct Viewer: Decodable { var liked: Bool; var saved: Bool; var following: Bool }
     var game_id: String
     var title: String
+    var orientation: String?
     var caption: String?
     var topics: [String]?
     var creator: Creator
