@@ -285,7 +285,7 @@ final class PlayerSmokeTests: XCTestCase {
             _ = play.waitForExistence(timeout: 5)
         }
         XCTAssertTrue(play.exists,
-                      "The feed should remain playable at accessibility text size. UI: \\(app.debugDescription)")
+                      "The feed should remain playable at accessibility text size. UI: \(app.debugDescription)")
 
         let targets: [(String, XCUIElement)] = [
             ("Play", play),
@@ -294,14 +294,14 @@ final class PlayerSmokeTests: XCTestCase {
             ("Comments", app.buttons["View comments"].firstMatch)
         ]
         for (name, target) in targets {
-            XCTAssertTrue(target.exists, "\\(name) should remain present at accessibility text size.")
+            XCTAssertTrue(target.exists, "\(name) should remain present at accessibility text size.")
             guard target.exists else { continue }
             XCTAssertGreaterThanOrEqual(target.frame.width, 44,
-                                        "\\(name) should remain at least 44pt wide.")
+                                        "\(name) should remain at least 44pt wide.")
             XCTAssertGreaterThanOrEqual(target.frame.height, 44,
-                                        "\\(name) should remain at least 44pt tall.")
+                                        "\(name) should remain at least 44pt tall.")
             XCTAssertTrue(target.isHittable,
-                          "\\(name) should remain reachable at accessibility text size.")
+                          "\(name) should remain reachable at accessibility text size.")
         }
 
         let shot = XCTAttachment(screenshot: app.screenshot())
