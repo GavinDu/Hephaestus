@@ -646,6 +646,11 @@ private struct ForYouGamePage: View {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFit()
+                    } else if phase.error == nil {
+                        ProgressView("Loading preview")
+                            .tint(.white)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         unavailablePreview
                     }
