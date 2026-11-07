@@ -167,6 +167,13 @@ final class PlayerSmokeTests: XCTestCase {
             if expectedLandscape && discover.exists && discover.isHittable {
                 discover.tap()
             }
+            if UIDevice.current.userInterfaceIdiom == .pad && !expectedLandscape {
+                // Portrait For You should not give away its initial viewport
+                // to the persistent sidebar. Users can reveal it manually.
+                let sidebarHeader = app.staticTexts["Your space"].firstMatch
+                XCTAssertFalse(sidebarHeader.isHittable,
+                               "iPad portrait must enter the detail-first swipe feed; sidebar remains user-toggleable.")
+            }
 
             let play = app.buttons["game.play"].firstMatch
             let retry = app.buttons["Try again"].firstMatch
