@@ -159,6 +159,15 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertEqual(app.frame.width > app.frame.height, expectedLandscape,
                            "The simulator viewport should actually be \(profile.1).")
 
+            // Landscape on iPad may restore the NavigationSplitView sidebar
+            // while Discover remains in a loading skeleton.  Keep the
+            // navigation explicit and expose the current state in CI logs.
+            // Do not silently count a skeleton as a successful feed page.
+            let discover = app.staticTexts["Discover"].firstMatch
+            if expectedLandscape && discover.exists && discover.isHittable {
+                discover.tap()
+            }
+
             let play = app.buttons["game.play"].firstMatch
             let retry = app.buttons["Try again"].firstMatch
             let feedDeadline = Date().addingTimeInterval(120)
