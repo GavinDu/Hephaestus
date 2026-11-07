@@ -927,16 +927,19 @@ private struct ForYouGamePage: View {
             }
         }
         .onAppear {
-            if ForYouPageLayout.shouldTrackImpression(isSettled: isSettled) {
-                onImpression()
-            }
             if isSettled && !reduceMotion && scenePhase == .active {
                 FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
             }
         }
         .onDisappear { FeedPreviewPlayback.shared.stop(gameID: game.id) }
-        .onChange(of: isSettled) { _, settled in
-            if ForYouPageLayout.shouldTrackImpression(isSettled: settled) {
+        .task(id: isSettled && scenePhase == .active) {
+            guard isSettled && scenePhase == .active else { return }
+            try? await Task.sleep(for: .milliseconds(ForYouPageLayout.impressionMinimumDwellMilliseconds))
+            guard !Task.isCancelled else { return }
+            if ForYouPageLayout.shouldTrackImpression(
+                isSettled: isSettled,
+                dwellMilliseconds: ForYouPageLayout.impressionMinimumDwellMilliseconds
+            ) {
                 onImpression()
             }
         }
