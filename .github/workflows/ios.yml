@@ -12,6 +12,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Test native XCTest feedback parser
+        run: python3 -m unittest discover -s tools/test-feedback -p "test_*.py" -v
       - name: List Xcode schemes
         run: xcodebuild -list -project Hephaestus.xcodeproj
       - name: Build for iOS Simulator
