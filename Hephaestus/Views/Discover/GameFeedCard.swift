@@ -132,7 +132,7 @@ struct GameFeedCard: View {
                 LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
                 if let poster = game.previewPosterURL, let url = URL(string: poster) {
                     AsyncImage(url: url) { phase in
-                        if let image = phase.image { image.resizable().scaledToFill() }
+                        if let image = phase.image { image.resizable().scaledToFit() }
                         else { LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing) }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -167,6 +167,9 @@ struct GameFeedCard: View {
                             .font(.caption2.weight(.bold))
                             .tracking(1.2)
                             .foregroundStyle(.white.opacity(0.82))
+                        if let orientation = game.orientationLabel {
+                            Text(orientation).font(.caption2.weight(.semibold))
+                        }
                         if let parentID = game.remixParentID, !parentID.isEmpty {
                             Label("REMIX", systemImage: "arrow.triangle.2.circlepath")
                                 .font(.caption2.weight(.bold))

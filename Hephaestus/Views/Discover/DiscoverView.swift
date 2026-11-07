@@ -627,7 +627,7 @@ private struct ForYouGamePage: View {
             if let poster = game.previewPosterURL, let url = URL(string: poster) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
-                        image.resizable().scaledToFill()
+                        image.resizable().scaledToFit()
                     } else {
                         LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
                     }
@@ -874,6 +874,15 @@ private struct ForYouGamePage: View {
                                     .padding(.vertical, 8)
                                     .background(.black.opacity(0.28), in: Capsule())
                                 Spacer()
+                                if !dynamicTypeSize.isAccessibilitySize, let orientation = game.orientationLabel {
+                                    Text(orientation)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 8)
+                                        .background(.black.opacity(0.4), in: Capsule())
+                                        .accessibilityIdentifier("feed.orientation")
+                                }
                             }
                             Spacer()
                         }

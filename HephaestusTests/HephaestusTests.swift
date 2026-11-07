@@ -535,3 +535,18 @@ struct HephaestusTests {
     #expect(FeedGame.resolvePreviewURL("http://insecure.example.test/poster.png") == nil)
     #expect(FeedGame.resolvePreviewURL(nil) == nil)
 }
+
+@Test func feedOrientationIsCarriedThroughCardsAndCache() throws {
+    let json = """
+    {"games":[{"game_id":"penguin","title":"Penguin"}],"cards":[{"game_id":"penguin","title":"Penguin","orientation":"portrait","creator":{"id":"creator"},"preview":{},"viewer":{"liked":false,"saved":false,"following":false}}]}
+    """.data(using: .utf8)!
+    let response = try JSONDecoder().decode(FeedResponse.self, from: json)
+    #expect(response.games[0].orientation == "portrait")
+    #expect(response.games[0].orientationLabel == "Portrait game")
+    let cached = try JSONDecoder().decode(FeedResponse.self, from: JSONEncoder().encode(response))
+    #expect(cached.games[0].orientation == "portrait")
+    let legacy = try JSONDecoder().decode(FeedGame.self, from: Data("{\"game_id\":\"old\",\"title\":\"Old\"}".utf8))
+    #expect(legacy.orientationLabel == nil)
+    let canonical = try JSONDecoder().decode(FeedGame.self, from: Data("{\"game_id\":\"old\",\"title\":\"Old\",\"game_ir\":{\"game\":{\"orientation\":\"landscape\"}}}".utf8))
+    #expect(canonical.orientationLabel == "Landscape game")
+}
