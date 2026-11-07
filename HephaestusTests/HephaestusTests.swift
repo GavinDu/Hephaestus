@@ -371,8 +371,12 @@ struct HephaestusTests {
 }
 
 @Test func forYouPagerTracksImpressionsOnlyAfterPageSettles() {
+    #expect(ForYouPageLayout.impressionMinimumDwellMilliseconds == 700)
     #expect(!ForYouPageLayout.shouldTrackImpression(isSettled: false))
-    #expect(ForYouPageLayout.shouldTrackImpression(isSettled: true))
+    #expect(!ForYouPageLayout.shouldTrackImpression(isSettled: false, dwellMilliseconds: 10_000))
+    #expect(!ForYouPageLayout.shouldTrackImpression(isSettled: true, dwellMilliseconds: 699))
+    #expect(ForYouPageLayout.shouldTrackImpression(isSettled: true, dwellMilliseconds: 700))
+    #expect(ForYouPageLayout.shouldTrackImpression(isSettled: true, dwellMilliseconds: 1_500))
 }
 
 
