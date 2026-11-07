@@ -24,8 +24,11 @@ enum ForYouPageLayout {
         return availableIDs.first
     }
 
-    /// Prefetched/offscreen pages must not count as viewed until they settle.
-    static func shouldTrackImpression(isSettled: Bool) -> Bool {
-        isSettled
+    /// Settled pages require a brief uninterrupted dwell before generating
+    /// an impression; a rapid swipe or offscreen prefetch is not a view.
+    static let impressionMinimumDwellMilliseconds = 700
+
+    static func shouldTrackImpression(isSettled: Bool, dwellMilliseconds: Int = impressionMinimumDwellMilliseconds) -> Bool {
+        isSettled && dwellMilliseconds >= impressionMinimumDwellMilliseconds
     }
 }
