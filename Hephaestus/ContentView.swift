@@ -38,6 +38,9 @@ private enum AppSection: String, CaseIterable, Identifiable, Hashable {
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selection: AppSection? = .discover
+    // On regular-width iPads, enter the full-screen playable feed first.
+    // The system sidebar button still lets people reveal navigation.
+    @State private var sidebarVisibility: NavigationSplitViewVisibility = .detailOnly
 
     var body: some View {
         Group {
@@ -65,7 +68,7 @@ struct ContentView: View {
     }
 
     private var expandedLayout: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
             List(selection: $selection) {
                 Section("Play") {
                     navigationRow(.discover)
@@ -77,6 +80,7 @@ struct ContentView: View {
                 }
             }
             .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 250)
             .navigationTitle("Hephaestus")
         } detail: {
             destination(for: selection ?? .discover)
@@ -87,6 +91,8 @@ struct ContentView: View {
 
     private func navigationRow(_ section: AppSection) -> some View {
         Label(section.title, systemImage: section.symbol)
+            .lineLimit(1)
+            .minimumScaleFactor(0.9)
             .tag(Optional(section))
     }
 
