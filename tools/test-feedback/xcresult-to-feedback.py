@@ -23,6 +23,8 @@ this script's output; the smoke test's own verdict remains the gate.
 Test-case lines parsed (xcodebuild format):
     Test case 'PlayerSmokeTests.testDiscoverLaunchesPlayer()' passed on ...
     Test case 'PlayerSmokeTests.testDiscoverLaunchesPlayer()' failed on ...
+The older XCTest style is also accepted:
+    Test Case '-[HephaestusUITests.PlayerSmokeTests testDiscoverLaunchesPlayer]' passed (1.234 seconds).
 A case that started (SMOKE: app launched) but has no result line is
 reported as `fail` with class `timeout`, not dropped.
 """
@@ -37,6 +39,13 @@ from pathlib import Path
 CASE_RE = re.compile(
     r"Test case '([^']+)' (passed|failed) on '([^']+)' \(([\d.]+) seconds\)"
 )
+# XCTest can emit "Test Case '-[Module.Suite method]' passed (N seconds)."
+# Swift Testing often emits "Test case 'Suite.method()' passed on 'Device'".
+# Both formats are authoritative when produced by xcodebuild.
+XCTEST_CASE_RE = re.compile(
+    r"Test Case '-\[([^\s\]]+) ([^\]]+)\]' (passed|failed) \(([\d.]+) seconds\)"
+)
+
 STARTED_RE = re.compile(r"SMOKE: app launched")
 
 
@@ -68,8 +77,15 @@ def main():
     # run's verdict is the run's verdict; counting both would double
     # count and could report a pass and a fail for one case.
     by_id = {}
+    detected = []
     for match in CASE_RE.finditer(text):
         name, result, _device, seconds = match.groups()
+        detected.append((match.start(), name, result, seconds))
+    for match in XCTEST_CASE_RE.finditer(text):
+        module_suite, method, result, seconds = match.groups()
+        # Normalize suite/method names across the two xcodebuild formats.
+        detected.append((match.start(), f"{module_suite.split('.')[-1]}.{method}", result, seconds))
+    for _offset, name, result, seconds in sorted(detected):
         name = name[:-2] if name.endswith("()") else name
         case = {
             "id": f"{args.prefix}.{name}",
