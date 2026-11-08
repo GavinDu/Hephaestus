@@ -164,7 +164,14 @@ final class PlayerSmokeTests: XCTestCase {
             // navigation explicit and expose the current state in CI logs.
             // Do not silently count a skeleton as a successful feed page.
             let discover = app.staticTexts["Discover"].firstMatch
-            if expectedLandscape && discover.exists && discover.isHittable {
+            let play = app.buttons["game.play"].firstMatch
+            // A fresh landscape launch already selects Discover. Re-tapping
+            // an already visible sidebar row can recreate the detail view
+            // and cancel the first live fetch; navigate only if the page
+            // still has not appeared after its initial load window.
+            if expectedLandscape && !play.waitForExistence(timeout: 10) &&
+                discover.exists && discover.isHittable {
+                print("UI EVALUATOR: landing page absent; explicitly opening Discover in landscape")
                 discover.tap()
             }
             if UIDevice.current.userInterfaceIdiom == .pad && !expectedLandscape {
@@ -175,18 +182,38 @@ final class PlayerSmokeTests: XCTestCase {
                                "iPad portrait must enter the detail-first swipe feed; sidebar remains user-toggleable.")
             }
 
-            let play = app.buttons["game.play"].firstMatch
             let retry = app.buttons["Try again"].firstMatch
-            let feedDeadline = Date().addingTimeInterval(120)
+            let pendingRetry = app.buttons["feed.retryLoading"].firstMatch
+            let startedLoading = Date()
+            let feedDeadline = startedLoading.addingTimeInterval(120)
+            var pendingRetryUsed = false
             while !play.exists && Date() < feedDeadline {
-                if retry.waitForExistence(timeout: 5) {
-                    print("UI EVALUATOR: feed unavailable in \(profile.1); retrying live request")
+                if retry.waitForExistence(timeout: 4) {
+                    print("UI EVALUATOR: feed error in \(profile.1); retrying live backend")
                     retry.tap()
+                } else if !pendingRetryUsed &&
+                            Date().timeIntervalSince(startedLoading) > 40 &&
+                            pendingRetry.exists && pendingRetry.isHittable {
+                    // Trigger one explicit cancellation-and-retry if the
+                    // loading skeleton outlives a normal backend timeout.
+                    // This does not synthesize pages or hide a failed fetch.
+                    pendingRetryUsed = true
+                    print("UI EVALUATOR: stalled skeleton in \(profile.1); cancel and retry once")
+                    pendingRetry.tap()
                 }
-                _ = play.waitForExistence(timeout: 5)
+                _ = play.waitForExistence(timeout: 4)
+            }
+            if !play.exists {
+                let loading = pendingRetry.exists
+                let error = app.staticTexts["Couldn't load the feed"].firstMatch.exists
+                print("UI_EVALUATOR_FEED_FAILURE orientation=\(profile.1) loading=\(loading) error=\(error) retry_attempted=\(pendingRetryUsed)")
+                let failureScreenshot = XCTAttachment(screenshot: app.screenshot())
+                failureScreenshot.name = "feed-live-backend-unavailable-\(profile.1)"
+                failureScreenshot.lifetime = .keepAlways
+                add(failureScreenshot)
             }
             XCTAssertTrue(play.exists,
-                          "For You should expose a playable feed page in \(profile.1) after bounded retries. UI: \(app.debugDescription)")
+                          "For You should expose a LIVE playable feed page in \(profile.1) after bounded retries, not a skeleton or fixture. UI: \(app.debugDescription)")
 
             let swipeCue = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "label CONTAINS %@", "SWIPE TO EXPLORE"))
