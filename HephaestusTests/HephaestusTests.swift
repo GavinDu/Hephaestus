@@ -295,6 +295,52 @@ struct HephaestusTests {
 }
 
 
+@MainActor @Test func discoverFeedRetryCancelsPriorRequestAndProtectsNewerResults() async throws {
+    let coordinator = FeedRequestCoordinator()
+    let stale = coordinator.begin {
+        // A transport can finish despite cancellation (for example when a
+        // mocked server response has already been buffered). Simulate that
+        // by deliberately swallowing sleep cancellation before returning.
+        do { try await Task.sleep(for: .seconds(30)) } catch { }
+        return try JSONDecoder().decode(FeedResponse.self,
+                                        from: Data(#"{"games":[{"game_id":"stale","title":"Stale"}]}"#.utf8))
+    }
+    let current = coordinator.begin {
+        try JSONDecoder().decode(FeedResponse.self,
+                                 from: Data(#"{"games":[{"game_id":"fresh","title":"Fresh"}]}"#.utf8))
+    }
+    #expect(stale.request.isCancelled)
+    #expect(!coordinator.isCurrent(stale.generation))
+    #expect(coordinator.isCurrent(current.generation))
+
+    let staleResponse = try await stale.request.value
+    #expect(staleResponse.games.first?.id == "stale")
+    coordinator.finishIfCurrent(stale.generation)
+    #expect(coordinator.isCurrent(current.generation))
+    let freshResponse = try await current.request.value
+    #expect(freshResponse.games.first?.id == "fresh")
+    coordinator.finishIfCurrent(current.generation)
+    #expect(coordinator.isCurrent(current.generation))
+}
+
+@MainActor @Test func discoverFeedRetryCancelsCancellableTransport() async throws {
+    let coordinator = FeedRequestCoordinator()
+    let first = coordinator.begin {
+        try await Task.sleep(for: .seconds(30))
+        return try JSONDecoder().decode(FeedResponse.self, from: Data(#"{"games":[]}"#.utf8))
+    }
+    let second = coordinator.begin {
+        try JSONDecoder().decode(FeedResponse.self, from: Data(#"{"games":[]}"#.utf8))
+    }
+    #expect(first.request.isCancelled)
+    var wasCancelled = false
+    do { _ = try await first.request.value }
+    catch { wasCancelled = error is CancellationError }
+    #expect(wasCancelled)
+    _ = try await second.request.value
+    #expect(coordinator.isCurrent(second.generation))
+}
+
 @Test func feedPreviewAutoplayRespectsMotionPowerAndNetworkPolicies() {
     #expect(FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: false, constrainedNetwork: false))
     #expect(!FeedPreviewPolicy.shouldAutoplay(hasClip: false, reduceMotion: false, lowPowerMode: false, constrainedNetwork: false))

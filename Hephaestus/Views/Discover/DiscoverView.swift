@@ -14,6 +14,33 @@ private struct PlayerResultPresentation: Identifiable {
     var id: String { result.runID }
 }
 
+/// One owner for in-flight Discover requests. A retry cancels the previous
+/// transport, and only the newest generation may update visible game pages.
+/// An old request can still complete after cancellation, so both checks matter.
+@MainActor
+final class FeedRequestCoordinator {
+    private(set) var generation = 0
+    private var activeRequest: Task<FeedResponse, Error>?
+
+    func begin(_ fetch: @escaping @MainActor () async throws -> FeedResponse)
+        -> (generation: Int, request: Task<FeedResponse, Error>) {
+        generation += 1
+        activeRequest?.cancel()
+        let request = Task { try await fetch() }
+        activeRequest = request
+        return (generation, request)
+    }
+
+    func isCurrent(_ requestGeneration: Int) -> Bool {
+        requestGeneration == generation
+    }
+
+    func finishIfCurrent(_ requestGeneration: Int) {
+        guard isCurrent(requestGeneration) else { return }
+        activeRequest = nil
+    }
+}
+
 /// Backend-backed social feeds use the verified bearer session when present.
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
@@ -30,10 +57,7 @@ struct DiscoverView: View {
     @State private var mutedTopics = Set<String>()
     @State private var isFeedPreferencesPresented = false
     @State private var likedGameIDs = Set<String>()
-    @State private var loadGeneration = 0
-    // Unlike the load-generation counter, cancellation actually stops a
-    // hanging URLSession request when somebody explicitly retries.
-    @State private var activeFeedRequest: Task<FeedResponse, Error>?
+    @State private var feedRequestCoordinator = FeedRequestCoordinator()
     @State private var nextCursor: String?
     @State private var isLoadingMore = false
     @State private var loadMoreError: String?
@@ -395,18 +419,18 @@ struct DiscoverView: View {
     private func loadMore() async {
         guard let cursor = nextCursor, !isLoadingMore else { return }
         let requestedScope = selectedFeed
-        let requestedGeneration = loadGeneration
+        let requestedGeneration = feedRequestCoordinator.generation
         isLoadingMore = true
         loadMoreError = nil
         defer { isLoadingMore = false }
         do {
             let page = try await BackendAPI.shared.fetchFeed(scope: requestedScope, cursor: cursor)
-            guard requestedScope == selectedFeed, requestedGeneration == loadGeneration else { return }
+            guard requestedScope == selectedFeed, feedRequestCoordinator.isCurrent(requestedGeneration) else { return }
             var seen = Set(games.map(\.id))
             games.append(contentsOf: page.games.filter { seen.insert($0.id).inserted })
             nextCursor = page.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
         } catch {
-            if requestedGeneration == loadGeneration {
+            if feedRequestCoordinator.isCurrent(requestedGeneration) {
                 errorMessage = "Couldn't load more games: \(error.localizedDescription)"
             }
         }
@@ -493,20 +517,15 @@ struct DiscoverView: View {
     }
 
     private func load() async {
-        loadGeneration += 1
-        let generation = loadGeneration
-        // Cancel the previous transport, not just its result assignment.
-        // A late first request can otherwise waste network resources and
-        // keep the skeleton up while a deliberate Retry is in progress.
-        activeFeedRequest?.cancel()
         let requestedScope = selectedFeed
-        let request = Task { try await BackendAPI.shared.fetchFeed(scope: requestedScope) }
-        activeFeedRequest = request
+        let (generation, request) = feedRequestCoordinator.begin {
+            try await BackendAPI.shared.fetchFeed(scope: requestedScope)
+        }
         isLoading = true
         defer {
-            if generation == loadGeneration {
+            if feedRequestCoordinator.isCurrent(generation) {
                 isLoading = false
-                activeFeedRequest = nil
+                feedRequestCoordinator.finishIfCurrent(generation)
             }
         }
         errorMessage = nil
@@ -516,7 +535,7 @@ struct DiscoverView: View {
             } onCancel: {
                 request.cancel()
             }
-            guard generation == loadGeneration else { return }
+            guard feedRequestCoordinator.isCurrent(generation) else { return }
             games = loadedGames.games
             nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
             repairPagerSelection()
@@ -536,19 +555,19 @@ struct DiscoverView: View {
                 likedGameIDs = Set(loadedGames.games.filter { $0.viewerLiked == true }.map(\.id))
                 UserDefaults.standard.set(savedGameIDs.sorted(), forKey: "hephaestus.savedGames")
             } else {
-                if let ids = try? await BackendAPI.shared.fetchFollowingCreatorIDs(), generation == loadGeneration {
+                if let ids = try? await BackendAPI.shared.fetchFollowingCreatorIDs(), feedRequestCoordinator.isCurrent(generation) {
                     followedCreatorIDs = ids
                 }
-                if let ids = try? await BackendAPI.shared.fetchSavedGameIDs(), generation == loadGeneration {
+                if let ids = try? await BackendAPI.shared.fetchSavedGameIDs(), feedRequestCoordinator.isCurrent(generation) {
                     savedGameIDs = ids
                     UserDefaults.standard.set(ids.sorted(), forKey: "hephaestus.savedGames")
                 }
             }
-            if let preferences = try? await BackendAPI.shared.fetchFeedPreferences(), generation == loadGeneration {
+            if let preferences = try? await BackendAPI.shared.fetchFeedPreferences(), feedRequestCoordinator.isCurrent(generation) {
                 mutedTopics = Set(preferences.muted_topics.map { $0.lowercased() })
             }
         } catch {
-            if generation == loadGeneration { errorMessage = error.localizedDescription }
+            if feedRequestCoordinator.isCurrent(generation) { errorMessage = error.localizedDescription }
         }
     }
 }

@@ -194,12 +194,32 @@ final class PlayerSmokeTests: XCTestCase {
                 } else if !pendingRetryUsed &&
                             Date().timeIntervalSince(startedLoading) > 40 &&
                             pendingRetry.exists && pendingRetry.isHittable {
-                    // Trigger one explicit cancellation-and-retry if the
-                    // loading skeleton outlives a normal backend timeout.
-                    // This does not synthesize pages or hide a failed fetch.
-                    pendingRetryUsed = true
-                    print("UI EVALUATOR: stalled skeleton in \(profile.1); cancel and retry once")
-                    pendingRetry.tap()
+                    // A network response can swap the skeleton for a real
+                    // page between XCTest's isHittable query and tap(). In
+                    // that case XCTest's element tap retries an element with
+                    // an invalid {inf, inf} hit point and fails even though
+                    // the live feed is recovering. Use a bounded snapshot
+                    // coordinate instead: it remains valid if the button
+                    // disappears during the animation. Never count a tap or
+                    // synthetic page as a successful feed evaluation.
+                    let frame = pendingRetry.frame
+                    let bounds = app.frame
+                    let valid = frame.origin.x.isFinite && frame.origin.y.isFinite &&
+                        frame.width.isFinite && frame.height.isFinite &&
+                        frame.width >= 44 && frame.height >= 44 &&
+                        bounds.contains(CGPoint(x: frame.midX, y: frame.midY))
+                    if valid && !play.exists {
+                        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                        let point = origin.withOffset(CGVector(
+                            dx: frame.midX - bounds.minX,
+                            dy: frame.midY - bounds.minY
+                        ))
+                        pendingRetryUsed = true
+                        print("UI EVALUATOR: stalled skeleton in \(profile.1); tap stable retry coordinate")
+                        point.tap()
+                    } else {
+                        print("UI EVALUATOR: retry button moved/vanished during transition; rechecking live feed")
+                    }
                 }
                 _ = play.waitForExistence(timeout: 4)
             }
