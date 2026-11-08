@@ -621,6 +621,24 @@ private struct ForYouGamePage: View {
         return game.creatorDisplayName?.isEmpty == false ? game.creatorDisplayName! : creator
     }
 
+    // A missing or stale version-bound poster is not a recorded preview.
+    // Keep the card playable and say so, without inventing visual evidence.
+    private var unavailablePreview: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "gamecontroller.fill")
+                .font(.system(size: 60, weight: .medium))
+            Text("Preview unavailable")
+                .font(.subheadline.weight(.semibold))
+            Text("Tap Play now to explore")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .foregroundStyle(.white.opacity(0.94))
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityHidden(true)
+    }
+
     private var mediaLayer: some View {
         ZStack {
             LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -628,16 +646,19 @@ private struct ForYouGamePage: View {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFit()
+                    } else if phase.error == nil {
+                        ProgressView("Loading preview")
+                            .tint(.white)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
+                        unavailablePreview
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
             } else {
-                Image(systemName: "gamecontroller.fill")
-                    .font(.system(size: 68, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
+                unavailablePreview
             }
             if previewPlayback.activeGameID == game.id && !reduceMotion {
                 FeedPreviewSurface(player: previewPlayback.player)
@@ -656,7 +677,7 @@ private struct ForYouGamePage: View {
         }
         .clipped()
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Preview of \(game.title)")
+        .accessibilityLabel(ForYouPageLayout.mediaAccessibilityLabel(title: game.title))
         .accessibilityAddTraits(.isImage)
         .accessibilitySortPriority(100)
         // Preview media is decorative; it must not intercept vertical pager swipes.

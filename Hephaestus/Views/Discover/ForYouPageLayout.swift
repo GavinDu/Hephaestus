@@ -12,6 +12,10 @@ enum ForYouPageLayout {
         return min(containerWidth, min(containerHeight * 9 / 16, 560))
     }
 
+    static func mediaAccessibilityLabel(title: String) -> String {
+        "Game artwork or preview for \(title). Use Play now to start."
+    }
+
     static func contentMaxWidth(isRegular: Bool) -> CGFloat {
         isRegular ? 760 : .infinity
     }
