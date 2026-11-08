@@ -31,6 +31,9 @@ struct DiscoverView: View {
     @State private var isFeedPreferencesPresented = false
     @State private var likedGameIDs = Set<String>()
     @State private var loadGeneration = 0
+    // Unlike the load-generation counter, cancellation actually stops a
+    // hanging URLSession request when somebody explicitly retries.
+    @State private var activeFeedRequest: Task<FeedResponse, Error>?
     @State private var nextCursor: String?
     @State private var isLoadingMore = false
     @State private var loadMoreError: String?
@@ -116,6 +119,17 @@ struct DiscoverView: View {
                             }
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel("Loading games")
+                            // A slow or suspended network request must not trap the
+                            // player behind an unclickable skeleton. This retries
+                            // with a NEW request, cancelling the previous one.
+                            Button {
+                                Task { await load() }
+                            } label: {
+                                Label("Retry loading", systemImage: "arrow.clockwise")
+                                    .frame(minHeight: 44)
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("feed.retryLoading")
 
                             LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: HephaestusDesign.sectionSpacing) {
                                 ForEach(0..<(horizontalSizeClass == .regular ? 4 : 2), id: \.self) { _ in
@@ -481,11 +495,27 @@ struct DiscoverView: View {
     private func load() async {
         loadGeneration += 1
         let generation = loadGeneration
+        // Cancel the previous transport, not just its result assignment.
+        // A late first request can otherwise waste network resources and
+        // keep the skeleton up while a deliberate Retry is in progress.
+        activeFeedRequest?.cancel()
+        let requestedScope = selectedFeed
+        let request = Task { try await BackendAPI.shared.fetchFeed(scope: requestedScope) }
+        activeFeedRequest = request
         isLoading = true
-        defer { if generation == loadGeneration { isLoading = false } }
+        defer {
+            if generation == loadGeneration {
+                isLoading = false
+                activeFeedRequest = nil
+            }
+        }
         errorMessage = nil
         do {
-            let loadedGames = try await BackendAPI.shared.fetchFeed(scope: selectedFeed)
+            let loadedGames = try await withTaskCancellationHandler {
+                try await request.value
+            } onCancel: {
+                request.cancel()
+            }
             guard generation == loadGeneration else { return }
             games = loadedGames.games
             nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
