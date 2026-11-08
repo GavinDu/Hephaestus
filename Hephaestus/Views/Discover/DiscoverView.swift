@@ -929,7 +929,21 @@ private struct ForYouGamePage: View {
             let isLandscape = proxy.size.width > proxy.size.height
             let pageWidth = ForYouPageLayout.stageWidth(containerWidth: proxy.size.width, containerHeight: proxy.size.height, isRegular: isRegular, isLandscape: isLandscape)
             ZStack {
-                Color(uiColor: .systemBackground).ignoresSafeArea()
+                // The centered portrait stage is intentional on iPad, but
+                // an empty white surround looks like a broken phone layout.
+                // A low-contrast palette-tinted theater backdrop makes
+                // portrait and landscape pages feel immersive without
+                // inventing a poster or implying recorded gameplay exists.
+                LinearGradient(
+                    colors: [
+                        Color(uiColor: .systemBackground),
+                        palette[0].opacity(0.28),
+                        palette[1].opacity(0.22)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
                     ZStack(alignment: .bottom) {

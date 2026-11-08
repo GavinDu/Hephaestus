@@ -6,10 +6,13 @@ import SwiftUI
 enum ForYouPageLayout {
     static func stageWidth(containerWidth: CGFloat, containerHeight: CGFloat, isRegular: Bool, isLandscape: Bool = false) -> CGFloat {
         guard isRegular else { return containerWidth }
-        // iPad portrait keeps a focused 9:16 viewer; landscape uses the
-        // available canvas so the feed feels intentional in either posture.
+        // iPad landscape uses the available canvas. In portrait, a strict
+        // phone-sized 9:16 stage left more than 40% of an iPad's usable
+        // viewport empty in screenshot review. Widen the stage modestly,
+        // but cap it so the video/game poster remains a focal element rather
+        // than becoming an edge-to-edge stretched landscape canvas.
         if isLandscape { return min(containerWidth, 1_120) }
-        return min(containerWidth, min(containerHeight * 9 / 16, 560))
+        return min(containerWidth * 0.78, min(containerHeight * 0.60, 680))
     }
 
     static func mediaAccessibilityLabel(title: String) -> String {

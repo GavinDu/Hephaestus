@@ -410,8 +410,12 @@ struct HephaestusTests {
 
 @Test func forYouPageLayoutUsesPortraitStageOnRegularWidth() {
     #expect(ForYouPageLayout.stageWidth(containerWidth: 390, containerHeight: 844, isRegular: false) == 390)
-    #expect(ForYouPageLayout.stageWidth(containerWidth: 1024, containerHeight: 768, isRegular: true) == 432)
-    #expect(ForYouPageLayout.stageWidth(containerWidth: 768, containerHeight: 1024, isRegular: true) == 560)
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 1024, containerHeight: 768, isRegular: true) > 430)
+    // iPad portrait should no longer be a narrow phone-sized strip:
+    // screenshots showed a center card with mostly empty side gutters.
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 768, containerHeight: 1024, isRegular: true) > 590)
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 1024, containerHeight: 1366, isRegular: true) == 680)
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 1366, containerHeight: 1024, isRegular: true) <= 680)
     #expect(ForYouPageLayout.stageWidth(containerWidth: 1024, containerHeight: 768, isRegular: true, isLandscape: true) == 1024)
     #expect(ForYouPageLayout.stageWidth(containerWidth: 1366, containerHeight: 1024, isRegular: true, isLandscape: true) == 1120)
     #expect(ForYouPageLayout.mediaAccessibilityLabel(title: "Rainbow") ==
