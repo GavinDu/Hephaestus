@@ -70,6 +70,14 @@ enum FeedPreviewPolicy {
         hasClip && isOnline && !reduceMotion && !lowPowerMode && !constrainedNetwork
     }
 
+    /// When a different game becomes the settled page, the previous clip or
+    /// delayed autoplay must retire even if the new page has no preview.
+    /// A reused card with the same ID must not reset its own playback.
+    static func shouldRetirePrevious(activeGameID: String?, pendingGameID: String?, nextGameID: String) -> Bool {
+        (activeGameID != nil && activeGameID != nextGameID) ||
+            (pendingGameID != nil && pendingGameID != nextGameID)
+    }
+
     static func shouldStopOnFailure(_ status: AVPlayerItem.Status) -> Bool {
         status == .failed
     }
@@ -119,6 +127,19 @@ final class FeedPreviewPlayback: ObservableObject {
     deinit {
         networkMonitor.cancel()
         pendingTask?.cancel()
+    }
+
+    /// Only the settled For You page owns the current preview. Retire a
+    /// previous page's active or pending playback BEFORE evaluating the next
+    /// clip URL/power policy, otherwise moving to a poster-only page leaves
+    /// the previous game's clip running invisibly.
+    func scheduleSettled(gameID: String, urlString: String?, reduceMotion: Bool) {
+        if FeedPreviewPolicy.shouldRetirePrevious(
+            activeGameID: activeGameID, pendingGameID: pendingGameID, nextGameID: gameID
+        ) {
+            stop()
+        }
+        schedule(gameID: gameID, urlString: urlString, reduceMotion: reduceMotion)
     }
 
     func schedule(gameID: String, urlString: String?, reduceMotion: Bool) {
