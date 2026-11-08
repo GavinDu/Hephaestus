@@ -305,6 +305,15 @@ struct HephaestusTests {
     #expect(FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: false, constrainedNetwork: false, isOnline: true))
 }
 
+@Test func settledFeedPreviewRetiresOldClipEvenWhenNextPageHasNoVideo() {
+    #expect(FeedPreviewPolicy.shouldRetirePrevious(activeGameID: "game-a", pendingGameID: nil, nextGameID: "game-b"))
+    #expect(FeedPreviewPolicy.shouldRetirePrevious(activeGameID: nil, pendingGameID: "game-a", nextGameID: "game-b"))
+    #expect(FeedPreviewPolicy.shouldRetirePrevious(activeGameID: "game-a", pendingGameID: "game-a", nextGameID: "game-b"))
+    #expect(!FeedPreviewPolicy.shouldRetirePrevious(activeGameID: "game-b", pendingGameID: nil, nextGameID: "game-b"))
+    #expect(!FeedPreviewPolicy.shouldRetirePrevious(activeGameID: nil, pendingGameID: "game-b", nextGameID: "game-b"))
+    #expect(!FeedPreviewPolicy.shouldRetirePrevious(activeGameID: nil, pendingGameID: nil, nextGameID: "game-b"))
+}
+
 @Test func verifiedRunResultDecodesOutcomeAndRank() throws {
     let json = """
     {
