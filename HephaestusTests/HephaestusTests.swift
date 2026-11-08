@@ -303,11 +303,11 @@ struct HephaestusTests {
         // by deliberately swallowing sleep cancellation before returning.
         do { try await Task.sleep(for: .seconds(30)) } catch { }
         return try JSONDecoder().decode(FeedResponse.self,
-                                        from: Data(#"{\"games\":[{\"game_id\":\"stale\",\"title\":\"Stale\"}]}"#.utf8))
+                                        from: Data(#"{"games":[{"game_id":"stale","title":"Stale"}]}"#.utf8))
     }
     let current = coordinator.begin {
         try JSONDecoder().decode(FeedResponse.self,
-                                 from: Data(#"{\"games\":[{\"game_id\":\"fresh\",\"title\":\"Fresh\"}]}"#.utf8))
+                                 from: Data(#"{"games":[{"game_id":"fresh","title":"Fresh"}]}"#.utf8))
     }
     #expect(stale.request.isCancelled)
     #expect(!coordinator.isCurrent(stale.generation))
@@ -327,10 +327,10 @@ struct HephaestusTests {
     let coordinator = FeedRequestCoordinator()
     let first = coordinator.begin {
         try await Task.sleep(for: .seconds(30))
-        return try JSONDecoder().decode(FeedResponse.self, from: Data(#"{\"games\":[]}"#.utf8))
+        return try JSONDecoder().decode(FeedResponse.self, from: Data(#"{"games":[]}"#.utf8))
     }
     let second = coordinator.begin {
-        try JSONDecoder().decode(FeedResponse.self, from: Data(#"{\"games\":[]}"#.utf8))
+        try JSONDecoder().decode(FeedResponse.self, from: Data(#"{"games":[]}"#.utf8))
     }
     #expect(first.request.isCancelled)
     var wasCancelled = false
