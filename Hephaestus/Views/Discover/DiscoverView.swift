@@ -979,7 +979,7 @@ private struct ForYouGamePage: View {
         }
         .onAppear {
             if isSettled && !reduceMotion && scenePhase == .active {
-                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
+                FeedPreviewPlayback.shared.scheduleSettled(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
             }
         }
         .onDisappear { FeedPreviewPlayback.shared.stop(gameID: game.id) }
@@ -998,19 +998,19 @@ private struct ForYouGamePage: View {
             if shouldReduceMotion || !isSettled {
                 FeedPreviewPlayback.shared.stop(gameID: game.id)
             } else {
-                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: shouldReduceMotion)
+                FeedPreviewPlayback.shared.scheduleSettled(gameID: game.id, urlString: game.previewClipURL, reduceMotion: shouldReduceMotion)
             }
         }
         .onChange(of: isSettled) { _, shouldPlay in
             if shouldPlay && !reduceMotion && scenePhase == .active {
-                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
+                FeedPreviewPlayback.shared.scheduleSettled(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
             } else {
                 FeedPreviewPlayback.shared.stop(gameID: game.id)
             }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && isSettled && !reduceMotion {
-                FeedPreviewPlayback.shared.schedule(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
+                FeedPreviewPlayback.shared.scheduleSettled(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)
             } else if phase != .active {
                 FeedPreviewPlayback.shared.stop(gameID: game.id)
             }
