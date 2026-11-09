@@ -44,6 +44,23 @@ enum ForYouPageLayout {
         hasCursor && !isLoading && !isLoadingMore && !hasPaginationError
     }
 
+    // Both a successful cursor response and its error must belong to the
+    // currently selected scope AND request generation. Matching only the
+    // generation can briefly expose a stale tab's pagination error.
+    static func shouldApplyPaginationResult(
+        requestedScope: SocialFeedScope, currentScope: SocialFeedScope,
+        requestedGeneration: Int, currentGeneration: Int) -> Bool {
+        requestedScope == currentScope && requestedGeneration == currentGeneration
+    }
+
+    // Play Next stays within its originating feed; an existing game should
+    // not be replaced by an unrelated For You fetch after finishing a round.
+    // Clear any search filter so the target card can become the settled page.
+    static func contextAfterPlayingNext(currentScope: SocialFeedScope, nextGameID: String)
+        -> (scope: SocialFeedScope, searchText: String, selectedGameID: String) {
+        (currentScope, "", nextGameID)
+    }
+
     static func mediaAccessibilityLabel(title: String) -> String {
         "Game artwork or preview for \(title). Use Play now to start."
     }

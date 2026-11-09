@@ -440,11 +440,14 @@ struct DiscoverView: View {
         }
         let nextGame = visibleGames[index + 1]
         resultPresentation = nil
-        if selectedFeed != .forYou || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            selectedFeed = .forYou
-            searchText = ""
-        }
-        settledForYouGameID = nextGame.id
+        // Each social scope now has its own immersive pager. Play Next must
+        // keep the same feed (including private Following/Friends results),
+        // rather than switching to For You and selecting a game from another scope.
+        let destination = ForYouPageLayout.contextAfterPlayingNext(
+            currentScope: selectedFeed, nextGameID: nextGame.id)
+        selectedFeed = destination.scope
+        searchText = destination.searchText
+        settledForYouGameID = destination.selectedGameID
     }
 
     private func loadMore() async {
@@ -456,12 +459,20 @@ struct DiscoverView: View {
         defer { isLoadingMore = false }
         do {
             let page = try await BackendAPI.shared.fetchFeed(scope: requestedScope, cursor: cursor)
-            guard requestedScope == selectedFeed, feedRequestCoordinator.isCurrent(requestedGeneration) else { return }
+            guard ForYouPageLayout.shouldApplyPaginationResult(
+                requestedScope: requestedScope, currentScope: selectedFeed,
+                requestedGeneration: requestedGeneration,
+                currentGeneration: feedRequestCoordinator.generation) else { return }
             var seen = Set(games.map(\.id))
             games.append(contentsOf: page.games.filter { seen.insert($0.id).inserted })
             nextCursor = page.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
         } catch {
-            if feedRequestCoordinator.isCurrent(requestedGeneration) {
+            // An old Following/Friends page may fail after switching tabs.
+            // Never show its private-scope error in a different feed.
+            if ForYouPageLayout.shouldApplyPaginationResult(
+                requestedScope: requestedScope, currentScope: selectedFeed,
+                requestedGeneration: requestedGeneration,
+                currentGeneration: feedRequestCoordinator.generation) {
                 loadMoreError = "Couldn't load more games: \(error.localizedDescription)"
             }
         }

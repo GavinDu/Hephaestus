@@ -484,6 +484,32 @@ struct HephaestusTests {
     #expect(ForYouPageLayout.shouldShowImmersivePager(searchText: "", hasGames: true))
 }
 
+@Test func stalePaginationErrorsNeverLeakAcrossSocialFeedScopes() {
+    for scope in SocialFeedScope.allCases {
+        #expect(ForYouPageLayout.shouldApplyPaginationResult(
+            requestedScope: scope, currentScope: scope,
+            requestedGeneration: 4, currentGeneration: 4))
+        #expect(!ForYouPageLayout.shouldApplyPaginationResult(
+            requestedScope: scope, currentScope: scope,
+            requestedGeneration: 3, currentGeneration: 4))
+        for otherScope in SocialFeedScope.allCases where otherScope != scope {
+            #expect(!ForYouPageLayout.shouldApplyPaginationResult(
+                requestedScope: scope, currentScope: otherScope,
+                requestedGeneration: 4, currentGeneration: 4))
+        }
+    }
+}
+
+@Test func playNextRetainsOriginatingSocialScopeInsteadOfOpeningForYou() {
+    for scope in SocialFeedScope.allCases {
+        let destination = ForYouPageLayout.contextAfterPlayingNext(
+            currentScope: scope, nextGameID: "game-next")
+        #expect(destination.scope == scope, "Play Next changed the originating \(scope.rawValue) feed")
+        #expect(destination.searchText.isEmpty, "Play Next must reveal the target card")
+        #expect(destination.selectedGameID == "game-next")
+    }
+}
+
 @Test func forYouPagerSelectionReconcilesRefreshAndPaginationChanges() {
     #expect(ForYouPageLayout.reconciledSelection(currentID: "game-2", availableIDs: ["game-1", "game-2"]) == "game-2")
     #expect(ForYouPageLayout.reconciledSelection(currentID: "removed-game", availableIDs: ["game-3", "game-4"]) == "game-3")
