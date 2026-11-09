@@ -346,7 +346,12 @@ final class PlayerSmokeTests: XCTestCase {
             let pagerFrame = pager.frame
             let visiblePages = pages.allElementsBoundByIndex.filter {
                 let frame = $0.frame
-                return frame.width > 0 && frame.height > 0 && frame.intersects(pagerFrame)
+                // SwiftUI may report the layout frame for the next card
+                // even though the ScrollView visually clips it. Combine
+                // viewport intersection with native on-screen hit testing,
+                // rather than accepting the offscreen accessibility node.
+                return frame.width > 0 && frame.height > 0 &&
+                    frame.intersects(pagerFrame) && $0.isHittable
             }
             let beforePage = visiblePages.first
             XCTAssertNotNil(beforePage, "The current \(profile.1) feed title should intersect the pager viewport.")
@@ -377,7 +382,8 @@ final class PlayerSmokeTests: XCTestCase {
             if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
                 let settledTitles = pages.allElementsBoundByIndex.filter {
                     let frame = $0.frame
-                    return frame.width > 0 && frame.height > 0 && frame.intersects(pager.frame)
+                    return frame.width > 0 && frame.height > 0 &&
+                        frame.intersects(pager.frame) && $0.isHittable
                 }
                 XCTAssertEqual(settledTitles.count, 1,
                     "Exactly one game title must intersect the compact landscape pager after swipe.")
