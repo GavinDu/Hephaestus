@@ -13,6 +13,7 @@ import argparse
 import json
 import shutil
 import struct
+import zlib
 from pathlib import Path
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -67,6 +68,9 @@ def read_png_metadata(path):
         if end > len(data):
             raise ValueError(f"{path.name}: truncated PNG chunk")
         payload = data[pos + 8:pos + 8 + size]
+        expected_crc = struct.unpack_from(">I", data, end - 4)[0]
+        if (zlib.crc32(kind + payload) & 0xffffffff) != expected_crc:
+            raise ValueError(f"{path.name}: invalid PNG chunk CRC")
         if kind == b"IHDR":
             if size != 13:
                 raise ValueError(f"{path.name}: invalid IHDR")
