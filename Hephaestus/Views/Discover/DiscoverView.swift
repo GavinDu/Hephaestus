@@ -1171,12 +1171,13 @@ private struct ForYouPagerView: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 35)
                     .onEnded { value in
-                        let vertical = value.translation.height
-                        let horizontal = value.translation.width
-                        guard abs(vertical) >= 80,
-                              abs(vertical) > abs(horizontal) * 1.2,
-                              !games.isEmpty else { return }
-                        movePage(by: vertical < 0 ? 1 : -1, using: scrollProxy)
+                        guard !games.isEmpty else { return }
+                        let offset = ForYouPageLayout.pageOffsetForSwipe(
+                            translation: value.translation,
+                            predictedEndTranslation: value.predictedEndTranslation
+                        )
+                        guard offset != 0 else { return }
+                        movePage(by: offset, using: scrollProxy)
                     }
             )
         }

@@ -15,6 +15,22 @@ enum ForYouPageLayout {
         return min(containerWidth * 0.78, min(containerHeight * 0.60, 680))
     }
 
+    /// Page swipes must respond to quick, deliberate vertical flicks, not only
+    /// slow 80-point drags. Require a real 35-point drag first so a tap on
+    /// Play / Like cannot advance the feed. Predicted momentum counts only
+    /// when it continues vertically in the same direction.
+    static func pageOffsetForSwipe(translation: CGSize, predictedEndTranslation: CGSize) -> Int {
+        let vertical = translation.height
+        let horizontal = translation.width
+        guard abs(vertical) >= 35, abs(vertical) > abs(horizontal) * 1.2 else { return 0 }
+        let predicted = predictedEndTranslation.height
+        let predictedIsVertical = abs(predicted) > abs(predictedEndTranslation.width) * 1.2
+        let projectedTravel = predictedIsVertical && predicted * vertical > 0
+            ? max(abs(vertical), abs(predicted)) : abs(vertical)
+        guard projectedTravel >= 80 else { return 0 }
+        return vertical < 0 ? 1 : -1
+    }
+
     static func mediaAccessibilityLabel(title: String) -> String {
         "Game artwork or preview for \(title). Use Play now to start."
     }

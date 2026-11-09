@@ -425,6 +425,38 @@ struct HephaestusTests {
     #expect(ForYouPageLayout.contentMaxWidth(isRegular: false).isInfinite)
 }
 
+@Test func forYouPagerShortFlickUsesVerticalMomentumWithoutStealingTaps() {
+    // Short deliberate flicks must work even when the finger travels
+    // less than the old fixed 80pt threshold.
+    #expect(ForYouPageLayout.pageOffsetForSwipe(
+        translation: CGSize(width: 3, height: -45),
+        predictedEndTranslation: CGSize(width: 5, height: -160)) == 1)
+    #expect(ForYouPageLayout.pageOffsetForSwipe(
+        translation: CGSize(width: -3, height: 42),
+        predictedEndTranslation: CGSize(width: -10, height: 130)) == -1)
+    // Slow deliberate drag still pages once.
+    #expect(ForYouPageLayout.pageOffsetForSwipe(
+        translation: CGSize(width: 2, height: -91),
+        predictedEndTranslation: CGSize(width: 2, height: -94)) == 1)
+    // Tap/short tug, diagonal and horizontal gestures cannot page.
+    #expect(ForYouPageLayout.pageOffsetForSwipe(
+        translation: CGSize(width: 1, height: -20),
+        predictedEndTranslation: CGSize(width: 1, height: -220)) == 0)
+    #expect(ForYouPageLayout.pageOffsetForSwipe(
+        translation: CGSize(width: 88, height: -55),
+        predictedEndTranslation: CGSize(width: 190, height: -150)) == 0)
+    #expect(ForYouPageLayout.pageOffsetForSwipe(
+        translation: CGSize(width: 45, height: -49),
+        predictedEndTranslation: CGSize(width: 72, height: -140)) == 0)
+    // A reversed or sideways prediction does not turn a tiny tug into a page.
+    #expect(ForYouPageLayout.pageOffsetForSwipe(
+        translation: CGSize(width: 2, height: -43),
+        predictedEndTranslation: CGSize(width: 1, height: 180)) == 0)
+    #expect(ForYouPageLayout.pageOffsetForSwipe(
+        translation: CGSize(width: 2, height: -43),
+        predictedEndTranslation: CGSize(width: 180, height: -180)) == 0)
+}
+
 @Test func forYouPagerSelectionReconcilesRefreshAndPaginationChanges() {
     #expect(ForYouPageLayout.reconciledSelection(currentID: "game-2", availableIDs: ["game-1", "game-2"]) == "game-2")
     #expect(ForYouPageLayout.reconciledSelection(currentID: "removed-game", availableIDs: ["game-3", "game-4"]) == "game-3")
