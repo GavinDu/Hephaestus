@@ -6,13 +6,13 @@ import SwiftUI
 enum ForYouPageLayout {
     static func stageWidth(containerWidth: CGFloat, containerHeight: CGFloat, isRegular: Bool, isLandscape: Bool = false) -> CGFloat {
         guard isRegular else { return containerWidth }
-        // iPad landscape uses the available canvas. In portrait, a strict
-        // phone-sized 9:16 stage left more than 40% of an iPad's usable
-        // viewport empty in screenshot review. Widen the stage modestly,
-        // but cap it so the video/game poster remains a focal element rather
-        // than becoming an edge-to-edge stretched landscape canvas.
+        // iPad landscape uses the available canvas. Portrait simulator
+        // screenshots showed a 680pt stage surrounded by unused space even
+        // when the feed had room for gameplay artwork and touch controls.
+        // Use most of the tablet width while preserving a portrait-focused
+        // theater stage; never stretch the game's actual preview pixels.
         if isLandscape { return min(containerWidth, 1_120) }
-        return min(containerWidth * 0.78, min(containerHeight * 0.60, 680))
+        return min(containerWidth * 0.86, min(containerHeight * 0.64, 820))
     }
 
     /// Page swipes must respond to quick, deliberate vertical flicks, not only
