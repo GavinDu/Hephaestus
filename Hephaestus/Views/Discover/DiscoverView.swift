@@ -710,16 +710,11 @@ private struct ForYouGamePage: View {
             [Color(red: 0.16, green: 0.33, blue: 0.68), Color(red: 0.39, green: 0.63, blue: 0.92)],
             [Color(red: 0.49, green: 0.24, blue: 0.59), Color(red: 0.82, green: 0.40, blue: 0.63)]
         ]
-        // Summing scalar values collided for Ribbon and Bobo; real
-        // iPad before/after screenshots differed only in tiny title text
-        // even though the feed selected a different game. Mix character
-        // *order* with a stable bounded hash. This is decorative fallback
-        // color only, never presented as a gameplay poster or recorded clip.
-        // Keeping the accumulator modulo the palette count avoids overflow.
-        let index = game.id.utf8.reduce(0) { hash, byte in
-            (hash * 31 + Int(byte)) % palettes.count
-        }
-        return palettes[index]
+        // The palette is decorative fallback only, never a fabricated
+        // preview. Use a stable, collision-tested ID hash shared with unit
+        // tests so real swipes produce distinguishable page screenshots.
+        return palettes[ForYouPageLayout.fallbackPaletteIndex(
+            gameID: game.id, paletteCount: palettes.count)]
     }
 
     private var creatorName: String {
