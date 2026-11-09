@@ -378,6 +378,22 @@ final class PlayerSmokeTests: XCTestCase {
                           "\(name) should remain reachable at accessibility text size.")
         }
 
+        // The previous screenshot had a Play button that remained tappable
+        // while oversized decorative hints, title, and the bottom tab bar
+        // visually collided. Gate actual element geometry, not only existence.
+        let visibleTitles = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title."))
+        if let title = visibleTitles.allElementsBoundByIndex.first(where: { $0.isHittable }) {
+            XCTAssertLessThanOrEqual(title.frame.maxY, play.frame.minY + 1,
+                                     "Large type title must not cover the Play CTA.")
+        }
+        let tabBar = app.tabBars.firstMatch
+        if tabBar.exists {
+            XCTAssertLessThanOrEqual(play.frame.maxY, tabBar.frame.minY + 1,
+                                     "Large type Play CTA must remain above bottom navigation.")
+        }
+        print("UI_EVALUATOR_ACCESSIBILITY_GEOMETRY play=\(play.frame) tabs=\(tabBar.exists ? String(describing: tabBar.frame) : "none")")
+
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "feed-accessibility-dynamic-type-xxxl"
         shot.lifetime = .keepAlways
