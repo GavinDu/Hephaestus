@@ -298,6 +298,7 @@ struct DiscoverView: View {
                             }
                         } label: {
                             Image(systemName: "rectangle.stack")
+                                .frame(minWidth: 44, minHeight: 44)
                         }
                         .accessibilityIdentifier("feed.scope.menu")
                         .accessibilityLabel("Social feed: \(selectedFeed.title). Change feed")
