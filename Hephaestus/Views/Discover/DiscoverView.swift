@@ -784,12 +784,26 @@ private struct ForYouGamePage: View {
         .allowsHitTesting(false)
     }
 
-    private func iconAction(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+    // Short, truthful captions help first-time viewers recognize the actions,
+    // like the familiar vertical rails in short-video feeds. Never invent
+    // engagement counts when the backend has not provided verified totals.
+    private func iconAction(_ symbol: String, label: String, caption: String? = nil,
+                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .semibold))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            VStack(spacing: 1) {
+                Image(systemName: symbol)
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                if let caption {
+                    Text(caption)
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .foregroundStyle(.white.opacity(0.94))
+                }
+            }
+            .frame(minWidth: 48, minHeight: caption == nil ? 44 : 58)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
@@ -807,45 +821,65 @@ private struct ForYouGamePage: View {
         }
     }
 
-    @ViewBuilder private var socialActionButtons: some View {
-                iconAction(isSaved ? "bookmark.fill" : "bookmark", label: isSaved ? "Remove from library" : "Save game", action: onToggleSaved)
-                iconAction(isLiked ? "heart.fill" : "heart", label: isLiked ? "Unlike game" : "Like game", action: onToggleLike)
-                iconAction("bubble.right", label: "View comments", action: onOpenComments)
-                Menu {
-                    Button("Report game", role: .destructive, action: onReport)
-                    Button("Not interested", action: onNotInterested)
-                    if game.ownerID != nil {
-                        Button("Block creator", role: .destructive, action: onBlockCreator)
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+    @ViewBuilder private func socialActionButtons(vertical: Bool) -> some View {
+        iconAction(isSaved ? "bookmark.fill" : "bookmark",
+                   label: isSaved ? "Remove from library" : "Save game",
+                   caption: vertical ? "Save" : nil, action: onToggleSaved)
+        iconAction(isLiked ? "heart.fill" : "heart",
+                   label: isLiked ? "Unlike game" : "Like game",
+                   caption: vertical ? "Like" : nil, action: onToggleLike)
+        iconAction("bubble.right", label: "View comments",
+                   caption: vertical ? "Comment" : nil, action: onOpenComments)
+        Menu {
+            Button("Report game", role: .destructive, action: onReport)
+            Button("Not interested", action: onNotInterested)
+            if game.ownerID != nil {
+                Button("Block creator", role: .destructive, action: onBlockCreator)
+            }
+        } label: {
+            VStack(spacing: 1) {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                if vertical {
+                    Text("More")
+                        .font(.system(size: 10, weight: .semibold))
                 }
-                .foregroundStyle(.white)
-                .accessibilityLabel("More game actions")
-                .accessibilitySortPriority(70)
-                ShareLink(item: shareURL) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 44)
+            }
+            .frame(minWidth: 48, minHeight: vertical ? 58 : 44)
+            .contentShape(Rectangle())
+        }
+        .foregroundStyle(.white)
+        .accessibilityLabel("More game actions")
+        .accessibilitySortPriority(70)
+        ShareLink(item: shareURL) {
+            VStack(spacing: 1) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                if vertical {
+                    Text("Share")
+                        .font(.system(size: 10, weight: .semibold))
                 }
-                .simultaneousGesture(TapGesture().onEnded {
-                    Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
-                })
-                .foregroundStyle(.white)
-                .accessibilityLabel("Share \(game.title)")
+            }
+            .frame(minWidth: 48, minHeight: vertical ? 58 : 44)
+            .contentShape(Rectangle())
+        }
+        .simultaneousGesture(TapGesture().onEnded {
+            Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
+        })
+        .foregroundStyle(.white)
+        .accessibilityLabel("Share \(game.title)")
     }
 
     @ViewBuilder private func socialActions(vertical: Bool) -> some View {
         if vertical {
-            VStack(spacing: 8) { socialActionButtons }
+            VStack(spacing: 5) { socialActionButtons(vertical: true) }
                 .padding(4)
                 .background(.black.opacity(0.3), in: Capsule())
                 .accessibilityIdentifier("feed.actionRail")
         } else {
-            HStack(spacing: 8) { socialActionButtons }
+            HStack(spacing: 8) { socialActionButtons(vertical: false) }
         }
     }
 
