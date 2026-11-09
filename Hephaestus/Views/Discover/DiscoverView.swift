@@ -85,9 +85,9 @@ struct DiscoverView: View {
         return [GridItem(.flexible())]
     }
 
-    private var showsForYouPager: Bool {
-        selectedFeed == .forYou && searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !isLoading && errorMessage == nil && !visibleGames.isEmpty
+    private var showsImmersivePager: Bool {
+        ForYouPageLayout.shouldShowImmersivePager(
+            searchText: searchText, hasGames: !visibleGames.isEmpty)
     }
 
     /// Feed stack, extracted from `body` so the body expression
@@ -106,16 +106,40 @@ struct DiscoverView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 8)
                 .onChange(of: selectedFeed) { _, _ in
-                    // Retire the settled page's clip and any pending delayed
-                    // autoplay before the grid replaces the full-screen feed.
+                    // Do not display the prior scope's games (potentially
+                    // private Following/Friends cards) under a new tab while
+                    // the next authenticated request is still in flight.
                     FeedPreviewPlayback.shared.stop()
                     settledForYouGameID = nil
+                    games = []
+                    nextCursor = nil
+                    loadMoreError = nil
+                    errorMessage = nil
                     Task { await load() }
                 }
 
-                if showsForYouPager {
+                if showsImmersivePager {
                     forYouPager
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .top) {
+                        if let loadMoreError {
+                            HStack(spacing: 10) {
+                                Image(systemName: "wifi.exclamationmark")
+                                Text(loadMoreError)
+                                    .font(.caption)
+                                    .lineLimit(2)
+                                Button("Retry") {
+                                    Task { await loadMore() }
+                                }
+                                .font(.subheadline.weight(.semibold))
+                            }
+                            .padding(12)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                            .accessibilityIdentifier("feed.pagination.retry")
+                        }
+                    }
                 } else {
                     ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
@@ -305,7 +329,10 @@ struct DiscoverView: View {
                             Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") }
                         },
                         onNearEnd: {
-                            if nextCursor != nil && !isLoadingMore && !isLoading {
+                            if ForYouPageLayout.shouldAutoLoadNextPage(
+                                hasCursor: nextCursor != nil, isLoading: isLoading,
+                                isLoadingMore: isLoadingMore, hasPaginationError: loadMoreError != nil
+                            ) {
                                 Task { await loadMore() }
                             }
                         }
@@ -435,7 +462,7 @@ struct DiscoverView: View {
             nextCursor = page.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
         } catch {
             if feedRequestCoordinator.isCurrent(requestedGeneration) {
-                errorMessage = "Couldn't load more games: \(error.localizedDescription)"
+                loadMoreError = "Couldn't load more games: \(error.localizedDescription)"
             }
         }
     }
@@ -491,7 +518,6 @@ struct DiscoverView: View {
     }
 
     private func repairPagerSelection() {
-        guard selectedFeed == .forYou else { return }
         if let settledForYouGameID, games.contains(where: { $0.id == settledForYouGameID }) { return }
         settledForYouGameID = games.first?.id
     }
@@ -539,7 +565,8 @@ struct DiscoverView: View {
             } onCancel: {
                 request.cancel()
             }
-            guard feedRequestCoordinator.isCurrent(generation) else { return }
+            guard requestedScope == selectedFeed,
+                  feedRequestCoordinator.isCurrent(generation) else { return }
             games = loadedGames.games
             nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
             repairPagerSelection()
@@ -571,7 +598,9 @@ struct DiscoverView: View {
                 mutedTopics = Set(preferences.muted_topics.map { $0.lowercased() })
             }
         } catch {
-            if feedRequestCoordinator.isCurrent(generation) { errorMessage = error.localizedDescription }
+            if requestedScope == selectedFeed && feedRequestCoordinator.isCurrent(generation) {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }
@@ -1074,8 +1103,8 @@ private struct ForYouPagerView: View {
     let onImpression: (FeedGame) -> Void
     let onNearEnd: () -> Void
 
-    /// A dedicated full-bleed page keeps the For You layout independent
-    /// from the compact card used by Search, Following, and Friends.
+    /// Full-bleed pages serve all non-search social feeds, with the compact
+    /// card reserved for search results and empty/error states.
     private func card(for game: FeedGame) -> some View {
         ForYouGamePage(
             game: game,
