@@ -565,7 +565,8 @@ struct DiscoverView: View {
             } onCancel: {
                 request.cancel()
             }
-            guard feedRequestCoordinator.isCurrent(generation) else { return }
+            guard requestedScope == selectedFeed,
+                  feedRequestCoordinator.isCurrent(generation) else { return }
             games = loadedGames.games
             nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
             repairPagerSelection()
@@ -597,7 +598,9 @@ struct DiscoverView: View {
                 mutedTopics = Set(preferences.muted_topics.map { $0.lowercased() })
             }
         } catch {
-            if feedRequestCoordinator.isCurrent(generation) { errorMessage = error.localizedDescription }
+            if requestedScope == selectedFeed && feedRequestCoordinator.isCurrent(generation) {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }
