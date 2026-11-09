@@ -106,6 +106,9 @@ struct DiscoverView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 8)
                 .onChange(of: selectedFeed) { _, _ in
+                    // Retire the settled page's clip and any pending delayed
+                    // autoplay before the grid replaces the full-screen feed.
+                    FeedPreviewPlayback.shared.stop()
                     settledForYouGameID = nil
                     Task { await load() }
                 }
@@ -326,7 +329,8 @@ struct DiscoverView: View {
                                     onReport: { reportingGame = game },
                                     onBlockCreator: { if let id = game.ownerID { Task { await blockCreator(id) } } },
                                     onNotInterested: { Task { await markNotInterested(game) } },
-                                    onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } }
+                                    onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } },
+                                    shouldAutoplayPreview: false
                                 )
     }
 
