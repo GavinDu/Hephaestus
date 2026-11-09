@@ -82,8 +82,23 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(done.waitForExistence(timeout: 10),
                       "Player sheet should expose its Done control. UI: \(app.debugDescription)")
 
-        // Let the game boot, then keep a screenshot as evidence.
-        _ = XCTWaiter.wait(for: [expectation(description: "boot settle")], timeout: 6)
+        // A web view appearing is not evidence that its navigation has finished.
+        // The previous fixed six-second sleep captured a still-loading sheet
+        // while the smoke test reported success. Wait for the *actual* loading
+        // overlay to disappear, fail on an actionable retry state, and retain
+        // the failure screenshot through tearDownWithError when either happens.
+        let loading = app.staticTexts["player.loading"].firstMatch
+        let failed = app.buttons["player.retry"].firstMatch
+        let navigationDeadline = Date().addingTimeInterval(90)
+        while loading.exists && !failed.exists && Date() < navigationDeadline {
+            Thread.sleep(forTimeInterval: 1)
+        }
+        XCTAssertFalse(failed.exists,
+                       "Player entered a recoverable failure instead of loading its game. UI: \\(app.debugDescription)")
+        XCTAssertFalse(loading.exists,
+                       "Player remained on the loading overlay for 90 seconds. UI: \\(app.debugDescription)")
+        // This certifies native navigation/overlay readiness, not a verified
+        // in-game win or first-render frame. Browser playtest owns that gate.
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "player-after-boot"
         shot.lifetime = .keepAlways
