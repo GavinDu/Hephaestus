@@ -313,6 +313,19 @@ final class PlayerSmokeTests: XCTestCase {
             }
 
             let beforeCapture = app.screenshot()
+            // Landscape xcresult exports have shown sideways feed chrome and a
+            // large black region even while the swipe evaluator scores 100.
+            // Retain a separate full-screen capture to distinguish an
+            // app-window screenshot/export issue from native rendering.
+            // Never replace or silently rotate the original app capture.
+            if expectedLandscape {
+                let fullScreen = XCUIScreen.main.screenshot()
+                let fullScreenAttachment = XCTAttachment(screenshot: fullScreen)
+                fullScreenAttachment.name = "feed-full-screen-before-swipe-landscape"
+                fullScreenAttachment.lifetime = .keepAlways
+                add(fullScreenAttachment)
+                print("UI_EVALUATOR_LANDSCAPE_CAPTURE app_px=\(beforeCapture.image.cgImage?.width ?? 0)x\(beforeCapture.image.cgImage?.height ?? 0) screen_px=\(fullScreen.image.cgImage?.width ?? 0)x\(fullScreen.image.cgImage?.height ?? 0) app_frame=\(app.frame)")
+            }
             let beforeSwipe = XCTAttachment(screenshot: beforeCapture)
             beforeSwipe.name = "feed-ui-evaluator-before-swipe-\(profile.1)"
             beforeSwipe.lifetime = .keepAlways
@@ -357,6 +370,12 @@ final class PlayerSmokeTests: XCTestCase {
             print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1) score=\(score)/100 touch_targets=\(touchTargetsPassed)/4 pages=\(pages.count) swipe_advanced=\(didAdvance)")
 
             let afterCapture = app.screenshot()
+            if expectedLandscape {
+                let fullScreenAfter = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                fullScreenAfter.name = "feed-full-screen-after-swipe-landscape"
+                fullScreenAfter.lifetime = .keepAlways
+                add(fullScreenAfter)
+            }
             let afterSwipe = XCTAttachment(screenshot: afterCapture)
             afterSwipe.name = "feed-ui-evaluator-after-swipe-\(profile.1)"
             afterSwipe.lifetime = .keepAlways
