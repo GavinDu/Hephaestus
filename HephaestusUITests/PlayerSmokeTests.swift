@@ -193,14 +193,17 @@ final class PlayerSmokeTests: XCTestCase {
                     retry.tap()
                 } else if !pendingRetryUsed &&
                             Date().timeIntervalSince(startedLoading) > 40 &&
-                            pendingRetry.exists && pendingRetry.isHittable {
+                            pendingRetry.exists {
                     // A network response can swap the skeleton for a real
                     // page between XCTest's isHittable query and tap(). In
                     // that case XCTest's element tap retries an element with
                     // an invalid {inf, inf} hit point and fails even though
                     // the live feed is recovering. Use a bounded snapshot
                     // coordinate instead: it remains valid if the button
-                    // disappears during the animation. Never count a tap or
+                    // disappears during the animation. Do not call isHittable
+                    // on this transient control: XCTest throws when its frame
+                    // has an invalid activation point during dismissal.
+                    // Never count a tap or
                     // synthetic page as a successful feed evaluation.
                     let frame = pendingRetry.frame
                     let bounds = app.frame
@@ -234,6 +237,13 @@ final class PlayerSmokeTests: XCTestCase {
             }
             XCTAssertTrue(play.exists,
                           "For You should expose a LIVE playable feed page in \(profile.1) after bounded retries, not a skeleton or fixture. UI: \(app.debugDescription)")
+            // Scope captions must match the selected social feed; a Following
+            // or Friends page must never claim it is the For You scope.
+            let scopeCaption = app.staticTexts["feed.scope.caption"].firstMatch
+            XCTAssertTrue(scopeCaption.waitForExistence(timeout: 5),
+                          "The immersive feed should expose its visible scope caption.")
+            XCTAssertEqual(scopeCaption.label, "FOR YOU",
+                           "The default pager must identify the For You scope.")
 
             let swipeCue = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "label CONTAINS %@", "SWIPE TO EXPLORE"))
