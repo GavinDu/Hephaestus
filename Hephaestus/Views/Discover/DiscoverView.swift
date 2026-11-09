@@ -1233,8 +1233,13 @@ private struct ForYouPagerView: View {
         let targetIndex = min(max(currentIndex + offset, 0), games.count - 1)
         guard targetIndex != currentIndex else { return }
         let targetID = games[targetIndex].id
-        settledGameID = targetID
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
+        // A short landscape viewport must finish the gesture on one exact
+        // page boundary. Animating the scroll position and its binding together
+        // can expose a second, hittable card after XCTest's swipe has returned.
+        // Commit selection and alignment atomically; never leave a fractional
+        // offset under the tab bar.
+        withTransaction(Transaction(animation: nil)) {
+            settledGameID = targetID
             scrollProxy.scrollTo(targetID, anchor: .top)
         }
     }
@@ -1318,7 +1323,8 @@ private struct ForYouPagerView: View {
                     guard let id, let index = games.firstIndex(where: { $0.id == id }) else { return }
                     if index >= max(0, games.count - 2) { onNearEnd() }
                 }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settledGameID)
+                // The pager itself commits each programmatic page boundary
+                // without a second implicit state animation.
             }
             // The pager owns vertical navigation. A simultaneous recognizer
             // can lose XCTest and real touch drags to overlaid buttons/media
