@@ -368,25 +368,52 @@ final class PlayerSmokeTests: XCTestCase {
             print("UI EVALUATOR pager frame orientation=\(profile.1): \(pagerFrame)")
             pager.swipeUp()
 
-            let pageDeadline = Date().addingTimeInterval(8)
+            // A title merely intersecting app.frame can be a neighbor under
+            // the tab bar, and the accessibility tree may be sampled while
+            // a SwiftUI scroll transition is still settling. Require a NEW
+            // single hittable title inside the actual scroll viewport twice
+            // consecutively, not a momentary offscreen element.
+            let pageDeadline = Date().addingTimeInterval(20)
             var didAdvance = false
+            var candidateID: String?
+            var stableSamples = 0
+            var latestVisibleIDs: [String] = []
             while Date() < pageDeadline {
-                didAdvance = pages.allElementsBoundByIndex.contains {
-                    $0.frame.intersects(app.frame) && $0.identifier != beforePageID
-                }
-                if didAdvance { break }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.25))
-            }
-            XCTAssertTrue(didAdvance,
-                          "Swiping up should settle on a different game page in \(profile.1).")
-            if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
-                let settledTitles = pages.allElementsBoundByIndex.filter {
+                let visible = pages.allElementsBoundByIndex.filter {
                     let frame = $0.frame
                     return frame.width > 0 && frame.height > 0 &&
                         frame.intersects(pager.frame) && $0.isHittable
                 }
-                XCTAssertEqual(settledTitles.count, 1,
-                    "Exactly one game title must intersect the compact landscape pager after swipe.")
+                latestVisibleIDs = visible.map(\.identifier)
+                if visible.count == 1, let newID = latestVisibleIDs.first,
+                    newID != beforePageID {
+                    stableSamples = candidateID == newID ? stableSamples + 1 : 1
+                    candidateID = newID
+                    if stableSamples >= 2 {
+                        didAdvance = true
+                        break
+                    }
+                } else {
+                    candidateID = nil
+                    stableSamples = 0
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+            }
+            print("UI_EVALUATOR_SETTLED orientation=\(profile.1) before=\(beforePageID ?? "none") after=\(latestVisibleIDs) stable_samples=\(stableSamples)")
+            if !didAdvance {
+                // Preserve the ORIGINAL simulator screen, even when the
+                // geometry assertion fails. A failed screenshot is an input
+                // to review, never a passing/approved media sample.
+                let failedScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                failedScreen.name = "feed-full-screen-unsettled-after-swipe-\(profile.1)"
+                failedScreen.lifetime = .keepAlways
+                add(failedScreen)
+            }
+            XCTAssertTrue(didAdvance,
+                          "Swipe must settle on exactly one NEW hittable page inside the \(profile.1) pager viewport; observed \(latestVisibleIDs).")
+            if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
+                XCTAssertEqual(latestVisibleIDs.count, 1,
+                    "Compact landscape must have one settled card after swipe.")
             }
 
             let score = (hasSwipeCue ? 10 : 0) + touchTargetsPassed * 15 +
