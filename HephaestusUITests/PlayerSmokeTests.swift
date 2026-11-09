@@ -275,17 +275,22 @@ final class PlayerSmokeTests: XCTestCase {
             if !expectedLandscape {
                 let rail = app.descendants(matching: .any)["feed.actionRail"].firstMatch
                 XCTAssertTrue(rail.exists, "Portrait feed should expose the social action rail.")
-                // XCTest reports the semantic action group's actual 48pt target bounds,
-                // not the decorative capsule's outer padding. Each icon is
-                // still >=44pt and captions are screenshot-reviewed below.
-                XCTAssertGreaterThanOrEqual(rail.frame.width, 48,
-                                            "Portrait action rail should preserve the labeled 48pt targets.")
-                XCTAssertGreaterThanOrEqual(rail.frame.height, 290,
-                                            "Portrait rail should show short action captions beneath its buttons.")
-                XCTAssertLessThanOrEqual(play.frame.maxX, rail.frame.minX + 4,
-                                         "The portrait action rail must not cover the primary Play CTA.")
+                // SwiftUI may attach a container accessibility identifier to
+                // a child button, so rail.frame can describe only one 58pt
+                // button, not the whole VStack. Measure the actual interactive
+                // buttons and their alignment/CTA separation instead.
                 let saveFrame = app.buttons["Save game"].firstMatch.frame
                 let likeFrame = app.buttons["Like game"].firstMatch.frame
+                let commentFrame = app.buttons["View comments"].firstMatch.frame
+                for frame in [saveFrame, likeFrame, commentFrame] {
+                    XCTAssertGreaterThanOrEqual(frame.height, 48,
+                                                "Portrait action captions should retain tall, tappable buttons.")
+                    XCTAssertGreaterThanOrEqual(frame.width, 44,
+                                                "Portrait action captions should retain 44pt minimum width.")
+                }
+                XCTAssertLessThanOrEqual(play.frame.maxX,
+                                         min(saveFrame.minX, likeFrame.minX, commentFrame.minX) + 4,
+                                         "The portrait action rail must not cover the primary Play CTA.")
                 XCTAssertLessThan(abs(saveFrame.midX - likeFrame.midX), 4,
                                   "Portrait social actions should align vertically.")
                 XCTAssertGreaterThan(abs(saveFrame.midY - likeFrame.midY), 40,
