@@ -1248,6 +1248,10 @@ private struct ForYouPagerView: View {
                 }
                 .accessibilityIdentifier("feed.forYou.pager")
                 .scrollIndicators(.hidden)
+                // Hide neighboring cards while an orientation/layout change
+                // repositions the current page. A landscape iPhone screenshot
+                // had shown the next game below the CTA and behind the tab bar.
+                .clipped()
                 .scrollDisabled(true)
                 .accessibilityLabel("\(scope.title) game feed")
                 .accessibilityHint("Scroll up for the next game, or down for the previous game")
@@ -1263,10 +1267,25 @@ private struct ForYouPagerView: View {
                 .scrollTargetBehavior(.paging)
                 .scrollPosition(id: $settledGameID)
                 .onAppear {
-                    settledGameID = ForYouPageLayout.reconciledSelection(
+                    let selected = ForYouPageLayout.reconciledSelection(
                         currentID: settledGameID,
                         availableIDs: games.map(\.id)
                     )
+                    settledGameID = selected
+                    if let selected {
+                        withTransaction(Transaction(animation: nil)) {
+                            scrollProxy.scrollTo(selected, anchor: .top)
+                        }
+                    }
+                }
+                .onChange(of: viewport.size.height) { _, _ in
+                    // A short landscape pager can preserve an old fractional
+                    // scroll offset after its safe-area height changes. Re-align
+                    // the actual selected card to the top of the new viewport.
+                    guard let selected = settledGameID else { return }
+                    withTransaction(Transaction(animation: nil)) {
+                        scrollProxy.scrollTo(selected, anchor: .top)
+                    }
                 }
                 .onChange(of: games.map(\.id)) { _, ids in
                     // Refreshes and pagination can remove the currently selected game.
