@@ -31,6 +31,17 @@ enum ForYouPageLayout {
         return vertical < 0 ? 1 : -1
     }
 
+    /// Use one navigation-bar scope menu in compact-height landscape to
+    /// recover the vertical space consumed by a segmented picker. Searching
+    /// intentionally restores the picker so multi-result browsing remains
+    /// explicit. Empty and loading feeds still need a scope switcher.
+    static func prefersCompactScopeMenu(
+        verticalSizeClass: UserInterfaceSizeClass?, searchText: String
+    ) -> Bool {
+        verticalSizeClass == .compact &&
+            searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     // All social feeds use the same immersive vertical pager whenever real
     // cards are available. Searching still exposes the compact grid.
     static func shouldShowImmersivePager(searchText: String, hasGames: Bool) -> Bool {
