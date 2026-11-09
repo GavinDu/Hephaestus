@@ -45,6 +45,7 @@ final class FeedRequestCoordinator {
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedFeed: SocialFeedScope = .forYou
     @State private var games: [FeedGame] = []
@@ -90,32 +91,29 @@ struct DiscoverView: View {
             searchText: searchText, hasGames: !visibleGames.isEmpty)
     }
 
+    // Compact landscape needs room for the actual game post. Keep scope
+    // switching available via the navigation toolbar, including when empty.
+    private var usesCompactFeedScopeMenu: Bool {
+        ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: verticalSizeClass, searchText: searchText)
+    }
+
     /// Feed stack, extracted from `body` so the body expression
     /// stays type-checkable: picker + pager/grid branches + the
     /// sheet/cover modifiers together timed out the compiler.
     private var feedContent: some View {
         VStack(spacing: 0) {
-                Picker("Feed", selection: $selectedFeed) {
-                    ForEach(SocialFeedScope.allCases) { scope in
-                        Text(scope.title).tag(scope)
+                if !usesCompactFeedScopeMenu {
+                    Picker("Feed", selection: $selectedFeed) {
+                        ForEach(SocialFeedScope.allCases) { scope in
+                            Text(scope.title).tag(scope)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityLabel("Social feed")
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-                .onChange(of: selectedFeed) { _, _ in
-                    // Do not display the prior scope's games (potentially
-                    // private Following/Friends cards) under a new tab while
-                    // the next authenticated request is still in flight.
-                    FeedPreviewPlayback.shared.stop()
-                    settledForYouGameID = nil
-                    games = []
-                    nextCursor = nil
-                    loadMoreError = nil
-                    errorMessage = nil
-                    Task { await load() }
+                    .pickerStyle(.segmented)
+                    .accessibilityLabel("Social feed")
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 8)
                 }
 
                 if showsImmersivePager {
@@ -268,11 +266,43 @@ struct DiscoverView: View {
                         }
                     }
                 }
+            // Always observe scope transitions even while the picker is hidden.
+            // Discard stale private-scope cards before fetching the next feed.
+            .onChange(of: selectedFeed) { _, _ in
+                FeedPreviewPlayback.shared.stop()
+                settledForYouGameID = nil
+                games = []
+                nextCursor = nil
+                loadMoreError = nil
+                errorMessage = nil
+                Task { await load() }
+            }
             .background(HephaestusDesign.pageBackground)
-            .navigationTitle("Discover")
+            .navigationTitle(usesCompactFeedScopeMenu ? selectedFeed.title : "Discover")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Find a game")
             .toolbar {
+                if usesCompactFeedScopeMenu {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            ForEach(SocialFeedScope.allCases) { scope in
+                                Button {
+                                    selectedFeed = scope
+                                } label: {
+                                    if selectedFeed == scope {
+                                        Label(scope.title, systemImage: "checkmark")
+                                    } else {
+                                        Text(scope.title)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "rectangle.stack")
+                        }
+                        .accessibilityIdentifier("feed.scope.menu")
+                        .accessibilityLabel("Social feed: \(selectedFeed.title). Change feed")
+                    }
+                }
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         isFeedPreferencesPresented = true
