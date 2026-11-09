@@ -1232,7 +1232,12 @@ private struct ForYouPagerView: View {
                 }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settledGameID)
             }
-            .simultaneousGesture(
+            // The pager owns vertical navigation. A simultaneous recognizer
+            // can lose XCTest and real touch drags to overlaid buttons/media
+            // on large iPad pages, leaving the selected game unchanged.
+            // A high-priority drag still requires 35pt travel, so ordinary
+            // Play / Like / Save taps retain their button actions.
+            .highPriorityGesture(
                 DragGesture(minimumDistance: 35)
                     .onEnded { value in
                         guard !games.isEmpty else { return }
