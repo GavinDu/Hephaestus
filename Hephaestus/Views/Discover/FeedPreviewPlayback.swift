@@ -210,7 +210,11 @@ final class FeedPreviewPlayback: ObservableObject {
         itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
             guard FeedPreviewPolicy.shouldStopOnFailure(observedItem.status) else { return }
             Task { @MainActor [weak self] in
-                guard let self, self.activeGameID == gameID else { return }
+                // A failed former version may report asynchronously after the
+                // card has refreshed. Never stop the replacement clip merely
+                // because it belongs to the same game ID.
+                guard let self, self.activeGameID == gameID,
+                      self.activeClipURL == url else { return }
                 // Keep the poster visible when a clip fails to load or decode.
                 self.stop(gameID: gameID)
             }
