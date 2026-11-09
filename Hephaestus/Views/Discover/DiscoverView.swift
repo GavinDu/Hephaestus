@@ -1055,7 +1055,7 @@ private struct ForYouGamePage: View {
                         mediaLayer
                         VStack {
                             HStack {
-                                if !dynamicTypeSize.isAccessibilitySize {
+                                if !dynamicTypeSize.isAccessibilitySize && !isLandscape {
                                     Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
                                         .font(.caption2.weight(.bold))
                                         .tracking(0.8)
@@ -1064,7 +1064,20 @@ private struct ForYouGamePage: View {
                                         .padding(.vertical, 8)
                                         .background(.black.opacity(0.28), in: Capsule())
                                 }
-                                Spacer()
+                                Spacer(minLength: 0)
+                                if !dynamicTypeSize.isAccessibilitySize && isLandscape {
+                                    // On a short phone landscape viewport the
+                                    // title overlay reaches the upper-left
+                                    // corner. Keep the gesture hint on the
+                                    // opposite side rather than over title text.
+                                    Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
+                                        .font(.caption2.weight(.bold))
+                                        .tracking(0.8)
+                                        .foregroundStyle(.white.opacity(0.9))
+                                        .padding(.horizontal, 11)
+                                        .padding(.vertical, 8)
+                                        .background(.black.opacity(0.28), in: Capsule())
+                                }
                                 if !dynamicTypeSize.isAccessibilitySize, let orientation = game.orientationLabel {
                                     Text(orientation)
                                         .font(.caption2.weight(.semibold))
