@@ -127,6 +127,20 @@ jobs:
             --log /tmp/smoke.log --out /tmp/test-feedback.json \
             --run-id "smoke-${{ github.run_id }}-${{ github.run_attempt }}" \
             --commit "${{ github.sha }}" --layer 1 --prefix player-smoke || true
+      # Export native screenshots to a reviewable artifact directory rather
+      # than burying them inside the binary .xcresult. Always run, including
+      # on UI test failure, so the failed frame remains available for triage.
+      - name: Export iPhone smoke screenshot evidence
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d "/tmp/smoke.xcresult" ]]; then
+            xcrun xcresulttool export attachments \
+              --path "/tmp/smoke.xcresult" \
+              --output-path "/tmp/iphone-smoke-screenshots"
+          else
+            echo "No .xcresult from this run; consult the preceding test failure log."
+          fi
       - name: Upload smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -135,6 +149,7 @@ jobs:
           path: |
             /tmp/smoke.log
             /tmp/smoke.xcresult
+            /tmp/iphone-smoke-screenshots
             /tmp/test-feedback.json
           if-no-files-found: ignore
 
@@ -188,6 +203,20 @@ jobs:
             --log /tmp/ipad-feed-ui.log --out /tmp/test-feedback-ipad.json \
             --run-id "ipad-feed-${{ github.run_id }}-${{ github.run_attempt }}" \
             --commit "${{ github.sha }}" --layer 1 --prefix ipad-feed || true
+      # Export native screenshots to a reviewable artifact directory rather
+      # than burying them inside the binary .xcresult. Always run, including
+      # on UI test failure, so the failed frame remains available for triage.
+      - name: Export iPad feed screenshot evidence
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d "/tmp/ipad-feed-ui.xcresult" ]]; then
+            xcrun xcresulttool export attachments \
+              --path "/tmp/ipad-feed-ui.xcresult" \
+              --output-path "/tmp/ipad-feed-ui-screenshots"
+          else
+            echo "No .xcresult from this run; consult the preceding test failure log."
+          fi
       - name: Upload iPad UI evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -196,5 +225,6 @@ jobs:
           path: |
             /tmp/ipad-feed-ui.log
             /tmp/ipad-feed-ui.xcresult
+            /tmp/ipad-feed-ui-screenshots
             /tmp/test-feedback-ipad.json
           if-no-files-found: ignore
