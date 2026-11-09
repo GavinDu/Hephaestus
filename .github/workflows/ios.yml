@@ -217,6 +217,14 @@ jobs:
           else
             echo "No .xcresult from this run; consult the preceding test failure log."
           fi
+      # Native app-window landscape attachments can export with a misleading
+      # portrait crop and black bands. Keep originals; validate and separately
+      # publish orientation-correct *full-screen* evidence for review.
+      - name: Validate native iPad screenshot orientation and review evidence
+        run: |
+          python3 tools/test-feedback/verify-ui-screenshot-evidence.py \\
+            --input /tmp/ipad-feed-ui-screenshots \\
+            --out /tmp/ipad-feed-ui-review
       - name: Upload iPad UI evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -226,5 +234,6 @@ jobs:
             /tmp/ipad-feed-ui.log
             /tmp/ipad-feed-ui.xcresult
             /tmp/ipad-feed-ui-screenshots
+            /tmp/ipad-feed-ui-review
             /tmp/test-feedback-ipad.json
           if-no-files-found: ignore
