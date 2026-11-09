@@ -193,14 +193,17 @@ final class PlayerSmokeTests: XCTestCase {
                     retry.tap()
                 } else if !pendingRetryUsed &&
                             Date().timeIntervalSince(startedLoading) > 40 &&
-                            pendingRetry.exists && pendingRetry.isHittable {
+                            pendingRetry.exists {
                     // A network response can swap the skeleton for a real
                     // page between XCTest's isHittable query and tap(). In
                     // that case XCTest's element tap retries an element with
                     // an invalid {inf, inf} hit point and fails even though
                     // the live feed is recovering. Use a bounded snapshot
                     // coordinate instead: it remains valid if the button
-                    // disappears during the animation. Never count a tap or
+                    // disappears during the animation. Do not call isHittable
+                    // on this transient control: XCTest throws when its frame
+                    // has an invalid activation point during dismissal.
+                    // Never count a tap or
                     // synthetic page as a successful feed evaluation.
                     let frame = pendingRetry.frame
                     let bounds = app.frame
