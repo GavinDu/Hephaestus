@@ -774,7 +774,10 @@ private struct ForYouGamePage: View {
         }
         .clipped()
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(ForYouPageLayout.mediaAccessibilityLabel(title: game.title))
+        .accessibilityLabel(ForYouPageLayout.mediaAccessibilityLabel(
+            title: game.title,
+            hasPreviewMedia: game.previewPosterURL != nil || game.previewClipURL != nil
+        ))
         .accessibilityAddTraits(.isImage)
         .accessibilitySortPriority(100)
         // Preview media is decorative; it must not intercept vertical pager swipes.

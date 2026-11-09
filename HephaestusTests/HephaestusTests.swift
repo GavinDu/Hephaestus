@@ -421,6 +421,10 @@ struct HephaestusTests {
     #expect(ForYouPageLayout.mediaAccessibilityLabel(title: "Rainbow") ==
             "Game artwork or preview for Rainbow. Use Play now to start.")
     #expect(!ForYouPageLayout.mediaAccessibilityLabel(title: "Penguin").contains("Recorded preview"))
+    #expect(ForYouPageLayout.mediaAccessibilityLabel(title: "Bobo", hasPreviewMedia: false) ==
+            "Gameplay preview not available for Bobo. Use Play now to start.")
+    #expect(!ForYouPageLayout.mediaAccessibilityLabel(title: "Bobo", hasPreviewMedia: false)
+        .contains("artwork or preview"))
     #expect(ForYouPageLayout.contentMaxWidth(isRegular: true) == 760)
     #expect(ForYouPageLayout.contentMaxWidth(isRegular: false).isInfinite)
 }
