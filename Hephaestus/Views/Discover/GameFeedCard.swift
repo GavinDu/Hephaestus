@@ -51,7 +51,9 @@ struct GameFeedCard: View {
     let onBlockCreator: () -> Void
     let onNotInterested: () -> Void
     let onImpression: () -> Void
-    var shouldAutoplayPreview: Bool = true
+    // Poster-only grid cards must not compete with the settled For You
+    // pager for the one shared AVQueuePlayer and decoder.
+    var shouldAutoplayPreview: Bool = false
 
     private var shareURL: URL {
         var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"), resolvingAgainstBaseURL: false)!
