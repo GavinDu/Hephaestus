@@ -10,6 +10,22 @@ import Testing
 // App-level tests will regrow around the WebView player and the
 // creation flow.
 struct HephaestusTests {
+    @Test func compactHeightFeedUsesAccessibleScopeMenuWithoutHidingSearchNavigation() {
+        // Landscape on iPhone: collapse the redundant segmented row but keep
+        // the menu even before feed content loads or in empty scopes.
+        #expect(ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .compact, searchText: ""))
+        #expect(ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .compact, searchText: "   "))
+        // Search/portrait/iPad keep their existing explicit picker.
+        #expect(!ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .compact, searchText: "Bobo"))
+        #expect(!ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .regular, searchText: ""))
+        #expect(!ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: nil, searchText: ""))
+    }
+
     @Test func socialFeedScopesAreStableAndDistinct() {
         #expect(SocialFeedScope.allCases.map(\.rawValue) == ["for_you", "following", "friends"])
         #expect(SocialFeedScope.allCases.map(\.title) == ["For You", "Following", "Friends"])
