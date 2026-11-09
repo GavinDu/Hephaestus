@@ -1133,6 +1133,17 @@ private struct ForYouGamePage: View {
                 FeedPreviewPlayback.shared.scheduleSettled(gameID: game.id, urlString: game.previewClipURL, reduceMotion: shouldReduceMotion)
             }
         }
+        // The card identity stays stable when a refreshed published version
+        // replaces its approved media. Propagate the new URL immediately;
+        // otherwise a settled page would keep playing the obsolete clip.
+        .onChange(of: game.previewClipURL) { _, nextURL in
+            if isSettled && scenePhase == .active && !reduceMotion {
+                FeedPreviewPlayback.shared.scheduleSettled(
+                    gameID: game.id, urlString: nextURL, reduceMotion: reduceMotion)
+            } else {
+                FeedPreviewPlayback.shared.stop(gameID: game.id)
+            }
+        }
         .onChange(of: isSettled) { _, shouldPlay in
             if shouldPlay && !reduceMotion && scenePhase == .active {
                 FeedPreviewPlayback.shared.scheduleSettled(gameID: game.id, urlString: game.previewClipURL, reduceMotion: reduceMotion)

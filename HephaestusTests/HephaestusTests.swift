@@ -351,6 +351,31 @@ struct HephaestusTests {
     #expect(FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: false, constrainedNetwork: false, isOnline: true))
 }
 
+@Test func settledFeedPreviewReusesOnlyTheExactVersionedClip() {
+    let old = URL(string: "https://example.test/v1/games/a/previews/1/clip.mp4")!
+    let fresh = URL(string: "https://example.test/v1/games/a/previews/2/clip.mp4")!
+    #expect(FeedPreviewPolicy.shouldReusePreview(
+        activeGameID: "a", activeURL: old,
+        pendingGameID: nil, pendingURL: nil,
+        nextGameID: "a", nextURL: old))
+    #expect(!FeedPreviewPolicy.shouldReusePreview(
+        activeGameID: "a", activeURL: old,
+        pendingGameID: nil, pendingURL: nil,
+        nextGameID: "a", nextURL: fresh))
+    #expect(FeedPreviewPolicy.shouldReusePreview(
+        activeGameID: nil, activeURL: nil,
+        pendingGameID: "a", pendingURL: fresh,
+        nextGameID: "a", nextURL: fresh))
+    #expect(!FeedPreviewPolicy.shouldReusePreview(
+        activeGameID: nil, activeURL: nil,
+        pendingGameID: "a", pendingURL: old,
+        nextGameID: "a", nextURL: fresh))
+    #expect(!FeedPreviewPolicy.shouldReusePreview(
+        activeGameID: "a", activeURL: fresh,
+        pendingGameID: nil, pendingURL: nil,
+        nextGameID: "b", nextURL: fresh))
+}
+
 @Test func settledFeedPreviewRetiresOldClipEvenWhenNextPageHasNoVideo() {
     #expect(FeedPreviewPolicy.shouldRetirePrevious(activeGameID: "game-a", pendingGameID: nil, nextGameID: "game-b"))
     #expect(FeedPreviewPolicy.shouldRetirePrevious(activeGameID: nil, pendingGameID: "game-a", nextGameID: "game-b"))
