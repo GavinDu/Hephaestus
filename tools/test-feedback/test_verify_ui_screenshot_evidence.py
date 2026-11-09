@@ -79,6 +79,16 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             for name in module.LANDSCAPE_DIAGNOSTIC:
                 self.assertFalse(report["verified"][name]["preferred_for_visual_review"])
 
+    def test_png_crc_corruption_rejected_before_visual_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            p = Path(directory) / "tampered.png"
+            raw = bytearray(png(10, 20, 8))
+            # First IHDR checksum: changing any byte must be a hard failure.
+            raw[29] ^= 1
+            p.write_bytes(raw)
+            with self.assertRaisesRegex(ValueError, "invalid PNG chunk CRC"):
+                module.read_png_metadata(p)
+
     def test_malformed_landscape_or_missing_evidence_fails(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source"
