@@ -1283,7 +1283,13 @@ private struct ForYouPagerView: View {
                     }
                 }
                 .scrollTargetBehavior(.paging)
-                .scrollPosition(id: $settledGameID)
+                // Native drag is already disabled and ForYouPagerView owns
+                // page selection via its high-priority gesture, VoiceOver
+                // scroll action and scrollProxy. Binding the same selection
+                // to ScrollView.scrollPosition lets the framework issue a
+                // second, asynchronously animated offset update. On compact
+                // iPhone landscape that races with scrollProxy.scrollTo,
+                // leaving two cards visible/hittable after a swipe.
                 .onAppear {
                     let selected = ForYouPageLayout.reconciledSelection(
                         currentID: settledGameID,
