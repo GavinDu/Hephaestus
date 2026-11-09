@@ -289,7 +289,7 @@ final class PlayerSmokeTests: XCTestCase {
                                                 "Portrait action captions should retain 44pt minimum width.")
                 }
                 XCTAssertLessThanOrEqual(play.frame.maxX,
-                                         min(saveFrame.minX, likeFrame.minX, commentFrame.minX) + 4,
+                                         min(saveFrame.minX, min(likeFrame.minX, commentFrame.minX)) + 4,
                                          "The portrait action rail must not cover the primary Play CTA.")
                 XCTAssertLessThan(abs(saveFrame.midX - likeFrame.midX), 4,
                                   "Portrait social actions should align vertically.")
