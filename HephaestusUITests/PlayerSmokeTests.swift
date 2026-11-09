@@ -336,21 +336,31 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(pages.count, 2,
                                         "The UI evaluator needs at least two feed pages in \(profile.1) to verify paging.")
 
-            // SwiftUI title nodes can have invalid activation points even
-            // while their page is rendered. Use viewport intersection.
-            let visiblePages = pages.allElementsBoundByIndex.filter {
-                $0.frame.intersects(app.frame)
-            }
-            let beforePage = visiblePages.first
-            XCTAssertNotNil(beforePage, "The current \(profile.1) feed page should intersect the app viewport.")
-            let beforePageID = beforePage?.identifier
-
-            // Scope the swipe to the first scroll view in the feed hierarchy;
-            // the custom identifier is not consistently surfaced by XCTest.
+            // A title intersecting the app window may belong to the NEXT
+            // card, rendered under the tab bar in short iPhone landscape.
+            // Wait for the real scroll viewport and scope page visibility to
+            // that rectangle, not the whole application window.
             let pager = app.scrollViews.firstMatch
             XCTAssertTrue(pager.waitForExistence(timeout: 5),
                           "For You should expose a scrollable \(profile.1) feed viewport.")
-            print("UI EVALUATOR pager frame orientation=\(profile.1): \(pager.frame)")
+            let pagerFrame = pager.frame
+            let visiblePages = pages.allElementsBoundByIndex.filter {
+                let frame = $0.frame
+                return frame.width > 0 && frame.height > 0 && frame.intersects(pagerFrame)
+            }
+            let beforePage = visiblePages.first
+            XCTAssertNotNil(beforePage, "The current \(profile.1) feed title should intersect the pager viewport.")
+            let beforePageID = beforePage?.identifier
+            if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
+                XCTAssertEqual(visiblePages.count, 1,
+                    "Exactly one game title must intersect the compact landscape pager before swipe; overlapping adjacent cards invalidate screenshot quality.")
+                let tabs = app.tabBars.firstMatch
+                if tabs.exists {
+                    XCTAssertLessThanOrEqual(play.frame.maxY, tabs.frame.minY + 1,
+                        "The landscape Play CTA must not be obscured by bottom navigation.")
+                }
+            }
+            print("UI EVALUATOR pager frame orientation=\(profile.1): \(pagerFrame)")
             pager.swipeUp()
 
             let pageDeadline = Date().addingTimeInterval(8)
@@ -364,6 +374,14 @@ final class PlayerSmokeTests: XCTestCase {
             }
             XCTAssertTrue(didAdvance,
                           "Swiping up should settle on a different game page in \(profile.1).")
+            if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
+                let settledTitles = pages.allElementsBoundByIndex.filter {
+                    let frame = $0.frame
+                    return frame.width > 0 && frame.height > 0 && frame.intersects(pager.frame)
+                }
+                XCTAssertEqual(settledTitles.count, 1,
+                    "Exactly one game title must intersect the compact landscape pager after swipe.")
+            }
 
             let score = (hasSwipeCue ? 10 : 0) + touchTargetsPassed * 15 +
                 (pages.count >= 2 ? 15 : 0) + (didAdvance ? 15 : 0)
