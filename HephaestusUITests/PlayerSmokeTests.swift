@@ -275,6 +275,12 @@ final class PlayerSmokeTests: XCTestCase {
             if !expectedLandscape {
                 let rail = app.descendants(matching: .any)["feed.actionRail"].firstMatch
                 XCTAssertTrue(rail.exists, "Portrait feed should expose the social action rail.")
+                XCTAssertGreaterThanOrEqual(rail.frame.width, 56,
+                                            "Portrait rail should have room for labeled actions, not clipped icons.")
+                XCTAssertGreaterThanOrEqual(rail.frame.height, 290,
+                                            "Portrait rail should show short action captions beneath its buttons.")
+                XCTAssertLessThanOrEqual(play.frame.maxX, rail.frame.minX + 4,
+                                         "The portrait action rail must not cover the primary Play CTA.")
                 let saveFrame = app.buttons["Save game"].firstMatch.frame
                 let likeFrame = app.buttons["Like game"].firstMatch.frame
                 XCTAssertLessThan(abs(saveFrame.midX - likeFrame.midX), 4,
