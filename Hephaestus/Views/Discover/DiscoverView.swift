@@ -306,6 +306,7 @@ struct DiscoverView: View {
     private var forYouPager: some View {
                     ForYouPagerView(
                         settledGameID: $settledForYouGameID,
+                        scope: selectedFeed,
                         games: visibleGames,
                         savedGameIDs: savedGameIDs,
                         likedGameIDs: likedGameIDs,
@@ -674,6 +675,7 @@ private struct ForYouGamePage: View {
     @State private var showsExpressionDetails = false
     @ObservedObject private var previewPlayback = FeedPreviewPlayback.shared
 
+    let scope: SocialFeedScope
     let game: FeedGame
     let isSaved: Bool
     let isLiked: Bool
@@ -850,7 +852,8 @@ private struct ForYouGamePage: View {
             Spacer(minLength: isCompact ? 0 : 100)
             HStack(spacing: 8) {
                 if !dynamicTypeSize.isAccessibilitySize {
-                    Text("FOR YOU")
+                    Text(scope.title.uppercased())
+                        .accessibilityIdentifier("feed.scope.caption")
                         .font(.caption2.weight(.bold))
                         .tracking(1.2)
                         .foregroundStyle(.white.opacity(0.82))
@@ -1113,6 +1116,7 @@ private struct ForYouGamePage: View {
 private struct ForYouPagerView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var settledGameID: String?
+    let scope: SocialFeedScope
     let games: [FeedGame]
     let savedGameIDs: Set<String>
     let likedGameIDs: Set<String>
@@ -1133,6 +1137,7 @@ private struct ForYouPagerView: View {
     /// card reserved for search results and empty/error states.
     private func card(for game: FeedGame) -> some View {
         ForYouGamePage(
+            scope: scope,
             game: game,
             isSaved: savedGameIDs.contains(game.id),
             isLiked: likedGameIDs.contains(game.id),
@@ -1188,7 +1193,7 @@ private struct ForYouPagerView: View {
                 .accessibilityIdentifier("feed.forYou.pager")
                 .scrollIndicators(.hidden)
                 .scrollDisabled(true)
-                .accessibilityLabel("For You game feed")
+                .accessibilityLabel("\(scope.title) game feed")
                 .accessibilityHint("Scroll up for the next game, or down for the previous game")
                 // ScrollView supplies its own accessibility container semantics;
                 // the explicit scroll action below provides VoiceOver paging.
