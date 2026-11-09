@@ -33,8 +33,8 @@ enum ForYouPageLayout {
 
     // All social feeds use the same immersive vertical pager whenever real
     // cards are available. Searching still exposes the compact grid.
-    static func shouldShowImmersivePager(searchText: String, isLoading: Bool, hasGames: Bool) -> Bool {
-        hasGames && !isLoading && searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    static func shouldShowImmersivePager(searchText: String, hasGames: Bool) -> Bool {
+        hasGames && searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // A failed cursor load must not spin background retries or replace the
