@@ -222,8 +222,8 @@ jobs:
       # publish orientation-correct *full-screen* evidence for review.
       - name: Validate native iPad screenshot orientation and review evidence
         run: |
-          python3 tools/test-feedback/verify-ui-screenshot-evidence.py \\
-            --input /tmp/ipad-feed-ui-screenshots \\
+          python3 tools/test-feedback/verify-ui-screenshot-evidence.py \
+            --input /tmp/ipad-feed-ui-screenshots \
             --out /tmp/ipad-feed-ui-review
       - name: Upload iPad UI evaluation artifacts
         if: always()
