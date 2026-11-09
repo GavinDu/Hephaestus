@@ -333,16 +333,19 @@ final class PlayerSmokeTests: XCTestCase {
 
             let pages = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title."))
-            XCTAssertGreaterThanOrEqual(pages.count, 2,
-                                        "The UI evaluator needs at least two feed pages in \(profile.1) to verify paging.")
-
-            // A title intersecting the app window may belong to the NEXT
-            // card, rendered under the tab bar in short iPhone landscape.
-            // Wait for the real scroll viewport and scope page visibility to
-            // that rectangle, not the whole application window.
-            let pager = app.scrollViews.firstMatch
+            // The renderer now materializes ONLY the selected game; a
+            // LazyVStack of several cards produced the verified landscape
+            // bleed. Require the backend-backed total count separately so
+            // one visible card cannot silently mask an untestable one-game feed.
+            let pager = app.scrollViews["feed.forYou.pager"].firstMatch
             XCTAssertTrue(pager.waitForExistence(timeout: 5),
-                          "For You should expose a scrollable \(profile.1) feed viewport.")
+                          "For You should expose its accessible \(profile.1) swipe viewport.")
+            let pageStatus = pager.value as? String ?? ""
+            let totalGames = Int(pageStatus.split(separator: " ").last ?? "") ?? 0
+            XCTAssertGreaterThanOrEqual(totalGames, 2,
+                                         "The real For You feed needs at least two games to verify paging; status=\(pageStatus).")
+            XCTAssertEqual(pages.count, 1,
+                           "Only the settled game page may enter the accessibility tree in \(profile.1).")
             let pagerFrame = pager.frame
             let visiblePages = pages.allElementsBoundByIndex.filter {
                 let frame = $0.frame
@@ -417,8 +420,8 @@ final class PlayerSmokeTests: XCTestCase {
             }
 
             let score = (hasSwipeCue ? 10 : 0) + touchTargetsPassed * 15 +
-                (pages.count >= 2 ? 15 : 0) + (didAdvance ? 15 : 0)
-            print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1) score=\(score)/100 touch_targets=\(touchTargetsPassed)/4 pages=\(pages.count) swipe_advanced=\(didAdvance)")
+                (totalGames >= 2 ? 15 : 0) + (didAdvance ? 15 : 0)
+            print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1) score=\(score)/100 touch_targets=\(touchTargetsPassed)/4 games=\(totalGames) visible_pages=\(pages.count) swipe_advanced=\(didAdvance)")
 
             let afterCapture = app.screenshot()
             if expectedLandscape {
