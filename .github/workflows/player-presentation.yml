@@ -165,6 +165,20 @@ jobs:
             -resultBundlePath /tmp/player-presentation-smoke.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/player-presentation-smoke.log
 
+      # Export native screenshots to a reviewable artifact directory rather
+      # than burying them inside the binary .xcresult. Always run, including
+      # on UI test failure, so the failed frame remains available for triage.
+      - name: Export iPhone UI screenshot evidence
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d "/tmp/player-presentation-smoke.xcresult" ]]; then
+            xcrun xcresulttool export attachments \
+              --path "/tmp/player-presentation-smoke.xcresult" \
+              --output-path "/tmp/player-presentation-iphone-screenshots"
+          else
+            echo "No .xcresult from this run; consult the preceding test failure log."
+          fi
       - name: Upload player smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -173,6 +187,7 @@ jobs:
           path: |
             /tmp/player-presentation-smoke.log
             /tmp/player-presentation-smoke.xcresult
+            /tmp/player-presentation-iphone-screenshots
           if-no-files-found: ignore
 
   ios-ipad-smoke:
@@ -215,6 +230,20 @@ jobs:
             -resultBundlePath /tmp/player-presentation-ipad.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/player-presentation-ipad.log
 
+      # Export native screenshots to a reviewable artifact directory rather
+      # than burying them inside the binary .xcresult. Always run, including
+      # on UI test failure, so the failed frame remains available for triage.
+      - name: Export iPad UI screenshot evidence
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d "/tmp/player-presentation-ipad.xcresult" ]]; then
+            xcrun xcresulttool export attachments \
+              --path "/tmp/player-presentation-ipad.xcresult" \
+              --output-path "/tmp/player-presentation-ipad-screenshots"
+          else
+            echo "No .xcresult from this run; consult the preceding test failure log."
+          fi
       - name: Upload iPad smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -223,6 +252,7 @@ jobs:
           path: |
             /tmp/player-presentation-ipad.log
             /tmp/player-presentation-ipad.xcresult
+            /tmp/player-presentation-ipad-screenshots
           if-no-files-found: ignore
 
   backend-play-contract:
