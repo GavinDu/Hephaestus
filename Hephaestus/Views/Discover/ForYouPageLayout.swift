@@ -61,8 +61,14 @@ enum ForYouPageLayout {
         (currentScope, "", nextGameID)
     }
 
-    static func mediaAccessibilityLabel(title: String) -> String {
-        "Game artwork or preview for \(title). Use Play now to start."
+    static func mediaAccessibilityLabel(title: String, hasPreviewMedia: Bool = true) -> String {
+        // The simulator screenshot audit found legitimate fallback pages.
+        // Do not imply a gameplay screenshot or recorded clip exists when
+        // this feed card has neither a poster nor a clip URL.
+        guard hasPreviewMedia else {
+            return "Gameplay preview not available for \(title). Use Play now to start."
+        }
+        return "Game artwork or preview for \(title). Use Play now to start."
     }
 
     static func contentMaxWidth(isRegular: Bool) -> CGFloat {
