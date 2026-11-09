@@ -457,6 +457,33 @@ struct HephaestusTests {
         predictedEndTranslation: CGSize(width: 180, height: -180)) == 0)
 }
 
+@Test func socialFeedUsesImmersiveSwipePagerForEveryPopulatedScope() {
+    // For You, Following and Friends are all full-screen vertical feeds.
+    // Only explicit search uses the compact multi-result card layout.
+    for scope in SocialFeedScope.allCases {
+        #expect(ForYouPageLayout.shouldShowImmersivePager(
+            searchText: "", hasGames: true), "pager unavailable for \(scope.rawValue)")
+    }
+    #expect(ForYouPageLayout.shouldShowImmersivePager(searchText: "   ", hasGames: true))
+    #expect(!ForYouPageLayout.shouldShowImmersivePager(searchText: "penguin", hasGames: true))
+    #expect(!ForYouPageLayout.shouldShowImmersivePager(searchText: "", hasGames: false))
+}
+
+@Test func failedCursorPagePreservesSwipeFeedAndRequiresExplicitRetry() {
+    #expect(ForYouPageLayout.shouldAutoLoadNextPage(
+        hasCursor: true, isLoading: false, isLoadingMore: false, hasPaginationError: false))
+    #expect(!ForYouPageLayout.shouldAutoLoadNextPage(
+        hasCursor: true, isLoading: false, isLoadingMore: false, hasPaginationError: true))
+    #expect(!ForYouPageLayout.shouldAutoLoadNextPage(
+        hasCursor: true, isLoading: true, isLoadingMore: false, hasPaginationError: false))
+    #expect(!ForYouPageLayout.shouldAutoLoadNextPage(
+        hasCursor: false, isLoading: false, isLoadingMore: false, hasPaginationError: false))
+    #expect(!ForYouPageLayout.shouldAutoLoadNextPage(
+        hasCursor: true, isLoading: false, isLoadingMore: true, hasPaginationError: false))
+    // Existing cards are still immersive during an unsuccessful refresh.
+    #expect(ForYouPageLayout.shouldShowImmersivePager(searchText: "", hasGames: true))
+}
+
 @Test func forYouPagerSelectionReconcilesRefreshAndPaginationChanges() {
     #expect(ForYouPageLayout.reconciledSelection(currentID: "game-2", availableIDs: ["game-1", "game-2"]) == "game-2")
     #expect(ForYouPageLayout.reconciledSelection(currentID: "removed-game", availableIDs: ["game-3", "game-4"]) == "game-3")
