@@ -717,13 +717,15 @@ private struct ForYouGamePage: View {
     // A missing or stale version-bound poster is not a recorded preview.
     // Keep the card playable and say so, without inventing visual evidence.
     private var unavailablePreview: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 6 : 12) {
             Image(systemName: "gamecontroller.fill")
-                .font(.system(size: 60, weight: .medium))
+                .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 38 : 60, weight: .medium))
             Text("Preview unavailable")
-                .font(.subheadline.weight(.semibold))
+                // The decorative media hint must not become a giant label
+                // covering the real game title and accessible Play action.
+                .font(dynamicTypeSize.isAccessibilitySize ? .system(size: 15, weight: .semibold) : .subheadline.weight(.semibold))
             Text("Tap Play now to explore")
-                .font(.caption)
+                .font(dynamicTypeSize.isAccessibilitySize ? .system(size: 12) : .caption)
                 .foregroundStyle(.white.opacity(0.85))
         }
         .foregroundStyle(.white.opacity(0.94))
@@ -847,10 +849,12 @@ private struct ForYouGamePage: View {
         return VStack(alignment: .leading, spacing: isCompact ? 6 : 14) {
             Spacer(minLength: isCompact ? 0 : 100)
             HStack(spacing: 8) {
-                Text("FOR YOU")
-                    .font(.caption2.weight(.bold))
-                    .tracking(1.2)
-                    .foregroundStyle(.white.opacity(0.82))
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Text("FOR YOU")
+                        .font(.caption2.weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(.white.opacity(0.82))
+                }
                 if let parentID = game.remixParentID, !parentID.isEmpty {
                     Label("REMIX", systemImage: "arrow.triangle.2.circlepath")
                         .font(.caption2.weight(.bold))
@@ -861,9 +865,16 @@ private struct ForYouGamePage: View {
                 }
             }
             Text(game.title)
-                .font(.system(isCompact ? .title2 : .title, design: .rounded).weight(.bold))
+                // The accessibility-XXXL screenshot previously put a huge,
+                // truncated title over the preview and bottom controls.
+                // Preserve the full VoiceOver text, but bound its visual size
+                // within a two-line feed overlay.
+                .font(dynamicTypeSize.isAccessibilitySize
+                    ? .system(size: 22, weight: .bold, design: .rounded)
+                    : .system(isCompact ? .title2 : .title, design: .rounded).weight(.bold))
                 .foregroundStyle(.white)
-                .lineLimit(isCompact ? 1 : 2)
+                .lineLimit(2)
+                .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.85 : 1)
                 .accessibilityIdentifier("feed.page.title.\(game.id)")
                 .accessibilitySortPriority(90)
             if !isCompact, let caption = game.caption, !caption.isEmpty {
@@ -932,7 +943,9 @@ private struct ForYouGamePage: View {
             HStack(spacing: 10) {
                 Button(action: onPlay) {
                     Label("Play now", systemImage: "play.fill")
-                        .font(.subheadline.weight(.bold))
+                        .font(dynamicTypeSize.isAccessibilitySize
+                            ? .system(size: 20, weight: .bold)
+                            : .subheadline.weight(.bold))
                         .frame(maxWidth: .infinity, minHeight: 48)
                         .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .foregroundStyle(.black)
@@ -948,7 +961,7 @@ private struct ForYouGamePage: View {
         }
         .padding(.horizontal, isCompact ? 10 : 20)
         .padding(.top, isCompact ? 4 : 24)
-        .padding(.bottom, isCompact ? max(4, bottomInset) : max(24, bottomInset + 12))
+        .padding(.bottom, isCompact ? max(12, bottomInset + 8) : max(24, bottomInset + 12))
         .frame(maxWidth: ForYouPageLayout.contentMaxWidth(isRegular: horizontalSizeClass == .regular), maxHeight: .infinity, alignment: .bottomLeading)
         .background(
             LinearGradient(colors: [.clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
@@ -994,13 +1007,15 @@ private struct ForYouGamePage: View {
                         mediaLayer
                         VStack {
                             HStack {
-                                Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
-                                    .font(.caption2.weight(.bold))
-                                    .tracking(0.8)
-                                    .foregroundStyle(.white.opacity(0.9))
-                                    .padding(.horizontal, 11)
-                                    .padding(.vertical, 8)
-                                    .background(.black.opacity(0.28), in: Capsule())
+                                if !dynamicTypeSize.isAccessibilitySize {
+                                    Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
+                                        .font(.caption2.weight(.bold))
+                                        .tracking(0.8)
+                                        .foregroundStyle(.white.opacity(0.9))
+                                        .padding(.horizontal, 11)
+                                        .padding(.vertical, 8)
+                                        .background(.black.opacity(0.28), in: Capsule())
+                                }
                                 Spacer()
                                 if !dynamicTypeSize.isAccessibilitySize, let orientation = game.orientationLabel {
                                     Text(orientation)
