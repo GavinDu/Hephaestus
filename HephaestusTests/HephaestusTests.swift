@@ -438,9 +438,14 @@ struct HephaestusTests {
     #expect(ForYouPageLayout.stageWidth(containerWidth: 1024, containerHeight: 768, isRegular: true) > 430)
     // iPad portrait should no longer be a narrow phone-sized strip:
     // screenshots showed a center card with mostly empty side gutters.
-    #expect(ForYouPageLayout.stageWidth(containerWidth: 768, containerHeight: 1024, isRegular: true) > 590)
-    #expect(ForYouPageLayout.stageWidth(containerWidth: 1024, containerHeight: 1366, isRegular: true) == 680)
-    #expect(ForYouPageLayout.stageWidth(containerWidth: 1366, containerHeight: 1024, isRegular: true) <= 680)
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 768, containerHeight: 1024, isRegular: true) > 640)
+    // A portrait iPad has enough space for a wide, media-first stage; the
+    // screenshot-derived 680pt cap wasted nearly a third of the viewport.
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 1024, containerHeight: 1366, isRegular: true) == 820)
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 1032, containerHeight: 1243, isRegular: true) > 780)
+    // Non-landscape explicit orientation remains conservative; never exceed
+    // portrait width/height caps just because a caller passes a wide canvas.
+    #expect(ForYouPageLayout.stageWidth(containerWidth: 1366, containerHeight: 1024, isRegular: true) <= 820)
     #expect(ForYouPageLayout.stageWidth(containerWidth: 1024, containerHeight: 768, isRegular: true, isLandscape: true) == 1024)
     #expect(ForYouPageLayout.stageWidth(containerWidth: 1366, containerHeight: 1024, isRegular: true, isLandscape: true) == 1120)
     #expect(ForYouPageLayout.mediaAccessibilityLabel(title: "Rainbow") ==
