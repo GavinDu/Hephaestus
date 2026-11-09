@@ -78,6 +78,16 @@ enum FeedPreviewPolicy {
             (pendingGameID != nil && pendingGameID != nextGameID)
     }
 
+    /// Reuse a decoder or delayed autoplay only for the exact, still-current
+    /// clip. A feed refresh can replace a game's versioned preview URL
+    /// without changing the game ID; playing its old clip is misleading.
+    static func shouldReusePreview(activeGameID: String?, activeURL: URL?,
+                                   pendingGameID: String?, pendingURL: URL?,
+                                   nextGameID: String, nextURL: URL) -> Bool {
+        (activeGameID == nextGameID && activeURL == nextURL) ||
+            (pendingGameID == nextGameID && pendingURL == nextURL)
+    }
+
     static func shouldStopOnFailure(_ status: AVPlayerItem.Status) -> Bool {
         status == .failed
     }
@@ -105,6 +115,8 @@ final class FeedPreviewPlayback: ObservableObject {
     private var itemStatusObservation: NSKeyValueObservation?
     private var pendingTask: Task<Void, Never>?
     private var pendingGameID: String?
+    private var pendingClipURL: URL?
+    private var activeClipURL: URL?
     private var clipStartedAt: Date?
     private let networkMonitor = NWPathMonitor()
     private let networkQueue = DispatchQueue(label: "hephaestus.feed-preview.network")
@@ -161,13 +173,20 @@ final class FeedPreviewPlayback: ObservableObject {
         }
         // SwiftUI may call schedule repeatedly as a card re-renders. Keep
         // the active preview stable and avoid resetting its 700ms delay.
-        if activeGameID == gameID || (pendingGameID == gameID && pendingTask != nil) {
+        if FeedPreviewPolicy.shouldReusePreview(
+            activeGameID: activeGameID, activeURL: activeClipURL,
+            pendingGameID: pendingTask == nil ? nil : pendingGameID,
+            pendingURL: pendingTask == nil ? nil : pendingClipURL,
+            nextGameID: gameID, nextURL: url
+        ) {
             return
         }
-        // Switching cards must stop the previous item and cancel its delay
+        // Switching cards or updating a versioned clip URL must stop the
+        // previous item and cancel its delay
         // before installing the new request.
         stop()
         pendingGameID = gameID
+        pendingClipURL = url
         pendingTask = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
             guard !Task.isCancelled, let self,
@@ -185,6 +204,7 @@ final class FeedPreviewPlayback: ObservableObject {
         player.removeAllItems()
         looper = nil
         activeGameID = gameID
+        activeClipURL = url
         clipStartedAt = Date()
         let item = AVPlayerItem(url: url)
         itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
@@ -200,6 +220,7 @@ final class FeedPreviewPlayback: ObservableObject {
         player.play()
         pendingTask = nil
         pendingGameID = nil
+        pendingClipURL = nil
     }
 
     func stop(gameID: String? = nil) {
@@ -208,12 +229,14 @@ final class FeedPreviewPlayback: ObservableObject {
                 pendingTask?.cancel()
                 pendingTask = nil
                 pendingGameID = nil
+                pendingClipURL = nil
             }
             guard activeGameID == gameID else { return }
         } else {
             pendingTask?.cancel()
             pendingTask = nil
             pendingGameID = nil
+            pendingClipURL = nil
         }
         let stoppedGameID = activeGameID
         let startedAt = clipStartedAt
@@ -223,6 +246,7 @@ final class FeedPreviewPlayback: ObservableObject {
         player.removeAllItems()
         looper = nil
         activeGameID = nil
+        activeClipURL = nil
         clipStartedAt = nil
         if let stoppedGameID, let startedAt {
             let dwell = FeedPreviewDwell.dwellMS(from: startedAt, to: Date())
