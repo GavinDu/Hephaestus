@@ -673,6 +673,9 @@ private struct ForYouGamePage: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsExpressionDetails = false
+    // A URL in the feed does not establish that its image decoded successfully.
+    // Keep accessibility/media audits tied to the exact poster that rendered.
+    @State private var loadedPosterURL: String?
     @ObservedObject private var previewPlayback = FeedPreviewPlayback.shared
 
     let scope: SocialFeedScope
@@ -743,6 +746,7 @@ private struct ForYouGamePage: View {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFit()
+                            .onAppear { loadedPosterURL = poster }
                     } else if phase.error == nil {
                         ProgressView("Loading preview")
                             .tint(.white)
@@ -750,12 +754,14 @@ private struct ForYouGamePage: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         unavailablePreview
+                            .onAppear { loadedPosterURL = nil }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
             } else {
                 unavailablePreview
+                    .onAppear { loadedPosterURL = nil }
             }
             if previewPlayback.activeGameID == game.id && !reduceMotion {
                 FeedPreviewSurface(player: previewPlayback.player)
@@ -773,11 +779,13 @@ private struct ForYouGamePage: View {
             )
         }
         .clipped()
+        .onChange(of: game.previewPosterURL) { _, _ in loadedPosterURL = nil }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(ForYouPageLayout.mediaAccessibilityLabel(
             title: game.title,
-            hasPreviewMedia: game.previewPosterURL != nil || game.previewClipURL != nil
+            hasPreviewMedia: loadedPosterURL != nil && loadedPosterURL == game.previewPosterURL
         ))
+        .accessibilityIdentifier("feed.preview.media.\(game.id)")
         .accessibilityAddTraits(.isImage)
         .accessibilitySortPriority(100)
         // Preview media is decorative; it must not intercept vertical pager swipes.
