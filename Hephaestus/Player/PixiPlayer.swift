@@ -503,6 +503,7 @@ struct PixiPlayerSheet: View {
                 .progressViewStyle(.linear)
                 .frame(width: 180)
             Text("Loading \(title)…")
+                .accessibilityIdentifier("player.loading")
                 .font(.subheadline)
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
@@ -649,6 +650,7 @@ struct PixiPlayerSheet: View {
                                 .progressViewStyle(.linear)
                                 .frame(width: 180)
                             Text("Loading \(title)…")
+                                .accessibilityIdentifier("player.loading")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                             if showSlowHint {
