@@ -1082,6 +1082,7 @@ private struct ForYouGamePage: View {
                 .strokeBorder(ArcadePulseTheme.subtleBorder, lineWidth: 1)
         }
         .padding(.vertical, 12)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("feed.ipad.context")
     }
 
