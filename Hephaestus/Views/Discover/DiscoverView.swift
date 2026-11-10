@@ -1558,45 +1558,183 @@ private struct CreatorDiscoverySheet: View {
 private struct CreatorProfileSheet: View {
     let creatorID: String
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var profile: CreatorProfile?
     @State private var errorMessage: String?
     @State private var isLoading = true
+    @State private var playerRequest: PixiPlayerRequest?
 
     var body: some View {
         NavigationStack {
             Group {
-                if isLoading { ProgressView("Loading creator…") }
-                else if let profile {
-                    List {
-                        Section("Creator") {
-                            LabeledContent("Creator ID", value: profile.creator_id)
-                            LabeledContent("Published games", value: "\(profile.post_count)")
-                            LabeledContent("Followers", value: "\(profile.follower_count)")
-                            LabeledContent("Following", value: "\(profile.following_count)")
-                            Button(profile.is_following ? "Unfollow" : "Follow") {
-                                Task { await toggleFollow(profile.is_following) }
+                if isLoading {
+                    ProgressView("Loading creator…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let profile {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            VStack(alignment: .leading, spacing: 14) {
+                                Label("ARCADE PULSE • CREATOR", systemImage: "sparkles")
+                                    .font(.caption.weight(.bold))
+                                    .tracking(1)
+                                    .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                                HStack(alignment: .center, spacing: 14) {
+                                    Image(systemName: "person.crop.circle.fill")
+                                        .resizable()
+                                        .scaledToFit()
+                                        .foregroundStyle(ArcadePulseTheme.electricViolet)
+                                        .frame(width: 64, height: 64)
+                                        .accessibilityHidden(true)
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(profile.creator_id)
+                                            .font(.system(.title2, design: .rounded).weight(.bold))
+                                            .lineLimit(2)
+                                            .minimumScaleFactor(0.8)
+                                        Text("Game creator")
+                                            .font(.subheadline)
+                                            .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                HStack(spacing: 10) {
+                                    creatorMetric("Games", value: profile.post_count)
+                                    creatorMetric("Followers", value: profile.follower_count)
+                                    creatorMetric("Following", value: profile.following_count)
+                                }
+                                if profile.creator_id != BackendConfig.currentUserID {
+                                    Button {
+                                        Task { await toggleFollow(profile.is_following) }
+                                    } label: {
+                                        Label(profile.is_following ? "Following" : "Follow creator",
+                                              systemImage: profile.is_following ? "person.fill.checkmark" : "person.badge.plus")
+                                            .font(.headline.weight(.semibold))
+                                            .frame(maxWidth: .infinity, minHeight: 48)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(ArcadePulseTheme.electricViolet)
+                                    .accessibilityIdentifier("creator.profile.follow")
+                                }
                             }
-                            .disabled(profile.creator_id == BackendConfig.currentUserID)
-                        }
-                        Section("Public games") {
-                            if profile.posts.isEmpty { Text("No public games yet.").foregroundStyle(.secondary) }
-                            ForEach(profile.posts) { game in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(game.title).font(.headline)
-                                    if let caption = game.caption, !caption.isEmpty { Text(caption).font(.subheadline).foregroundStyle(.secondary) }
+                            .padding(18)
+                            .background(ArcadePulseTheme.surface,
+                                        in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("creator.profile.header")
+
+                            Text("Published games")
+                                .font(.system(.title2, design: .rounded).weight(.bold))
+                            if profile.posts.isEmpty {
+                                ContentUnavailableView(
+                                    "No public games yet",
+                                    systemImage: "gamecontroller",
+                                    description: Text("Published games from this creator will appear here."))
+                            } else {
+                                LazyVStack(spacing: 12) {
+                                    ForEach(profile.posts) { game in
+                                        creatorGameRow(game)
+                                    }
                                 }
                             }
                         }
+                        .frame(maxWidth: horizontalSizeClass == .regular ? 850 : 540)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 20)
                     }
+                    .accessibilityIdentifier("creator.profile.games")
                 } else {
-                    ContentUnavailableView("Couldn't load creator", systemImage: "person.crop.circle.badge.exclamationmark", description: Text(errorMessage ?? "Please try again."))
+                    VStack(spacing: 14) {
+                        ContentUnavailableView(
+                            "Couldn't load creator",
+                            systemImage: "person.crop.circle.badge.exclamationmark",
+                            description: Text(errorMessage ?? "Please try again."))
+                        Button("Try again") { Task { await load() } }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            .foregroundStyle(.white)
+            .background(ArcadePulseTheme.canvas)
+            .preferredColorScheme(.dark)
             .navigationTitle("Creator")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .task { await load() }
+            .fullScreenCover(item: $playerRequest) { request in
+                PixiPlayerSheet(gameID: request.gameID, title: request.title)
+            }
         }
+    }
+
+    private func creatorMetric(_ label: String, value: Int) -> some View {
+        VStack(spacing: 5) {
+            Text(value.formatted())
+                .font(.headline.weight(.bold))
+                .monospacedDigit()
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(ArcadePulseTheme.textSecondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func creatorGameRow(_ game: FeedGame) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                LinearGradient(colors: ArcadePulseTheme.fallbackPalette(gameID: game.id),
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                if let poster = game.previewPosterURL, let url = URL(string: poster) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFit()
+                        } else {
+                            Image(systemName: "gamecontroller.fill")
+                                .font(.title3)
+                        }
+                    }
+                } else {
+                    Image(systemName: "gamecontroller.fill")
+                        .font(.title3)
+                        .accessibilityLabel("Gameplay preview unavailable")
+                }
+            }
+            .frame(width: 112, height: 116)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(game.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                if let caption = game.caption, !caption.isEmpty {
+                    Text(caption)
+                        .font(.caption)
+                        .foregroundStyle(ArcadePulseTheme.textSecondary)
+                        .lineLimit(3)
+                }
+                if let parent = game.remixParentID, !parent.isEmpty {
+                    Label("Published remix", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                }
+                Button {
+                    playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
+                } label: {
+                    Label("Play game", systemImage: "play.fill")
+                        .font(.subheadline.weight(.bold))
+                        .frame(minWidth: 110, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(ArcadePulseTheme.playOrangeDeep)
+                .accessibilityIdentifier("creator.game.play.\(game.id)")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ArcadePulseTheme.surface,
+                    in: RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius))
     }
 
     private func load() async {
