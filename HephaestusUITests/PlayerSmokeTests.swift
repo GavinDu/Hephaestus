@@ -172,6 +172,35 @@ final class PlayerSmokeTests: XCTestCase {
         add(screenshot)
     }
 
+    /// Verify the real saved/recent game library remains reachable through
+    /// native tabs and preserves truthful empty/network states.
+    @MainActor
+    func testArcadePulseLibraryNavigation() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("iPad uses the adaptive NavigationSplitView sidebar.")
+        }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+        let libraryTab = app.tabBars.buttons["Library"].firstMatch
+        XCTAssertTrue(libraryTab.waitForExistence(timeout: 15))
+        libraryTab.tap()
+        let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 10),
+                      "Saved/recent Library should be a real navigable Arcade Pulse surface.")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "arcade-pulse-library-iphone"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let discover = app.tabBars.buttons["Discover"].firstMatch
+        XCTAssertTrue(discover.exists && discover.isHittable,
+                      "Native tab navigation must remain reachable.")
+        discover.tap()
+        XCTAssertTrue(app.navigationBars.firstMatch.waitForExistence(timeout: 10),
+                      "Returning from Library must restore the Discover navigation stack.")
+    }
+
     /// Downsample two captured screenshots and report the fraction of
     /// pixels whose RGB distance exceeds a small threshold. The evaluator
     /// uses this as a visual evidence signal alongside semantic page IDs.

@@ -21,6 +21,24 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("YOUR ARCADE", systemImage: "gamecontroller.fill")
+                            .font(.caption.weight(.bold))
+                            .tracking(0.8)
+                            .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                        Text("Jump back into play")
+                            .font(.system(.title2, design: .rounded).weight(.bold))
+                            .accessibilityAddTraits(.isHeader)
+                            .accessibilityIdentifier("library.arcadePulse")
+                        Text("Saved and recently played games in one place.")
+                            .font(.subheadline)
+                            .foregroundStyle(ArcadePulseTheme.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
+                    .listRowBackground(ArcadePulseTheme.surface)
+                }
                 if let errorMessage {
                     Section {
                         Label(errorMessage, systemImage: "wifi.exclamationmark")
@@ -46,7 +64,7 @@ struct LibraryView: View {
                                     .foregroundStyle(.white)
                                     .frame(width: 48, height: 48)
                                     .background(
-                                        LinearGradient(colors: [.purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing),
+                                        LinearGradient(colors: ArcadePulseTheme.fallbackPalette(gameID: game.id), startPoint: .topLeading, endPoint: .bottomTrailing),
                                         in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     )
                                 VStack(alignment: .leading, spacing: 4) {
@@ -56,13 +74,16 @@ struct LibraryView: View {
                                     }
                                 }
                                 Spacer(minLength: 4)
-                                Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(.tint)
+                                Image(systemName: "play.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(ArcadePulseTheme.playOrange)
                             }
                             .padding(.vertical, 4)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("Opens the game player")
+                        .listRowBackground(ArcadePulseTheme.surface)
                         .contextMenu {
                             Button("Remove from saved", systemImage: "bookmark.slash", role: .destructive) {
                                 Task { await removeSaved(game) }
@@ -95,7 +116,7 @@ struct LibraryView: View {
                                     .foregroundStyle(.white)
                                     .frame(width: 48, height: 48)
                                     .background(
-                                        LinearGradient(colors: [.indigo, .teal], startPoint: .topLeading, endPoint: .bottomTrailing),
+                                        LinearGradient(colors: ArcadePulseTheme.fallbackPalette(gameID: game.gameID), startPoint: .topLeading, endPoint: .bottomTrailing),
                                         in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     )
                                 VStack(alignment: .leading, spacing: 4) {
@@ -103,13 +124,16 @@ struct LibraryView: View {
                                     Text("Recently played").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 4)
-                                Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(.tint)
+                                Image(systemName: "play.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(ArcadePulseTheme.playOrange)
                             }
                             .padding(.vertical, 4)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("Opens the game player")
+                        .listRowBackground(ArcadePulseTheme.surface)
                         .contextMenu {
                             Button("Remove from recent", systemImage: "clock.badge.xmark", role: .destructive) {
                                 RecentGames.remove(gameID: game.gameID)
@@ -125,6 +149,10 @@ struct LibraryView: View {
                     }
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(ArcadePulseTheme.canvas)
+            .preferredColorScheme(.dark)
             .navigationTitle("Library")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
