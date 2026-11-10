@@ -366,9 +366,12 @@ final class PlayerSmokeTests: XCTestCase {
                 // explicitly instead of letting a passing swipe score hide
                 // a sideways/black screenshot. Preserve the ORIGINAL full
                 // screen and app-window attachments for review.
-                let screenshotMismatch = appImageWidth > appImageHeight &&
+                let rawStorageAspectMismatch = appImageWidth > appImageHeight &&
                     fullScreenWidth < fullScreenHeight
-                print("UI_EVALUATOR_SCREENSHOT_ORIENTATION orientation=landscape app_landscape=\(appImageWidth > appImageHeight) screen_landscape=\(fullScreenWidth > fullScreenHeight) mismatch=\(screenshotMismatch) raw_attachments_kept=true")
+                // Raw pixel dimensions do not account for PNG eXIf/TIFF
+                // orientation. The CI artifact verifier validates actual
+                // displayed geometry and keeps every original attachment.
+                print("UI_EVALUATOR_SCREENSHOT_ORIENTATION orientation=landscape app_raw_wider=\(appImageWidth > appImageHeight) screen_raw_wider=\(fullScreenWidth > fullScreenHeight) raw_storage_aspect_mismatch=\(rawStorageAspectMismatch) display_orientation_requires_exif=true raw_attachments_kept=true")
             }
             let beforeSwipe = XCTAttachment(screenshot: beforeCapture)
             beforeSwipe.name = "feed-ui-evaluator-before-swipe-\(profile.1)"
