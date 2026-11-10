@@ -68,6 +68,10 @@ struct ContentView: View {
                     .tag(section)
             }
         }
+        .tint(ArcadePulseTheme.electricViolet)
+        .toolbarBackground(ArcadePulseTheme.canvas, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
+        .preferredColorScheme(.dark)
     }
 
     private var expandedLayout: some View {
@@ -83,6 +87,8 @@ struct ContentView: View {
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(ArcadePulseTheme.surface)
             .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 250)
             .navigationTitle("Hephaestus")
         } detail: {
@@ -90,6 +96,8 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationSplitViewStyle(.balanced)
+        .tint(ArcadePulseTheme.electricViolet)
+        .preferredColorScheme(.dark)
     }
 
     private func navigationRow(_ section: AppSection) -> some View {
