@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import SwiftUI
 import Testing
 @testable import Hephaestus
 
@@ -22,6 +23,19 @@ struct HephaestusTests {
         #expect(Set(slots).count == ids.count)
         #expect(slots == [4, 0, 1, 2])
         #expect(ForYouPageLayout.fallbackPaletteIndex(gameID: "anything", paletteCount: 0) == 0)
+    }
+
+    @Test func compactHeightFeedUsesAccessibleScopeMenuWithoutHidingSearchNavigation() {
+        #expect(ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .compact, searchText: ""))
+        #expect(ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .compact, searchText: "   "))
+        #expect(!ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .compact, searchText: "Bobo"))
+        #expect(!ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .regular, searchText: ""))
+        #expect(!ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: nil, searchText: ""))
     }
 
     @Test func socialFeedScopesAreStableAndDistinct() {

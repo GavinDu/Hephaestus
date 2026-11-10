@@ -260,6 +260,20 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertEqual(scopeCaption.label, "FOR YOU",
                            "The default pager must identify the For You scope.")
 
+            if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
+                let scopeMenu = app.descendants(matching: .any)["feed.scope.menu"].firstMatch
+                XCTAssertTrue(scopeMenu.waitForExistence(timeout: 5),
+                              "Compact landscape needs an accessible For You/Following/Friends menu.")
+                XCTAssertTrue(scopeMenu.isHittable,
+                              "Landscape feed-scope switcher must remain reachable.")
+                let visiblePager = app.scrollViews.firstMatch
+                XCTAssertTrue(visiblePager.waitForExistence(timeout: 5))
+                let ratio = visiblePager.frame.height / max(app.frame.height, 1)
+                print("UI_EVALUATOR_COMPACT_LANDSCAPE_PAGE viewport_ratio=\(ratio) pager_height=\(visiblePager.frame.height) app_height=\(app.frame.height) scope_menu_hittable=\(scopeMenu.isHittable)")
+                XCTAssertGreaterThan(ratio, 0.60,
+                                     "The playable page should occupy over 60% of the landscape app height.")
+            }
+
             let swipeCue = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "label CONTAINS %@", "SWIPE TO EXPLORE"))
                 .firstMatch
@@ -341,6 +355,7 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertTrue(pager.waitForExistence(timeout: 5),
                           "For You should expose its accessible \(profile.1) swipe viewport.")
             let pageStatus = pager.value as? String ?? ""
+            print("UI_EVALUATOR_PAGER_VALUE_BEFORE orientation=\(profile.1) value=\(pageStatus)")
             let totalGames = Int(pageStatus.split(separator: " ").last ?? "") ?? 0
             XCTAssertGreaterThanOrEqual(totalGames, 2,
                                          "The real For You feed needs at least two games to verify paging; status=\(pageStatus).")
@@ -369,7 +384,20 @@ final class PlayerSmokeTests: XCTestCase {
                 }
             }
             print("UI EVALUATOR pager frame orientation=\(profile.1): \(pagerFrame)")
-            pager.swipeUp()
+            if expectedLandscape {
+                // A one-card, scroll-disabled pager is driven by its own
+                // DragGesture, not the UIScrollView's content scrolling.
+                // Use a real touch trace inside its content area in compact
+                // landscape, where XCTest's generic scroll gesture may be
+                // routed to the disabled scroll view and never reach the card.
+                // Only a changed LIVE game identity may pass the gate.
+                let start = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.82))
+                let end = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.18))
+                print("UI_EVALUATOR_PHYSICAL_DRAG orientation=landscape start=0.50,0.82 end=0.50,0.18")
+                start.press(forDuration: 0.1, thenDragTo: end)
+            } else {
+                pager.swipeUp()
+            }
 
             // A title merely intersecting app.frame can be a neighbor under
             // the tab bar, and the accessibility tree may be sampled while
@@ -403,6 +431,7 @@ final class PlayerSmokeTests: XCTestCase {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.3))
             }
             print("UI_EVALUATOR_SETTLED orientation=\(profile.1) before=\(beforePageID ?? "none") after=\(latestVisibleIDs) stable_samples=\(stableSamples)")
+            print("UI_EVALUATOR_PAGER_VALUE_AFTER orientation=\(profile.1) value=\(pager.value as? String ?? "missing")")
             if !didAdvance {
                 // Preserve the ORIGINAL simulator screen, even when the
                 // geometry assertion fails. A failed screenshot is an input

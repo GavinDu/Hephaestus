@@ -43,6 +43,15 @@ enum ForYouPageLayout {
         return vertical < 0 ? 1 : -1
     }
 
+    /// Recover vertical play space on compact-height landscapes, including
+    /// when Following/Friends feed content has not loaded yet.
+    static func prefersCompactScopeMenu(
+        verticalSizeClass: UserInterfaceSizeClass?, searchText: String
+    ) -> Bool {
+        verticalSizeClass == .compact &&
+            searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     // All social feeds use the same immersive vertical pager whenever real
     // cards are available. Searching still exposes the compact grid.
     static func shouldShowImmersivePager(searchText: String, hasGames: Bool) -> Bool {

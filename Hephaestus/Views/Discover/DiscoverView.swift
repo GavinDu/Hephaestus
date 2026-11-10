@@ -45,6 +45,7 @@ final class FeedRequestCoordinator {
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedFeed: SocialFeedScope = .forYou
     @State private var games: [FeedGame] = []
@@ -90,32 +91,30 @@ struct DiscoverView: View {
             searchText: searchText, hasGames: !visibleGames.isEmpty)
     }
 
+    // On short iPhone landscape viewports, put social-feed scopes in an
+    // accessible toolbar menu instead of sacrificing the game playfield
+    // to a permanent segmented picker. Search restores the explicit picker.
+    private var usesCompactFeedScopeMenu: Bool {
+        ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: verticalSizeClass, searchText: searchText)
+    }
+
     /// Feed stack, extracted from `body` so the body expression
     /// stays type-checkable: picker + pager/grid branches + the
     /// sheet/cover modifiers together timed out the compiler.
     private var feedContent: some View {
         VStack(spacing: 0) {
-                Picker("Feed", selection: $selectedFeed) {
-                    ForEach(SocialFeedScope.allCases) { scope in
-                        Text(scope.title).tag(scope)
+                if !usesCompactFeedScopeMenu {
+                    Picker("Feed", selection: $selectedFeed) {
+                        ForEach(SocialFeedScope.allCases) { scope in
+                            Text(scope.title).tag(scope)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityLabel("Social feed")
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-                .onChange(of: selectedFeed) { _, _ in
-                    // Do not display the prior scope's games (potentially
-                    // private Following/Friends cards) under a new tab while
-                    // the next authenticated request is still in flight.
-                    FeedPreviewPlayback.shared.stop()
-                    settledForYouGameID = nil
-                    games = []
-                    nextCursor = nil
-                    loadMoreError = nil
-                    errorMessage = nil
-                    Task { await load() }
+                    .pickerStyle(.segmented)
+                    .accessibilityLabel("Social feed")
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 8)
                 }
 
                 if showsImmersivePager {
@@ -268,11 +267,45 @@ struct DiscoverView: View {
                         }
                     }
                 }
+            // This observer remains active when compact landscape hides
+            // the segmented picker. Clear old private feed cards before
+            // requesting the newly selected social scope.
+            .onChange(of: selectedFeed) { _, _ in
+                FeedPreviewPlayback.shared.stop()
+                settledForYouGameID = nil
+                games = []
+                nextCursor = nil
+                loadMoreError = nil
+                errorMessage = nil
+                Task { await load() }
+            }
             .background(HephaestusDesign.pageBackground)
-            .navigationTitle("Discover")
+            .navigationTitle(usesCompactFeedScopeMenu ? selectedFeed.title : "Discover")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Find a game")
             .toolbar {
+                if usesCompactFeedScopeMenu {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            ForEach(SocialFeedScope.allCases) { scope in
+                                Button {
+                                    selectedFeed = scope
+                                } label: {
+                                    if selectedFeed == scope {
+                                        Label(scope.title, systemImage: "checkmark")
+                                    } else {
+                                        Text(scope.title)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "rectangle.stack")
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .accessibilityIdentifier("feed.scope.menu")
+                        .accessibilityLabel("Social feed: \(selectedFeed.title). Change feed")
+                    }
+                }
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         isFeedPreferencesPresented = true
@@ -419,6 +452,10 @@ struct DiscoverView: View {
     }
 
     private func play(_ game: FeedGame) {
+        // Prime the WebView on the actual Play action, rather than using a
+        // zero-distance finger-drag recognizer on the card CTA. This keeps
+        // vertical feed navigation independent of player prewarming.
+        PlayerWebViewPool.prewarm(gameID: game.id)
         RecentGames.record(gameID: game.id, title: game.title)
         // #58: the tap timestamp and poster travel with the request so
         // the sheet can measure tap-to-nav-ready and hold the poster
@@ -1004,9 +1041,10 @@ private struct ForYouGamePage: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("game.play")
                 .accessibilityHint("Opens this game in the player")
-                .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in
-                    PlayerWebViewPool.prewarm(gameID: game.id)
-                })
+                // Do not attach a zero-distance drag to Play. On short
+                // landscape screens that button fills the lower swipe
+                // start region and steals the parent page gesture.
+                // Prewarm in the button's action instead.
             }
             .accessibilitySortPriority(60)
         }
@@ -1187,6 +1225,11 @@ private struct ForYouGamePage: View {
 
 private struct ForYouPagerView: View {
     @Binding var settledGameID: String?
+    // Diagnostic-only instrumentation: distinguish a gesture that never
+    // arrived from one whose direction, or selected-page state, was wrong.
+    @State private var diagnosticDragCount = 0
+    @State private var diagnosticLastDragY = 0
+    @State private var diagnosticLastOffset = 0
     let scope: SocialFeedScope
     let games: [FeedGame]
     let savedGameIDs: Set<String>
@@ -1240,6 +1283,14 @@ private struct ForYouPagerView: View {
         games.firstIndex(where: { $0.id == selectedGame?.id }) ?? 0
     }
 
+    private var pagerAccessibilityValue: String {
+        #if DEBUG
+        return "Drag \(diagnosticDragCount) dy \(diagnosticLastDragY) offset \(diagnosticLastOffset); Game \(games.isEmpty ? 0 : currentIndex + 1) of \(games.count)"
+        #else
+        return "Game \(games.isEmpty ? 0 : currentIndex + 1) of \(games.count)"
+        #endif
+    }
+
     private func movePage(by offset: Int) {
         guard !games.isEmpty, offset != 0 else { return }
         let targetIndex = min(max(currentIndex + offset, 0), games.count - 1)
@@ -1265,7 +1316,7 @@ private struct ForYouPagerView: View {
             }
             .accessibilityIdentifier("feed.forYou.pager")
             .accessibilityLabel("\(scope.title) game feed")
-            .accessibilityValue("Game \(games.isEmpty ? 0 : currentIndex + 1) of \(games.count)")
+            .accessibilityValue(pagerAccessibilityValue)
             .accessibilityHint("Scroll up for the next game, or down for the previous game")
             .accessibilityScrollAction { edge in
                 if edge == .top {
@@ -1280,6 +1331,23 @@ private struct ForYouPagerView: View {
             .scrollDisabled(true)
             .scrollIndicators(.hidden)
             .clipped()
+            // Attach the physical page drag to the actual scroll viewport.
+            // With compact landscape removing the scope picker, a gesture on
+            // the outer GeometryReader could miss swipes begun on the page.
+            .contentShape(Rectangle())
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 35)
+                    .onEnded { value in
+                        let offset = ForYouPageLayout.pageOffsetForSwipe(
+                            translation: value.translation,
+                            predictedEndTranslation: value.predictedEndTranslation
+                        )
+                        diagnosticDragCount += 1
+                        diagnosticLastDragY = Int(value.translation.height)
+                        diagnosticLastOffset = offset
+                        movePage(by: offset)
+                    }
+            )
             .onAppear {
                 settledGameID = ForYouPageLayout.reconciledSelection(
                     currentID: settledGameID,
@@ -1297,16 +1365,6 @@ private struct ForYouPagerView: View {
                 if index >= max(0, games.count - 2) { onNearEnd() }
             }
         }
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 35)
-                .onEnded { value in
-                    let offset = ForYouPageLayout.pageOffsetForSwipe(
-                        translation: value.translation,
-                        predictedEndTranslation: value.predictedEndTranslation
-                    )
-                    movePage(by: offset)
-                }
-        )
     }
 }
 
