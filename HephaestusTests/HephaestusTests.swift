@@ -78,6 +78,20 @@ struct HephaestusTests {
         }
     }
 
+    @Test func remixEligibilityIsServerDecidedNotDerivedFromPublicFeedPresence() throws {
+        let blocked = try JSONDecoder().decode(
+            RemixEligibility.self,
+            from: Data(#"{"eligible":false,"reason":"Creator has not allowed remixing.","game_id":"game-1"}"#.utf8))
+        #expect(!blocked.eligible)
+        #expect(blocked.gameID == "game-1")
+        #expect(!blocked.reason.isEmpty)
+        let allowed = try JSONDecoder().decode(
+            RemixEligibility.self,
+            from: Data(#"{"eligible":true,"reason":"","game_id":"sample-ribbon-sky"}"#.utf8))
+        #expect(allowed.eligible)
+        #expect(allowed.gameID == "sample-ribbon-sky")
+    }
+
     @Test func socialFeedScopesAreStableAndDistinct() {
         #expect(SocialFeedScope.allCases.map(\.rawValue) == ["for_you", "following", "friends"])
         #expect(SocialFeedScope.allCases.map(\.title) == ["For You", "Following", "Friends"])
