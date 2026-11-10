@@ -355,6 +355,7 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertTrue(pager.waitForExistence(timeout: 5),
                           "For You should expose its accessible \(profile.1) swipe viewport.")
             let pageStatus = pager.value as? String ?? ""
+            print("UI_EVALUATOR_PAGER_VALUE_BEFORE orientation=\(profile.1) value=\(pageStatus)")
             let totalGames = Int(pageStatus.split(separator: " ").last ?? "") ?? 0
             XCTAssertGreaterThanOrEqual(totalGames, 2,
                                          "The real For You feed needs at least two games to verify paging; status=\(pageStatus).")
@@ -430,6 +431,7 @@ final class PlayerSmokeTests: XCTestCase {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.3))
             }
             print("UI_EVALUATOR_SETTLED orientation=\(profile.1) before=\(beforePageID ?? "none") after=\(latestVisibleIDs) stable_samples=\(stableSamples)")
+            print("UI_EVALUATOR_PAGER_VALUE_AFTER orientation=\(profile.1) value=\(pager.value as? String ?? "missing")")
             if !didAdvance {
                 // Preserve the ORIGINAL simulator screen, even when the
                 // geometry assertion fails. A failed screenshot is an input
