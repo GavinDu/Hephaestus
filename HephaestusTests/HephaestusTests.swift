@@ -64,7 +64,7 @@ struct HephaestusTests {
             verticalSizeClass: .compact, horizontalSizeClass: .compact, hasImmersivePager: true))
         #expect(!ForYouPageLayout.usesCompactLandscapeOverlay(
             verticalSizeClass: .regular, horizontalSizeClass: .compact, hasImmersivePager: true))
-        #expect(!ForYouPageLayout.usesCompactLandscapeOverlay(
+        #expect(ForYouPageLayout.usesCompactLandscapeOverlay(
             verticalSizeClass: .compact, horizontalSizeClass: .regular, hasImmersivePager: true))
         #expect(!ForYouPageLayout.usesCompactLandscapeOverlay(
             verticalSizeClass: .compact, horizontalSizeClass: .compact, hasImmersivePager: false))
