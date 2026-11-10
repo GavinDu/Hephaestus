@@ -81,6 +81,7 @@ struct DiscoverView: View {
     @State private var isLoadingMore = false
     @State private var loadMoreError: String?
     @State private var commentsGame: FeedGame?
+    @State private var detailGame: FeedGame?
     @State private var reportingGame: FeedGame?
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
@@ -476,6 +477,7 @@ struct DiscoverView: View {
                             if let id = game.ownerID { Task { await blockCreator(id) } }
                         },
                         onNotInterested: { game in Task { await markNotInterested(game) } },
+                        onOpenDetails: { detailGame = $0 },
                         onImpression: { game in
                             Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") }
                         },
@@ -550,6 +552,9 @@ struct DiscoverView: View {
             }
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
+            }
+            .sheet(item: $detailGame) { game in
+                ArcadePulseGameDetailsSheet(game: game)
             }
             .sheet(item: $reportingGame) { game in
                 ReportGameSheet(game: game)
@@ -851,6 +856,7 @@ private struct ForYouGamePage: View {
     let onReport: () -> Void
     let onBlockCreator: () -> Void
     let onNotInterested: () -> Void
+    let onOpenDetails: () -> Void
     let onImpression: () -> Void
 
     private var shareURL: URL {
@@ -970,6 +976,7 @@ private struct ForYouGamePage: View {
         iconAction("bubble.right", label: "View comments",
                    caption: vertical ? "Comment" : nil, action: onOpenComments)
         Menu {
+            Button("Game details", systemImage: "info.circle", action: onOpenDetails)
             Button("Report game", role: .destructive, action: onReport)
             Button("Not interested", action: onNotInterested)
             if game.ownerID != nil {
@@ -1389,6 +1396,7 @@ private struct ForYouPagerView: View {
     let onReport: (FeedGame) -> Void
     let onBlockCreator: (FeedGame) -> Void
     let onNotInterested: (FeedGame) -> Void
+    let onOpenDetails: (FeedGame) -> Void
     let onImpression: (FeedGame) -> Void
     let onNearEnd: () -> Void
 
@@ -1412,6 +1420,7 @@ private struct ForYouPagerView: View {
             onReport: { onReport(game) },
             onBlockCreator: { onBlockCreator(game) },
             onNotInterested: { onNotInterested(game) },
+            onOpenDetails: { onOpenDetails(game) },
             onImpression: { onImpression(game) }
         )
     }
@@ -1509,6 +1518,129 @@ private struct ForYouPagerView: View {
                 guard let id, let index = games.firstIndex(where: { $0.id == id }) else { return }
                 if index >= max(0, games.count - 2) { onNearEnd() }
             }
+        }
+    }
+}
+
+private struct ArcadePulseGameDetailsSheet: View {
+    let game: FeedGame
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dismiss) private var dismiss
+    @State private var playerRequest: PixiPlayerRequest?
+
+    private var shareURL: URL {
+        var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"),
+                                       resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "game", value: game.id)]
+        return components?.url ?? BackendConfig.baseURL
+    }
+
+    private var preview: some View {
+        ZStack {
+            LinearGradient(colors: ArcadePulseTheme.fallbackPalette(gameID: game.id),
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            if let poster = game.previewPosterURL, let url = URL(string: poster) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFit()
+                    } else {
+                        unavailablePreview
+                    }
+                }
+            } else {
+                unavailablePreview
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: horizontalSizeClass == .regular ? 335 : 240)
+        .clipShape(RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(game.previewPosterURL == nil
+                            ? "Gameplay preview unavailable"
+                            : "Game preview image or fallback for \(game.title)")
+        .accessibilityIdentifier("game.details.preview")
+    }
+
+    private var unavailablePreview: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "gamecontroller.fill")
+                .font(.system(size: 38))
+            Text("Preview unavailable")
+                .font(.headline)
+            Text("Play the actual game below")
+                .font(.caption)
+        }
+        .foregroundStyle(.white)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    preview
+                    Text(game.title)
+                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                        .foregroundStyle(.white)
+                        .accessibilityIdentifier("game.details.title")
+                    if let owner = game.ownerID, !owner.isEmpty {
+                        Label(game.creatorDisplayName?.isEmpty == false
+                              ? game.creatorDisplayName! : owner,
+                              systemImage: "person.crop.circle")
+                            .foregroundStyle(ArcadePulseTheme.textSecondary)
+                    }
+                    if let caption = game.caption, !caption.isEmpty {
+                        Text(caption)
+                            .font(.body)
+                            .foregroundStyle(ArcadePulseTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let topics = game.topics, !topics.isEmpty {
+                        Text(topics.prefix(5).map { "#\($0)" }.joined(separator: "  "))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let orientation = game.orientationLabel {
+                            Label(orientation, systemImage: "rotate.right")
+                        }
+                        if let version = game.publishedVersion {
+                            Label("Published version \(version)", systemImage: "square.stack.3d.up")
+                        }
+                        if let remixParent = game.remixParentID, !remixParent.isEmpty {
+                            Label("Published remix", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                    ArcadePulsePlayCTA {
+                        playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
+                    }
+                    ShareLink(item: shareURL) {
+                        Label("Share game", systemImage: "square.and.arrow.up")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(ArcadePulseTheme.electricViolet)
+                }
+                .frame(maxWidth: horizontalSizeClass == .regular ? 800 : 560)
+                .frame(maxWidth: .infinity)
+                .padding(18)
+            }
+            .background(ArcadePulseTheme.canvas)
+            .preferredColorScheme(.dark)
+            .navigationTitle("Game details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .fullScreenCover(item: $playerRequest) { request in
+                PixiPlayerSheet(gameID: request.gameID, title: request.title)
+            }
+            .accessibilityIdentifier("game.details.root")
         }
     }
 }
