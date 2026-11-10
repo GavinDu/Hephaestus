@@ -400,10 +400,10 @@ private struct PlayerStateCard<Content: View>: View {
         content
             .padding(HephaestusDesign.cardPadding)
             .frame(maxWidth: HephaestusDesign.stateCardMaxWidth)
-            .background(HephaestusDesign.cardBackground, in: RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: HephaestusDesign.sectionRadius, style: .continuous).strokeBorder(HephaestusDesign.subtleBorder, lineWidth: 1))
+            .background(ArcadePulseTheme.surface, in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius, style: .continuous).strokeBorder(ArcadePulseTheme.subtleBorder, lineWidth: 1))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.background)
+            .background(ArcadePulseTheme.canvas)
     }
 }
 
@@ -780,9 +780,21 @@ struct PixiPlayerSheet: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(HephaestusDesign.pageBackground)
+                .background(
+                    LinearGradient(
+                        colors: [
+                            ArcadePulseTheme.canvas,
+                            ArcadePulseTheme.electricViolet.opacity(0.19),
+                            ArcadePulseTheme.canvas
+                        ],
+                        startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
             }
             .navigationTitle(title)
+            .preferredColorScheme(.dark)
+            .tint(ArcadePulseTheme.electricViolet)
+            .toolbarBackground(ArcadePulseTheme.canvas, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 playerToolbar
@@ -898,7 +910,7 @@ struct PlayerResultSheet: View {
             VStack(spacing: 20) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 54))
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(ArcadePulseTheme.neonMagenta)
                     .accessibilityHidden(true)
                 VStack(spacing: 8) {
                     Text(result.result?.won == true ? "You did it!" : "Run complete")
@@ -931,6 +943,7 @@ struct PlayerResultSheet: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(ArcadePulseTheme.playOrangeDeep)
                     .frame(minHeight: HephaestusDesign.minimumActionHeight)
 
                     Button {
@@ -958,7 +971,10 @@ struct PlayerResultSheet: View {
             }
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(HephaestusDesign.pageBackground)
+            .background(ArcadePulseTheme.canvas)
+            .foregroundStyle(ArcadePulseTheme.textPrimary)
+            .preferredColorScheme(.dark)
+            .tint(ArcadePulseTheme.electricViolet)
             .navigationTitle("Run complete")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
