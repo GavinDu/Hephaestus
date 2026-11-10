@@ -279,7 +279,8 @@ struct DiscoverView: View {
                 errorMessage = nil
                 Task { await load() }
             }
-            .background(HephaestusDesign.pageBackground)
+            .background(ArcadePulseTheme.canvas)
+            .preferredColorScheme(.dark)
             .navigationTitle(usesCompactFeedScopeMenu ? selectedFeed.title : "Discover")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Find a game")
@@ -740,18 +741,7 @@ private struct ForYouGamePage: View {
     }
 
     private var palette: [Color] {
-        let palettes: [[Color]] = [
-            [Color(red: 0.31, green: 0.20, blue: 0.67), Color(red: 0.10, green: 0.55, blue: 0.69)],
-            [Color(red: 0.86, green: 0.29, blue: 0.48), Color(red: 0.98, green: 0.57, blue: 0.31)],
-            [Color(red: 0.10, green: 0.48, blue: 0.39), Color(red: 0.55, green: 0.69, blue: 0.30)],
-            [Color(red: 0.16, green: 0.33, blue: 0.68), Color(red: 0.39, green: 0.63, blue: 0.92)],
-            [Color(red: 0.49, green: 0.24, blue: 0.59), Color(red: 0.82, green: 0.40, blue: 0.63)]
-        ]
-        // The palette is decorative fallback only, never a fabricated
-        // preview. Use a stable, collision-tested ID hash shared with unit
-        // tests so real swipes produce distinguishable page screenshots.
-        return palettes[ForYouPageLayout.fallbackPaletteIndex(
-            gameID: game.id, paletteCount: palettes.count)]
+        ArcadePulseTheme.fallbackPalette(gameID: game.id)
     }
 
     private var creatorName: String {
@@ -837,27 +827,9 @@ private struct ForYouGamePage: View {
     // engagement counts when the backend has not provided verified totals.
     private func iconAction(_ symbol: String, label: String, caption: String? = nil,
                             action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 1) {
-                Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                if let caption {
-                    Text(caption)
-                        .font(.system(size: 10, weight: .semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .foregroundStyle(.white.opacity(0.94))
-                }
-            }
-            .frame(minWidth: 48, minHeight: caption == nil ? 44 : 58)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.white)
-        .accessibilityLabel(label)
+        ArcadePulseAction(symbol: symbol, accessibilityLabel: label,
+                          caption: caption, action: action)
     }
-
 
     private func sourceLabel(_ type: String) -> String {
         switch type {
@@ -989,28 +961,12 @@ private struct ForYouGamePage: View {
             }
             if !isCompact {
             HStack(spacing: 8) {
-                Button(action: onOpenCreator) {
-                    HStack(spacing: 7) {
-                        if let avatar = game.creatorAvatarURL, let url = URL(string: avatar) {
-                            AsyncImage(url: url) { phase in
-                                if let image = phase.image { image.resizable().scaledToFill() }
-                                else { Image(systemName: "person.crop.circle.fill").resizable().scaledToFit() }
-                            }
-                            .frame(width: isCompact ? 24 : 28, height: isCompact ? 24 : 28)
-                            .clipShape(Circle())
-                            .accessibilityHidden(true)
-                        } else {
-                            Image(systemName: "person.crop.circle").font(.title3)
-                        }
-                        Text(creatorName)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                    }
-                    .frame(minHeight: 44)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white)
-                .accessibilityLabel("View profile for \(creatorName)")
+                ArcadePulseCreatorIdentity(
+                    name: creatorName,
+                    avatarURL: game.creatorAvatarURL,
+                    foreground: ArcadePulseTheme.textPrimary,
+                    action: onOpenCreator
+                )
                 .accessibilitySortPriority(80)
                 Spacer(minLength: 4)
                 if canFollowCreator {
@@ -1029,18 +985,7 @@ private struct ForYouGamePage: View {
             }
             if isCompact { socialActions(vertical: false) }
             HStack(spacing: 10) {
-                Button(action: onPlay) {
-                    Label("Play now", systemImage: "play.fill")
-                        .font(dynamicTypeSize.isAccessibilitySize
-                            ? .system(size: 20, weight: .bold)
-                            : .subheadline.weight(.bold))
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .foregroundStyle(.black)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("game.play")
-                .accessibilityHint("Opens this game in the player")
+                ArcadePulsePlayCTA(action: onPlay)
                 // Do not attach a zero-distance drag to Play. On short
                 // landscape screens that button fills the lower swipe
                 // start region and steals the parent page gesture.
@@ -1082,9 +1027,9 @@ private struct ForYouGamePage: View {
                 // inventing a poster or implying recorded gameplay exists.
                 LinearGradient(
                     colors: [
-                        Color(uiColor: .systemBackground),
-                        palette[0].opacity(0.28),
-                        palette[1].opacity(0.22)
+                        ArcadePulseTheme.canvas,
+                        palette[0].opacity(0.30),
+                        palette[1].opacity(0.25)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
