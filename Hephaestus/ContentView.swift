@@ -9,6 +9,7 @@ import SwiftUI
 private enum AppSection: String, CaseIterable, Identifiable, Hashable {
     case discover
     case create
+    case studio
     case library
     case profile
 
@@ -18,6 +19,7 @@ private enum AppSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .discover: "Discover"
         case .create: "Create"
+        case .studio: "Studio"
         case .library: "Library"
         case .profile: "Profile"
         }
@@ -27,6 +29,7 @@ private enum AppSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .discover: "play.rectangle.on.rectangle"
         case .create: "plus.circle"
+        case .studio: "square.stack.3d.up"
         case .library: "bookmark"
         case .profile: "person.crop.circle"
         }
@@ -57,7 +60,8 @@ struct ContentView: View {
             get: { selection ?? .discover },
             set: { selection = $0 }
         )) {
-            ForEach(AppSection.allCases) { section in
+            // Studio is a full-width creator workspace, not a fifth cramped iPhone tab.
+            ForEach(AppSection.allCases.filter { $0 != .studio }) { section in
                 destination(for: section)
                     .tabItem {
                         Label(section.title, systemImage: section.symbol)
@@ -73,6 +77,7 @@ struct ContentView: View {
                 Section("Play") {
                     navigationRow(.discover)
                     navigationRow(.create)
+                    navigationRow(.studio)
                 }
                 Section("Your space") {
                     navigationRow(.library)
@@ -103,6 +108,8 @@ struct ContentView: View {
             DiscoverView()
         case .create:
             CreateView()
+        case .studio:
+            CreatorStudioView()
         case .library:
             LibraryView()
         case .profile:
