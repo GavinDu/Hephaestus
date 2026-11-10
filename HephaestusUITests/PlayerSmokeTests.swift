@@ -260,6 +260,13 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertEqual(scopeCaption.label, "FOR YOU",
                            "The default pager must identify the For You scope.")
 
+            if !expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
+                let portraitScopeMenu = app.descendants(matching: .any)["feed.scope.menu"].firstMatch
+                XCTAssertTrue(portraitScopeMenu.waitForExistence(timeout: 5),
+                              "Arcade Pulse portrait should reclaim feed space without hiding For You/Following/Friends.")
+                XCTAssertTrue(portraitScopeMenu.isHittable,
+                              "Portrait feed-scope menu must remain reachable after removing the permanent picker.")
+            }
             if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
                 let scopeMenu = app.descendants(matching: .any)["feed.scope.menu"].firstMatch
                 XCTAssertTrue(scopeMenu.waitForExistence(timeout: 5),
