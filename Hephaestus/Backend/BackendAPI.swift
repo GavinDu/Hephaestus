@@ -465,7 +465,7 @@ final class BackendAPI: ObservableObject {
     private struct CommentsResponse: Decodable { var comments: [SocialComment] }
     private struct CommentResponse: Decodable { var comment: SocialComment }
     private struct PostResponse: Decodable { var post: FeedGame }
-    private struct PublishBody: Encodable { var caption: String; var topics: [String]; var remix_parent_id: String? }
+    private struct PublishBody: Encodable { var caption: String; var topics: [String]; var remix_parent_id: String?; var allow_remixes: Bool }
     private struct ReactionBody: Encodable { var reaction: String }
     private struct CommentBody: Encodable { var body: String }
     private struct ReportBody: Encodable { var reason: String }
@@ -692,8 +692,10 @@ final class BackendAPI: ObservableObject {
         return try await send(CreatorDiscoveryResponse.self, request)
     }
 
-    func publishPost(gameID: String, caption: String, topics: [String], remixParentID: String? = nil) async throws -> FeedGame {
-        let body = PublishBody(caption: caption, topics: topics, remix_parent_id: remixParentID)
+    func publishPost(gameID: String, caption: String, topics: [String],
+                     remixParentID: String? = nil, allowRemixes: Bool = false) async throws -> FeedGame {
+        let body = PublishBody(caption: caption, topics: topics,
+                               remix_parent_id: remixParentID, allow_remixes: allowRemixes)
         let req = try makeRequest("v1/games/\(gameID)/publish", method: "POST", body: body)
         return try await send(PostResponse.self, req).post
     }
