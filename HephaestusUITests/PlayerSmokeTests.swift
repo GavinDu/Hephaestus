@@ -268,11 +268,17 @@ final class PlayerSmokeTests: XCTestCase {
                               "Portrait feed-scope menu must remain reachable after removing the permanent picker.")
             }
             if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
-                let scopeMenu = app.descendants(matching: .any)["feed.scope.menu"].firstMatch
+                let scopeMenu = app.descendants(matching: .any)["feed.landscape.scope"].firstMatch
+                let searchButton = app.descendants(matching: .any)["feed.landscape.search"].firstMatch
+                let moreMenu = app.descendants(matching: .any)["feed.landscape.more"].firstMatch
                 XCTAssertTrue(scopeMenu.waitForExistence(timeout: 5),
-                              "Compact landscape needs an accessible For You/Following/Friends menu.")
+                              "Compact landscape needs its overlaid social-feed scope menu.")
                 XCTAssertTrue(scopeMenu.isHittable,
                               "Landscape feed-scope switcher must remain reachable.")
+                XCTAssertTrue(searchButton.waitForExistence(timeout: 5) && searchButton.isHittable,
+                              "Landscape search must stay available after hiding navigation chrome.")
+                XCTAssertTrue(moreMenu.waitForExistence(timeout: 5) && moreMenu.isHittable,
+                              "Feed preferences, creators and refresh must stay reachable.")
                 let visiblePager = app.scrollViews.firstMatch
                 XCTAssertTrue(visiblePager.waitForExistence(timeout: 5))
                 let ratio = visiblePager.frame.height / max(app.frame.height, 1)
