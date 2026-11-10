@@ -106,6 +106,35 @@ final class PlayerSmokeTests: XCTestCase {
     }
 
 
+    /// Prove the actual Create screen, not a marketing concept, exposes
+    /// a reachable photo picker and blocks upload before consent and art.
+    @MainActor
+    func testArcadePulseCreateEntryConsentAndControls() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("The iPad creator layout uses sidebar navigation; test separately.")
+        }
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+        let createTab = app.tabBars.buttons["Create"].firstMatch
+        XCTAssertTrue(createTab.waitForExistence(timeout: 15),
+                      "Create must remain a visible native app tab.")
+        createTab.tap()
+        let hero = app.descendants(matching: .any)["create.pick.hero"].firstMatch
+        let choose = app.descendants(matching: .any)["create.pick.chooseDrawing"].firstMatch
+        let consent = app.switches["create.sourceConsent"].firstMatch
+        let analyze = app.buttons["create.pick.analyze"].firstMatch
+        XCTAssertTrue(hero.waitForExistence(timeout: 10))
+        XCTAssertTrue(choose.exists && choose.isHittable)
+        XCTAssertTrue(consent.exists && consent.isHittable)
+        XCTAssertTrue(analyze.exists && !analyze.isEnabled,
+                      "Analyze must stay disabled until artwork and source consent exist.")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "arcade-pulse-create-entry-iphone"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     /// Downsample two captured screenshots and report the fraction of
     /// pixels whose RGB distance exceeds a small threshold. The evaluator
     /// uses this as a visual evidence signal alongside semantic page IDs.
