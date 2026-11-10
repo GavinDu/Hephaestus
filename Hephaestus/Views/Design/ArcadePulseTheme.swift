@@ -73,7 +73,7 @@ enum HephaestusDesign {
 /// A real action; never mount a zero-distance DragGesture here. In a
 /// swipe-to-browse feed that would steal the pager's vertical contact.
 struct ArcadePulsePlayCTA: View {
-    @Environment(\.accessibilityContrast) private var contrast
+    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let action: () -> Void
 
