@@ -41,6 +41,22 @@ final class FeedRequestCoordinator {
     }
 }
 
+/// Keep the native search drawer out of compact iPhone landscape's tiny
+/// media viewport. The floating 44pt search button opens an actual sheet,
+/// while search results return to the standard native searchable grid.
+private struct FeedSearchVisibilityModifier: ViewModifier {
+    @Binding var text: String
+    let hidesNativeSearch: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if hidesNativeSearch {
+            content
+        } else {
+            content.searchable(text: $text, prompt: "Find a game")
+        }
+    }
+}
+
 /// Backend-backed social feeds use the verified bearer session when present.
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
@@ -383,7 +399,8 @@ struct DiscoverView: View {
             .navigationTitle(usesCompactFeedScopeMenu ? selectedFeed.title : "Discover")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(usesCompactLandscapeOverlay ? .hidden : .visible, for: .navigationBar)
-            .searchable(text: $searchText, prompt: "Find a game")
+            .modifier(FeedSearchVisibilityModifier(
+                text: $searchText, hidesNativeSearch: usesCompactLandscapeOverlay))
             .toolbar {
                 if usesCompactFeedScopeMenu {
                     ToolbarItem(placement: .topBarTrailing) {
