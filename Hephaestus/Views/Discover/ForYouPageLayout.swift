@@ -63,7 +63,9 @@ enum ForYouPageLayout {
         horizontalSizeClass: UserInterfaceSizeClass?,
         hasImmersivePager: Bool
     ) -> Bool {
-        hasImmersivePager && verticalSizeClass == .compact && horizontalSizeClass == .compact
+        // iPhone Plus/Pro Max can report a REGULAR horizontal class when landscape.
+        // Height is the decisive signal; the caller checks phone idiom.
+        hasImmersivePager && verticalSizeClass == .compact
     }
 
     // All social feeds use the same immersive vertical pager whenever real
