@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate real iPad XCTest screenshot orientation and publish reviewable raw PNGs.
+"""Validate iPhone/iPad XCTest screenshot orientation and publish reviewable raw PNGs.
 
 XCTest's app-window attachment can export as a portrait-framed image with
 large black bands even when the same simulator's full-screen capture is a
