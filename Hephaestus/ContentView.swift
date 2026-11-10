@@ -37,7 +37,10 @@ private enum AppSection: String, CaseIterable, Identifiable, Hashable {
 /// is used rather than device identity so Split View and resizable windows adapt too.
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var selection: AppSection? = .discover
+    // UI-only simulator entry for capturing the actual Create screen on iPad.
+    // No fake projects, media or backend responses are injected.
+    @State private var selection: AppSection? =
+        ProcessInfo.processInfo.arguments.contains("--ui-test-create-entry") ? .create : .discover
     // On regular-width iPads, enter the full-screen playable feed first.
     // The system sidebar button still lets people reveal navigation.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .detailOnly
