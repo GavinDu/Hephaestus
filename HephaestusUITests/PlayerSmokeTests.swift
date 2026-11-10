@@ -110,16 +110,19 @@ final class PlayerSmokeTests: XCTestCase {
     /// a reachable photo picker and blocks upload before consent and art.
     @MainActor
     func testArcadePulseCreateEntryConsentAndControls() throws {
-        guard UIDevice.current.userInterfaceIdiom == .phone else {
-            throw XCTSkip("The iPad creator layout uses sidebar navigation; test separately.")
-        }
         let app = XCUIApplication()
         self.app = app
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        // Capture the actual iPad Create destination without bypassing any
+        // permission, upload or game-generation actions.
+        if isPad { app.launchArguments.append("--ui-test-create-entry") }
         app.launch()
-        let createTab = app.tabBars.buttons["Create"].firstMatch
-        XCTAssertTrue(createTab.waitForExistence(timeout: 15),
-                      "Create must remain a visible native app tab.")
-        createTab.tap()
+        if !isPad {
+            let createTab = app.tabBars.buttons["Create"].firstMatch
+            XCTAssertTrue(createTab.waitForExistence(timeout: 15),
+                          "Create must remain a visible native app tab.")
+            createTab.tap()
+        }
         let hero = app.descendants(matching: .any)["create.pick.hero"].firstMatch
         let choose = app.descendants(matching: .any)["create.pick.chooseDrawing"].firstMatch
         let consent = app.switches["create.sourceConsent"].firstMatch
@@ -130,7 +133,7 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(analyze.exists && !analyze.isEnabled,
                       "Analyze must stay disabled until artwork and source consent exist.")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "arcade-pulse-create-entry-iphone"
+        screenshot.name = isPad ? "arcade-pulse-create-entry-ipad" : "arcade-pulse-create-entry-iphone"
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }
