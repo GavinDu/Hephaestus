@@ -106,6 +106,7 @@ struct DiscoverView: View {
     /// Compact phone landscape floats critical controls over the media stage.
     /// The app's bottom tab bar still provides Create, Library and Profile.
     private var usesCompactLandscapeOverlay: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone &&
         ForYouPageLayout.usesCompactLandscapeOverlay(
             verticalSizeClass: verticalSizeClass,
             horizontalSizeClass: horizontalSizeClass,
