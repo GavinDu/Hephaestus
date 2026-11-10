@@ -16,6 +16,24 @@ enum ForYouPageLayout {
         return hash % paletteCount
     }
 
+    /// Regular-width landscape tablets get a real information panel
+    /// beside the preview stage. Compact Split View, portrait and large
+    /// accessibility text preserve the single immersive stage instead.
+    static func showsIPadContextPanel(
+        width: CGFloat, height: CGFloat, isRegular: Bool, isAccessibilityText: Bool
+    ) -> Bool {
+        isRegular && width > height && width >= 1_024 && !isAccessibilityText
+    }
+
+    static func contextPanelWidth(containerWidth: CGFloat) -> CGFloat {
+        min(300, containerWidth * 0.27)
+    }
+
+    static func adaptiveLandscapeStageWidth(containerWidth: CGFloat) -> CGFloat {
+        let panel = contextPanelWidth(containerWidth: containerWidth)
+        return max(0, min(920, containerWidth - panel - 44))
+    }
+
     static func stageWidth(containerWidth: CGFloat, containerHeight: CGFloat, isRegular: Bool, isLandscape: Bool = false) -> CGFloat {
         guard isRegular else { return containerWidth }
         // iPad landscape uses the available canvas. Portrait simulator
