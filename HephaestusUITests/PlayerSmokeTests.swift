@@ -263,16 +263,15 @@ final class PlayerSmokeTests: XCTestCase {
             if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
                 let scopeMenu = app.descendants(matching: .any)["feed.scope.menu"].firstMatch
                 XCTAssertTrue(scopeMenu.waitForExistence(timeout: 5),
-                              "Compact landscape must retain a discoverable For You/Following/Friends selector.")
+                              "Compact landscape needs an accessible For You/Following/Friends menu.")
                 XCTAssertTrue(scopeMenu.isHittable,
-                              "Landscape feed scope menu must be reachable above the game.")
+                              "Landscape feed-scope switcher must remain reachable.")
                 let visiblePager = app.scrollViews.firstMatch
                 XCTAssertTrue(visiblePager.waitForExistence(timeout: 5))
-                let pagerHeight = visiblePager.frame.height
-                let viewportRatio = pagerHeight / max(app.frame.height, 1)
-                print("UI_EVALUATOR_COMPACT_LANDSCAPE_PAGE viewport_ratio=\(viewportRatio) pager_height=\(pagerHeight) app_height=\(app.frame.height) scope_menu_hittable=\(scopeMenu.isHittable)")
-                XCTAssertGreaterThan(viewportRatio, 0.60,
-                                     "A landscape playable post must occupy >60% of the app height, with scope/search still accessible.")
+                let ratio = visiblePager.frame.height / max(app.frame.height, 1)
+                print("UI_EVALUATOR_COMPACT_LANDSCAPE_PAGE viewport_ratio=\(ratio) pager_height=\(visiblePager.frame.height) app_height=\(app.frame.height) scope_menu_hittable=\(scopeMenu.isHittable)")
+                XCTAssertGreaterThan(ratio, 0.60,
+                                     "The playable page should occupy over 60% of the landscape app height.")
             }
 
             let swipeCue = app.descendants(matching: .any)
@@ -348,41 +347,95 @@ final class PlayerSmokeTests: XCTestCase {
 
             let pages = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title."))
-            XCTAssertGreaterThanOrEqual(pages.count, 2,
-                                        "The UI evaluator needs at least two feed pages in \(profile.1) to verify paging.")
-
-            // SwiftUI title nodes can have invalid activation points even
-            // while their page is rendered. Use viewport intersection.
+            // The renderer now materializes ONLY the selected game; a
+            // LazyVStack of several cards produced the verified landscape
+            // bleed. Require the backend-backed total count separately so
+            // one visible card cannot silently mask an untestable one-game feed.
+            let pager = app.scrollViews["feed.forYou.pager"].firstMatch
+            XCTAssertTrue(pager.waitForExistence(timeout: 5),
+                          "For You should expose its accessible \(profile.1) swipe viewport.")
+            let pageStatus = pager.value as? String ?? ""
+            let totalGames = Int(pageStatus.split(separator: " ").last ?? "") ?? 0
+            XCTAssertGreaterThanOrEqual(totalGames, 2,
+                                         "The real For You feed needs at least two games to verify paging; status=\(pageStatus).")
+            XCTAssertEqual(pages.count, 1,
+                           "Only the settled game page may enter the accessibility tree in \(profile.1).")
+            let pagerFrame = pager.frame
             let visiblePages = pages.allElementsBoundByIndex.filter {
-                $0.frame.intersects(app.frame)
+                let frame = $0.frame
+                // SwiftUI may report the layout frame for the next card
+                // even though the ScrollView visually clips it. Combine
+                // viewport intersection with native on-screen hit testing,
+                // rather than accepting the offscreen accessibility node.
+                return frame.width > 0 && frame.height > 0 &&
+                    frame.intersects(pagerFrame) && $0.isHittable
             }
             let beforePage = visiblePages.first
-            XCTAssertNotNil(beforePage, "The current \(profile.1) feed page should intersect the app viewport.")
+            XCTAssertNotNil(beforePage, "The current \(profile.1) feed title should intersect the pager viewport.")
             let beforePageID = beforePage?.identifier
-
-            // Scope the swipe to the first scroll view in the feed hierarchy;
-            // the custom identifier is not consistently surfaced by XCTest.
-            let pager = app.scrollViews.firstMatch
-            XCTAssertTrue(pager.waitForExistence(timeout: 5),
-                          "For You should expose a scrollable \(profile.1) feed viewport.")
-            print("UI EVALUATOR pager frame orientation=\(profile.1): \(pager.frame)")
+            if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
+                XCTAssertEqual(visiblePages.count, 1,
+                    "Exactly one game title must intersect the compact landscape pager before swipe; overlapping adjacent cards invalidate screenshot quality.")
+                let tabs = app.tabBars.firstMatch
+                if tabs.exists {
+                    XCTAssertLessThanOrEqual(play.frame.maxY, tabs.frame.minY + 1,
+                        "The landscape Play CTA must not be obscured by bottom navigation.")
+                }
+            }
+            print("UI EVALUATOR pager frame orientation=\(profile.1): \(pagerFrame)")
             pager.swipeUp()
 
-            let pageDeadline = Date().addingTimeInterval(8)
+            // A title merely intersecting app.frame can be a neighbor under
+            // the tab bar, and the accessibility tree may be sampled while
+            // a SwiftUI scroll transition is still settling. Require a NEW
+            // single hittable title inside the actual scroll viewport twice
+            // consecutively, not a momentary offscreen element.
+            let pageDeadline = Date().addingTimeInterval(20)
             var didAdvance = false
+            var candidateID: String?
+            var stableSamples = 0
+            var latestVisibleIDs: [String] = []
             while Date() < pageDeadline {
-                didAdvance = pages.allElementsBoundByIndex.contains {
-                    $0.frame.intersects(app.frame) && $0.identifier != beforePageID
+                let visible = pages.allElementsBoundByIndex.filter {
+                    let frame = $0.frame
+                    return frame.width > 0 && frame.height > 0 &&
+                        frame.intersects(pager.frame) && $0.isHittable
                 }
-                if didAdvance { break }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+                latestVisibleIDs = visible.map(\.identifier)
+                if visible.count == 1, let newID = latestVisibleIDs.first,
+                    newID != beforePageID {
+                    stableSamples = candidateID == newID ? stableSamples + 1 : 1
+                    candidateID = newID
+                    if stableSamples >= 2 {
+                        didAdvance = true
+                        break
+                    }
+                } else {
+                    candidateID = nil
+                    stableSamples = 0
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+            }
+            print("UI_EVALUATOR_SETTLED orientation=\(profile.1) before=\(beforePageID ?? "none") after=\(latestVisibleIDs) stable_samples=\(stableSamples)")
+            if !didAdvance {
+                // Preserve the ORIGINAL simulator screen, even when the
+                // geometry assertion fails. A failed screenshot is an input
+                // to review, never a passing/approved media sample.
+                let failedScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                failedScreen.name = "feed-full-screen-unsettled-after-swipe-\(profile.1)"
+                failedScreen.lifetime = .keepAlways
+                add(failedScreen)
             }
             XCTAssertTrue(didAdvance,
-                          "Swiping up should settle on a different game page in \(profile.1).")
+                          "Swipe must settle on exactly one NEW hittable page inside the \(profile.1) pager viewport; observed \(latestVisibleIDs).")
+            if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
+                XCTAssertEqual(latestVisibleIDs.count, 1,
+                    "Compact landscape must have one settled card after swipe.")
+            }
 
             let score = (hasSwipeCue ? 10 : 0) + touchTargetsPassed * 15 +
-                (pages.count >= 2 ? 15 : 0) + (didAdvance ? 15 : 0)
-            print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1) score=\(score)/100 touch_targets=\(touchTargetsPassed)/4 pages=\(pages.count) swipe_advanced=\(didAdvance)")
+                (totalGames >= 2 ? 15 : 0) + (didAdvance ? 15 : 0)
+            print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1) score=\(score)/100 touch_targets=\(touchTargetsPassed)/4 games=\(totalGames) visible_pages=\(pages.count) swipe_advanced=\(didAdvance)")
 
             let afterCapture = app.screenshot()
             if expectedLandscape {

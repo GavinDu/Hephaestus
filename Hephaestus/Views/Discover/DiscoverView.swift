@@ -91,8 +91,9 @@ struct DiscoverView: View {
             searchText: searchText, hasGames: !visibleGames.isEmpty)
     }
 
-    // Compact landscape needs room for the actual game post. Keep scope
-    // switching available via the navigation toolbar, including when empty.
+    // On short iPhone landscape viewports, put social-feed scopes in an
+    // accessible toolbar menu instead of sacrificing the game playfield
+    // to a permanent segmented picker. Search restores the explicit picker.
     private var usesCompactFeedScopeMenu: Bool {
         ForYouPageLayout.prefersCompactScopeMenu(
             verticalSizeClass: verticalSizeClass, searchText: searchText)
@@ -266,8 +267,9 @@ struct DiscoverView: View {
                         }
                     }
                 }
-            // Always observe scope transitions even while the picker is hidden.
-            // Discard stale private-scope cards before fetching the next feed.
+            // This observer remains active when compact landscape hides
+            // the segmented picker. Clear old private feed cards before
+            // requesting the newly selected social scope.
             .onChange(of: selectedFeed) { _, _ in
                 FeedPreviewPlayback.shared.stop()
                 settledForYouGameID = nil
@@ -741,8 +743,11 @@ private struct ForYouGamePage: View {
             [Color(red: 0.16, green: 0.33, blue: 0.68), Color(red: 0.39, green: 0.63, blue: 0.92)],
             [Color(red: 0.49, green: 0.24, blue: 0.59), Color(red: 0.82, green: 0.40, blue: 0.63)]
         ]
-        let seed = game.id.unicodeScalars.reduce(0) { $0 + Int($1.value) }
-        return palettes[seed % palettes.count]
+        // The palette is decorative fallback only, never a fabricated
+        // preview. Use a stable, collision-tested ID hash shared with unit
+        // tests so real swipes produce distinguishable page screenshots.
+        return palettes[ForYouPageLayout.fallbackPaletteIndex(
+            gameID: game.id, paletteCount: palettes.count)]
     }
 
     private var creatorName: String {
@@ -1086,7 +1091,7 @@ private struct ForYouGamePage: View {
                         mediaLayer
                         VStack {
                             HStack {
-                                if !dynamicTypeSize.isAccessibilitySize {
+                                if !dynamicTypeSize.isAccessibilitySize && !isLandscape {
                                     Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
                                         .font(.caption2.weight(.bold))
                                         .tracking(0.8)
@@ -1095,7 +1100,20 @@ private struct ForYouGamePage: View {
                                         .padding(.vertical, 8)
                                         .background(.black.opacity(0.28), in: Capsule())
                                 }
-                                Spacer()
+                                Spacer(minLength: 0)
+                                if !dynamicTypeSize.isAccessibilitySize && isLandscape {
+                                    // On a short phone landscape viewport the
+                                    // title overlay reaches the upper-left
+                                    // corner. Keep the gesture hint on the
+                                    // opposite side rather than over title text.
+                                    Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
+                                        .font(.caption2.weight(.bold))
+                                        .tracking(0.8)
+                                        .foregroundStyle(.white.opacity(0.9))
+                                        .padding(.horizontal, 11)
+                                        .padding(.vertical, 8)
+                                        .background(.black.opacity(0.28), in: Capsule())
+                                }
                                 if !dynamicTypeSize.isAccessibilitySize, let orientation = game.orientationLabel {
                                     Text(orientation)
                                         .font(.caption2.weight(.semibold))
@@ -1201,7 +1219,6 @@ private struct ForYouGamePage: View {
 }
 
 private struct ForYouPagerView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var settledGameID: String?
     let scope: SocialFeedScope
     let games: [FeedGame]
@@ -1244,99 +1261,85 @@ private struct ForYouPagerView: View {
         )
     }
 
-    /// Move one page for both direct touch gestures and VoiceOver scroll actions.
-    private func movePage(by offset: Int, using scrollProxy: ScrollViewProxy) {
-        guard !games.isEmpty else { return }
-        let currentIndex = games.firstIndex(where: { $0.id == settledGameID }) ?? 0
+    /// Keep only the selected card in the SwiftUI and accessibility trees.
+    /// ScrollView with a LazyVStack of adjacent cards leaked the next title
+    /// into compact iPhone landscape, even after clipping and scrollTo
+    /// alignment. A single-page renderer makes that failure impossible.
+    private var selectedGame: FeedGame? {
+        games.first(where: { $0.id == settledGameID }) ?? games.first
+    }
+
+    private var currentIndex: Int {
+        games.firstIndex(where: { $0.id == selectedGame?.id }) ?? 0
+    }
+
+    private func movePage(by offset: Int) {
+        guard !games.isEmpty, offset != 0 else { return }
         let targetIndex = min(max(currentIndex + offset, 0), games.count - 1)
         guard targetIndex != currentIndex else { return }
-        let targetID = games[targetIndex].id
-        settledGameID = targetID
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
-            scrollProxy.scrollTo(targetID, anchor: .top)
+        // One state transition updates identity, media and accessible title
+        // together. No stored scroll offset or intermediate card is exposed.
+        withTransaction(Transaction(animation: nil)) {
+            settledGameID = games[targetIndex].id
         }
     }
 
     var body: some View {
-        // The feed selector and search controls sit above this pager. Use the
-        // actual remaining viewport height instead of the outer device height.
-        // A small explicit swipe recognizer advances exactly one page; relying
-        // on nested SwiftUI paging gestures was inconsistent on iPhone.
-        ScrollViewReader { scrollProxy in
-            GeometryReader { viewport in
-                ScrollView(.vertical) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(games) { game in
-                            card(for: game)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: viewport.size.height)
-                                .id(game.id)
-                                .accessibilityElement(children: .contain)
-                                .accessibilityHint("Swipe up for the next game")
-                        }
-                    }
-                    .scrollTargetLayout()
+        GeometryReader { viewport in
+            ScrollView(.vertical) {
+                if let game = selectedGame {
+                    card(for: game)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: viewport.size.height)
+                        .id(game.id)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityHint("Swipe up for the next game")
                 }
-                .accessibilityIdentifier("feed.forYou.pager")
-                .scrollIndicators(.hidden)
-                .scrollDisabled(true)
-                .accessibilityLabel("\(scope.title) game feed")
-                .accessibilityHint("Scroll up for the next game, or down for the previous game")
-                // ScrollView supplies its own accessibility container semantics;
-                // the explicit scroll action below provides VoiceOver paging.
-                .accessibilityScrollAction { edge in
-                    if edge == .top {
-                        movePage(by: 1, using: scrollProxy)
-                    } else if edge == .bottom {
-                        movePage(by: -1, using: scrollProxy)
-                    }
-                }
-                .scrollTargetBehavior(.paging)
-                .scrollPosition(id: $settledGameID)
-                .onAppear {
-                    settledGameID = ForYouPageLayout.reconciledSelection(
-                        currentID: settledGameID,
-                        availableIDs: games.map(\.id)
-                    )
-                }
-                .onChange(of: games.map(\.id)) { _, ids in
-                    // Refreshes and pagination can remove the currently selected game.
-                    // Never leave the scroll-position binding pointing at a stale page.
-                    let reconciled = ForYouPageLayout.reconciledSelection(
-                        currentID: settledGameID,
-                        availableIDs: ids
-                    )
-                    if reconciled != settledGameID {
-                        settledGameID = reconciled
-                        if let reconciled {
-                            scrollProxy.scrollTo(reconciled, anchor: .top)
-                        }
-                    }
-                }
-                .onChange(of: settledGameID) { _, id in
-                    guard let id, let index = games.firstIndex(where: { $0.id == id }) else { return }
-                    if index >= max(0, games.count - 2) { onNearEnd() }
-                }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: settledGameID)
             }
-            // The pager owns vertical navigation. A simultaneous recognizer
-            // can lose XCTest and real touch drags to overlaid buttons/media
-            // on large iPad pages, leaving the selected game unchanged.
-            // A high-priority drag still requires 35pt travel, so ordinary
-            // Play / Like / Save taps retain their button actions.
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 35)
-                    .onEnded { value in
-                        guard !games.isEmpty else { return }
-                        let offset = ForYouPageLayout.pageOffsetForSwipe(
-                            translation: value.translation,
-                            predictedEndTranslation: value.predictedEndTranslation
-                        )
-                        guard offset != 0 else { return }
-                        movePage(by: offset, using: scrollProxy)
-                    }
-            )
+            .accessibilityIdentifier("feed.forYou.pager")
+            .accessibilityLabel("\(scope.title) game feed")
+            .accessibilityValue("Game \(games.isEmpty ? 0 : currentIndex + 1) of \(games.count)")
+            .accessibilityHint("Scroll up for the next game, or down for the previous game")
+            .accessibilityScrollAction { edge in
+                if edge == .top {
+                    movePage(by: 1)
+                } else if edge == .bottom {
+                    movePage(by: -1)
+                }
+            }
+            // The screen shows one card only. ScrollView exists for familiar
+            // VoiceOver scroll semantics and UI automation; physical touch
+            // navigation is owned by the high-priority drag gesture.
+            .scrollDisabled(true)
+            .scrollIndicators(.hidden)
+            .clipped()
+            .onAppear {
+                settledGameID = ForYouPageLayout.reconciledSelection(
+                    currentID: settledGameID,
+                    availableIDs: games.map(\.id)
+                )
+            }
+            .onChange(of: games.map(\.id)) { _, ids in
+                settledGameID = ForYouPageLayout.reconciledSelection(
+                    currentID: settledGameID,
+                    availableIDs: ids
+                )
+            }
+            .onChange(of: settledGameID) { _, id in
+                guard let id, let index = games.firstIndex(where: { $0.id == id }) else { return }
+                if index >= max(0, games.count - 2) { onNearEnd() }
+            }
         }
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 35)
+                .onEnded { value in
+                    let offset = ForYouPageLayout.pageOffsetForSwipe(
+                        translation: value.translation,
+                        predictedEndTranslation: value.predictedEndTranslation
+                    )
+                    movePage(by: offset)
+                }
+        )
     }
 }
 

@@ -4,6 +4,18 @@ import SwiftUI
 /// Compact layouts fill the available width; regular layouts preserve a
 /// portrait 9:16 stage with a readable maximum width.
 enum ForYouPageLayout {
+    /// A stable per-game palette slot for truthful fallback artwork when no
+    /// approved poster/clip exists. Hash through a larger prime first: reducing
+    /// modulo a five-color palette inside the loop makes 31 ≡ 1 (mod 5)
+    /// and reintroduces the same anagram/same-sum collisions as before.
+    static func fallbackPaletteIndex(gameID: String, paletteCount: Int) -> Int {
+        guard paletteCount > 0 else { return 0 }
+        let hash = gameID.utf8.reduce(0) { partial, byte in
+            (partial * 31 + Int(byte)) % 101
+        }
+        return hash % paletteCount
+    }
+
     static func stageWidth(containerWidth: CGFloat, containerHeight: CGFloat, isRegular: Bool, isLandscape: Bool = false) -> CGFloat {
         guard isRegular else { return containerWidth }
         // iPad landscape uses the available canvas. Portrait simulator
@@ -31,10 +43,8 @@ enum ForYouPageLayout {
         return vertical < 0 ? 1 : -1
     }
 
-    /// Use one navigation-bar scope menu in compact-height landscape to
-    /// recover the vertical space consumed by a segmented picker. Searching
-    /// intentionally restores the picker so multi-result browsing remains
-    /// explicit. Empty and loading feeds still need a scope switcher.
+    /// Recover vertical play space on compact-height landscapes, including
+    /// when Following/Friends feed content has not loaded yet.
     static func prefersCompactScopeMenu(
         verticalSizeClass: UserInterfaceSizeClass?, searchText: String
     ) -> Bool {

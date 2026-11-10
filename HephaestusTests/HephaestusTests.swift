@@ -11,14 +11,25 @@ import Testing
 // App-level tests will regrow around the WebView player and the
 // creation flow.
 struct HephaestusTests {
+    @Test func shippedFeedFallbackPalettesDoNotCollide() {
+        // Run against the same real game IDs used by native screenshot QA.
+        // The old scalar sum and an in-loop modulo five both mapped Ribbon
+        // and Bobo to one fallback gradient, even after a successful swipe.
+        let ids = ["sample-ribbon-sky", "sample-rainbow-bear",
+                   "escape-from-injection", "penguin-heartlight-rescue"]
+        let slots = ids.map {
+            ForYouPageLayout.fallbackPaletteIndex(gameID: $0, paletteCount: 5)
+        }
+        #expect(Set(slots).count == ids.count)
+        #expect(slots == [4, 0, 1, 2])
+        #expect(ForYouPageLayout.fallbackPaletteIndex(gameID: "anything", paletteCount: 0) == 0)
+    }
+
     @Test func compactHeightFeedUsesAccessibleScopeMenuWithoutHidingSearchNavigation() {
-        // Landscape on iPhone: collapse the redundant segmented row but keep
-        // the menu even before feed content loads or in empty scopes.
         #expect(ForYouPageLayout.prefersCompactScopeMenu(
             verticalSizeClass: .compact, searchText: ""))
         #expect(ForYouPageLayout.prefersCompactScopeMenu(
             verticalSizeClass: .compact, searchText: "   "))
-        // Search/portrait/iPad keep their existing explicit picker.
         #expect(!ForYouPageLayout.prefersCompactScopeMenu(
             verticalSizeClass: .compact, searchText: "Bobo"))
         #expect(!ForYouPageLayout.prefersCompactScopeMenu(
