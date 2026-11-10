@@ -178,7 +178,6 @@ struct DiscoverView: View {
         }
         .foregroundStyle(.white)
         .background(.black.opacity(0.72), in: Capsule())
-        .accessibilityIdentifier("feed.landscape.controls")
     }
 
     private var compactSearchSheet: some View {
