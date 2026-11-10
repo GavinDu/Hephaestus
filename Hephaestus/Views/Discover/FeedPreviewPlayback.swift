@@ -6,22 +6,7 @@ import SwiftUI
 
 // MARK: - Shared pieces
 
-/// Semantic SwiftUI tokens shared by discovery, profiles, saved games, and player entry points.
-enum HephaestusDesign {
-    static let pageBackground = Color(uiColor: .systemGroupedBackground)
-    static let cardBackground = Color(uiColor: .secondarySystemGroupedBackground)
-    static let elevatedBackground = Color(uiColor: .tertiarySystemGroupedBackground)
-    static let cardRadius: CGFloat = 22
-    static let compactCardRadius: CGFloat = 14
-    static let sectionRadius: CGFloat = 20
-    static let horizontalInset: CGFloat = 16
-    static let sectionSpacing: CGFloat = 16
-    static let minimumActionHeight: CGFloat = 44
-    static let cardPadding: CGFloat = 24
-    static let stateCardMaxWidth: CGFloat = 360
-    static let stateIconSize: CGFloat = 40
-    static let subtleBorder = Color(uiColor: .separator).opacity(0.18)
-}
+// Semantic design tokens now live in Views/Design/ArcadePulseTheme.swift.
 
 /// Recently played games, persisted locally.
 struct RecentGame: Codable, Identifiable {
