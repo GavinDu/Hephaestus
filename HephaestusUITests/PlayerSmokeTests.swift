@@ -140,6 +140,29 @@ final class PlayerSmokeTests: XCTestCase {
                       "Closing creator profile must preserve the playable feed.")
     }
 
+    /// The Studio must not pretend to show private drafts or generated
+    /// analytics when no authenticated session or backend evidence exists.
+    @MainActor
+    func testArcadePulseStudioSignedOutState() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Creator Studio is a native iPad sidebar destination.")
+        }
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-studio")
+        app.launch()
+        let root = app.descendants(matching: .any)["studio.arcadePulse.root"].firstMatch
+        XCTAssertTrue(root.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Sign in to see your projects"].firstMatch.exists,
+                      "Signed-out Studio must explain that private drafts require sign-in.")
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
+                       "Without an authenticated owner there can be no playable project card.")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "arcade-pulse-ipad-creator-studio-signed-out"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     /// Downsample two captured screenshots and report the fraction of
     /// pixels whose RGB distance exceeds a small threshold. The evaluator
     /// uses this as a visual evidence signal alongside semantic page IDs.
