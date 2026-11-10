@@ -59,6 +59,25 @@ struct HephaestusTests {
             verticalSizeClass: .regular, horizontalSizeClass: .regular, searchText: ""))
     }
 
+    @Test func arcadePulseIPadContextPanelNeverCrushesTheGameStage() {
+        #expect(ForYouPageLayout.showsIPadContextPanel(
+            width: 1_366, height: 1_024, isRegular: true, isAccessibilityText: false))
+        #expect(!ForYouPageLayout.showsIPadContextPanel(
+            width: 1_024, height: 1_366, isRegular: true, isAccessibilityText: false))
+        #expect(!ForYouPageLayout.showsIPadContextPanel(
+            width: 860, height: 700, isRegular: true, isAccessibilityText: false))
+        #expect(!ForYouPageLayout.showsIPadContextPanel(
+            width: 1_366, height: 1_024, isRegular: true, isAccessibilityText: true))
+        #expect(!ForYouPageLayout.showsIPadContextPanel(
+            width: 1_366, height: 1_024, isRegular: false, isAccessibilityText: false))
+        for width: CGFloat in [1_024, 1_194, 1_366] {
+            let stage = ForYouPageLayout.adaptiveLandscapeStageWidth(containerWidth: width)
+            let panel = ForYouPageLayout.contextPanelWidth(containerWidth: width)
+            #expect(stage / width > 0.60)
+            #expect(stage + panel + 44 <= width)
+        }
+    }
+
     @Test func socialFeedScopesAreStableAndDistinct() {
         #expect(SocialFeedScope.allCases.map(\.rawValue) == ["for_you", "following", "friends"])
         #expect(SocialFeedScope.allCases.map(\.title) == ["For You", "Following", "Friends"])
