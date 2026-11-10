@@ -395,6 +395,20 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertEqual(pages.count, 1,
                            "Only the settled game page may enter the accessibility tree in \(profile.1).")
             let pagerFrame = pager.frame
+            // A swipe score can be perfect while the main playable visual
+            // shrinks to a tiny strip. Check the *real* media container's
+            // visible area inside the pager separately from playback
+            // readiness; gradients count for geometry, never as previews.
+            XCTAssertTrue(mediaSurface.exists,
+                          "Arcade Pulse needs an actual preview-media surface, even when preview media is unavailable.")
+            let mediaFrame = mediaSurface.frame
+            let visibleMediaFrame = mediaFrame.intersection(pagerFrame)
+            let viewportArea = max(1, pagerFrame.width * pagerFrame.height)
+            let mediaOccupancy = visibleMediaFrame.isNull ? 0 :
+                max(0, visibleMediaFrame.width * visibleMediaFrame.height) / viewportArea
+            print("UI_EVALUATOR_MEDIA_OCCUPANCY orientation=\(profile.1) ratio=\(mediaOccupancy) media_frame=\(mediaFrame) pager_frame=\(pagerFrame) preview_status=\(mediaReadiness)")
+            XCTAssertGreaterThanOrEqual(mediaOccupancy, 0.55,
+                "Arcade Pulse media stage must dominate the real iPhone/iPad pager; a small card cannot earn a 100/100 swipe score.")
             let visiblePages = pages.allElementsBoundByIndex.filter {
                 let frame = $0.frame
                 // SwiftUI may report the layout frame for the next card
