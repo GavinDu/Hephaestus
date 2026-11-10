@@ -250,6 +250,69 @@ final class PlayerSmokeTests: XCTestCase {
                       "Closing game details must preserve the browsable origin post.")
     }
 
+    /// Verify the actual social sheet on a live feed, not the design render.
+    /// No synthetic comments or engagement counters are injected.
+    @MainActor
+    func testArcadePulseCommentsSheetAndSafeAreaComposer() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+        let commentAction = app.buttons["View comments"].firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let until = Date().addingTimeInterval(120)
+        while !commentAction.exists && Date() < until {
+            if retry.waitForExistence(timeout: 4) { retry.tap() }
+            _ = commentAction.waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(commentAction.exists,
+                      "Real For You posts must offer an accessible comment action.")
+        commentAction.tap()
+        // An axis:.vertical SwiftUI TextField can surface as a UITextView
+        // rather than the generic accessibility wrapper carrying the SwiftUI
+        // identifier. Require an actual *editable* native field, not an
+        // adjacent placeholder StaticText or screenshot-only decoration.
+        let identifiedComposer = app.descendants(matching: .any)["comments.composer"].firstMatch
+        let editView = app.textViews.firstMatch
+        let editField = app.textFields.firstMatch
+        let composer: XCUIElement
+        if identifiedComposer.waitForExistence(timeout: 3) &&
+           (identifiedComposer.elementType == .textView ||
+            identifiedComposer.elementType == .textField) {
+            composer = identifiedComposer
+        } else if editView.waitForExistence(timeout: 5) {
+            composer = editView
+        } else {
+            composer = editField
+        }
+        let send = app.buttons["comments.send"].firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 10),
+                      "Arcade Pulse comments must expose a real editable native text view or text field, not just a caption.")
+        XCTAssertTrue(composer.elementType == .textView || composer.elementType == .textField,
+                      "The composer must be an editable element for VoiceOver and XCTest.")
+        XCTAssertTrue(composer.isHittable,
+                      "Comment composer must remain reachable above the safe-area inset.")
+        let unavailable = app.descendants(matching: .any)["comments.send.unavailable"].firstMatch
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 5),
+                      "Empty comments must show an explicitly unavailable Send affordance.")
+        XCTAssertFalse(send.exists,
+                       "No actionable Send button may exist before the user enters a comment.")
+        composer.tap()
+        composer.typeText("Nice game")
+        XCTAssertTrue(send.waitForExistence(timeout: 5) && send.isEnabled,
+                      "Typing non-empty text must expose a real enabled Send button without submitting.")
+        // Do not submit this smoke-test draft to the real public comment API.
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "arcade-pulse-comments-sheet"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let done = app.buttons["Done"].firstMatch
+        XCTAssertTrue(done.exists && done.isHittable)
+        done.tap()
+        XCTAssertTrue(app.buttons["game.play"].firstMatch.waitForExistence(timeout: 10),
+                      "Closing comments must return to the same browsable game feed.")
+    }
+
     /// Downsample two captured screenshots and report the fraction of
     /// pixels whose RGB distance exceeds a small threshold. The evaluator
     /// uses this as a visual evidence signal alongside semantic page IDs.
@@ -698,13 +761,16 @@ final class PlayerSmokeTests: XCTestCase {
         let startedLoading = Date()
         let feedDeadline = startedLoading.addingTimeInterval(120)
         var pendingRetryUsed = false
+        var lastRetry = Date.distantPast
         while !play.exists && Date() < feedDeadline {
-            if retry.waitForExistence(timeout: 4) {
+            if Date().timeIntervalSince(lastRetry) >= 15,
+               retry.exists && retry.isHittable && retry.isEnabled {
                 print("UI EVALUATOR ACCESSIBILITY: feed error; retrying live backend")
                 retry.tap()
-            } else if !pendingRetryUsed &&
-                        Date().timeIntervalSince(startedLoading) > 40 &&
-                        pendingRetry.exists {
+                lastRetry = Date()
+            } else if Date().timeIntervalSince(lastRetry) >= 15 &&
+                        Date().timeIntervalSince(startedLoading) > 20 &&
+                        pendingRetry.exists && pendingRetry.isHittable && pendingRetry.isEnabled {
                 // Accessible XXXL can remain in a pending loading skeleton
                 // after the backend has warmed. This is a REAL, user-visible
                 // Retry loading control, not a test fixture or mocked feed.
@@ -723,7 +789,8 @@ final class PlayerSmokeTests: XCTestCase {
                         dy: frame.midY - bounds.minY
                     ))
                     pendingRetryUsed = true
-                    print("UI EVALUATOR ACCESSIBILITY: retry stalled live feed once at XXL/XXXL")
+                    lastRetry = Date()
+                    print("UI EVALUATOR ACCESSIBILITY: retry stalled live feed at XXL/XXXL")
                     point.tap()
                 }
             }
