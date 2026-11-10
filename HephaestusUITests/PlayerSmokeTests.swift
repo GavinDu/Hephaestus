@@ -106,6 +106,34 @@ final class PlayerSmokeTests: XCTestCase {
     }
 
 
+    /// Capture the actual Library screen through the native app tab. Counts,
+    /// recent games and saved posters come from local state and live backend;
+    /// this test does not inject synthetic cards or preview artwork.
+    @MainActor
+    func testArcadePulseLibraryAndTabNavigation() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("Regular iPad uses the adaptive sidebar instead of the tab bar.")
+        }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+        let libraryTab = app.tabBars.buttons["Library"].firstMatch
+        XCTAssertTrue(libraryTab.waitForExistence(timeout: 15),
+                      "Library remains reachable from the compact app navigation.")
+        libraryTab.tap()
+        XCTAssertTrue(app.navigationBars["Library"].firstMatch.waitForExistence(timeout: 12),
+                      "Library should use its native accessible navigation heading.")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "arcade-pulse-library-iphone"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let discoverTab = app.tabBars.buttons["Discover"].firstMatch
+        XCTAssertTrue(discoverTab.exists && discoverTab.isHittable)
+        discoverTab.tap()
+        XCTAssertTrue(app.navigationBars.firstMatch.waitForExistence(timeout: 10))
+    }
+
     /// Downsample two captured screenshots and report the fraction of
     /// pixels whose RGB distance exceeds a small threshold. The evaluator
     /// uses this as a visual evidence signal alongside semantic page IDs.
