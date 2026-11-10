@@ -1016,11 +1016,85 @@ private struct ForYouGamePage: View {
         }
     }
 
+    /// Tablet-only social context stays beside a large real playable preview,
+    /// never on top of gameplay or in compact Split View. Use backend
+    /// metadata only; mockup play counts, star ratings and creator figures
+    /// are illustrative and must never appear as product facts.
+    private var ipadContextPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("GAME SPOTLIGHT", systemImage: "gamecontroller.fill")
+                .font(.caption.weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(ArcadePulseTheme.neonMagenta)
+
+            Text(game.title)
+                .font(.system(.title2, design: .rounded).weight(.bold))
+                .foregroundStyle(ArcadePulseTheme.textPrimary)
+                .lineLimit(3)
+                .minimumScaleFactor(0.85)
+
+            if let owner = game.ownerID, !owner.isEmpty {
+                ArcadePulseCreatorIdentity(
+                    name: creatorName,
+                    avatarURL: game.creatorAvatarURL,
+                    foreground: ArcadePulseTheme.textPrimary,
+                    action: onOpenCreator)
+            }
+
+            if let caption = game.caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.subheadline)
+                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                    .lineLimit(5)
+            }
+
+            if let topics = game.topics, !topics.isEmpty {
+                Text(topics.prefix(4).map { "#\($0)" }.joined(separator: "  "))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                    .lineLimit(3)
+            }
+
+            Divider().overlay(ArcadePulseTheme.subtleBorder)
+
+            Label("Swipe vertically to discover the next game.",
+                  systemImage: "arrow.up.arrow.down")
+                .font(.subheadline)
+                .foregroundStyle(ArcadePulseTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if game.previewPosterURL == nil && game.previewClipURL == nil {
+                Label("A recorded gameplay preview is not available yet.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(
+            ArcadePulseTheme.surface,
+            in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius, style: .continuous)
+                .strokeBorder(ArcadePulseTheme.subtleBorder, lineWidth: 1)
+        }
+        .padding(.vertical, 12)
+        .accessibilityIdentifier("feed.ipad.context")
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let isRegular = horizontalSizeClass == .regular
             let isLandscape = proxy.size.width > proxy.size.height
-            let pageWidth = ForYouPageLayout.stageWidth(containerWidth: proxy.size.width, containerHeight: proxy.size.height, isRegular: isRegular, isLandscape: isLandscape)
+            let showsContext = ForYouPageLayout.showsIPadContextPanel(
+                width: proxy.size.width, height: proxy.size.height,
+                isRegular: isRegular, isAccessibilityText: dynamicTypeSize.isAccessibilitySize)
+            let pageWidth = showsContext
+                ? ForYouPageLayout.adaptiveLandscapeStageWidth(containerWidth: proxy.size.width)
+                : ForYouPageLayout.stageWidth(containerWidth: proxy.size.width, containerHeight: proxy.size.height, isRegular: isRegular, isLandscape: isLandscape)
             ZStack {
                 // The centered portrait stage is intentional on iPad, but
                 // an empty white surround looks like a broken phone layout.
@@ -1037,7 +1111,7 @@ private struct ForYouGamePage: View {
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
-                HStack(spacing: 0) {
+                HStack(spacing: showsContext ? 12 : 0) {
                     Spacer(minLength: 0)
                     ZStack(alignment: .bottom) {
                         mediaLayer
@@ -1092,6 +1166,12 @@ private struct ForYouGamePage: View {
                     }
                     .frame(width: pageWidth, height: proxy.size.height)
                     .clipShape(RoundedRectangle(cornerRadius: isRegular ? 24 : 0, style: .continuous))
+                    if showsContext {
+                        ipadContextPanel
+                            .frame(width: ForYouPageLayout.contextPanelWidth(
+                                containerWidth: proxy.size.width),
+                                   height: proxy.size.height)
+                    }
                     Spacer(minLength: 0)
                 }
             }
