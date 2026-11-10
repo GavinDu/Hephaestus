@@ -62,15 +62,7 @@ struct GameFeedCard: View {
     }
 
     private var palette: [Color] {
-        let palettes: [[Color]] = [
-            [Color(red: 0.31, green: 0.20, blue: 0.67), Color(red: 0.10, green: 0.55, blue: 0.69)],
-            [Color(red: 0.86, green: 0.29, blue: 0.48), Color(red: 0.98, green: 0.57, blue: 0.31)],
-            [Color(red: 0.10, green: 0.48, blue: 0.39), Color(red: 0.55, green: 0.69, blue: 0.30)],
-            [Color(red: 0.16, green: 0.33, blue: 0.68), Color(red: 0.39, green: 0.63, blue: 0.92)],
-            [Color(red: 0.49, green: 0.24, blue: 0.59), Color(red: 0.82, green: 0.40, blue: 0.63)]
-        ]
-        let seed = game.id.unicodeScalars.reduce(0) { $0 + Int($1.value) }
-        return palettes[seed % palettes.count]
+        ArcadePulseTheme.fallbackPalette(gameID: game.id)
     }
 
     private func expressionTag(_ title: String, count: Int) -> some View {
@@ -208,25 +200,13 @@ struct GameFeedCard: View {
 
             HStack(spacing: 10) {
                 if let creator = game.ownerID, !creator.isEmpty {
-                    Button(action: onOpenCreator) {
-                        HStack(spacing: 6) {
-                            if let avatar = game.creatorAvatarURL, let url = URL(string: avatar) {
-                                AsyncImage(url: url) { phase in
-                                    if let image = phase.image { image.resizable().scaledToFill() }
-                                    else { Image(systemName: "person.crop.circle.fill").resizable().scaledToFit() }
-                                }
-                                .frame(width: 22, height: 22)
-                                .clipShape(Circle())
-                                .accessibilityHidden(true)
-                            } else {
-                                Image(systemName: "person.crop.circle")
-                            }
-                            Text(game.creatorDisplayName?.isEmpty == false ? game.creatorDisplayName! : creator)
-                                .font(.caption.weight(.medium)).lineLimit(1)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("View profile for \(game.creatorDisplayName?.isEmpty == false ? game.creatorDisplayName! : creator)")
+                    ArcadePulseCreatorIdentity(
+                        name: game.creatorDisplayName?.isEmpty == false
+                            ? game.creatorDisplayName! : creator,
+                        avatarURL: game.creatorAvatarURL,
+                        foreground: .primary,
+                        action: onOpenCreator
+                    )
                 } else {
                     Label("Mini game", systemImage: "sparkles").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 }
@@ -285,33 +265,9 @@ struct GameFeedCard: View {
             .padding(.horizontal, 14)
             .padding(.top, 8)
 
-            Button(action: onPlay) {
-                HStack(spacing: 8) {
-                    Image(systemName: "play.fill")
-                    Text("Play now")
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption.weight(.bold))
-                }
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16)
-                .frame(height: 48)
-                .background(
-                    LinearGradient(colors: palette, startPoint: .leading, endPoint: .trailing),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                )
-            }
-            .buttonStyle(.plain)
-            // A simultaneous zero-distance drag starts warming on finger-down
-            // without stealing the Button tap or changing its accessibility.
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0).onChanged { _ in
-                    PlayerWebViewPool.prewarm(gameID: game.id)
-                }
-            )
-            .accessibilityIdentifier("game.play")
-            .accessibilityHint("Opens this game in the player")
+            ArcadePulsePlayCTA(action: onPlay)
+            // Warming happens inside Discover's Play action, not in a
+            // zero-distance touch recognizer that can steal grid scrolling.
             .padding(14)
         }
         .background(HephaestusDesign.cardBackground)
