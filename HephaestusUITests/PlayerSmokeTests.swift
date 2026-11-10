@@ -54,12 +54,25 @@ final class PlayerSmokeTests: XCTestCase {
         // Use a stable identifier instead of matching visible copy ("Play now"),
         // which can change as the social-feed card design evolves.
         let play = app.buttons["game.play"].firstMatch
-        let retry = app.buttons["Try again"].firstMatch
+        // The feed has separate accessible retry affordances for an
+        // unsuccessful request and an in-progress request that stalls.
+        // The previous test only searched for the obsolete "Try again"
+        // label and therefore never exercised the actual Retry loading
+        // button visible in the failing native screenshot.
+        let retries = [
+            app.buttons["feed.retryLoading"].firstMatch,
+            app.buttons["Retry loading"].firstMatch,
+            app.buttons["Try again"].firstMatch,
+            app.buttons["Refresh games"].firstMatch
+        ]
         let feedDeadline = Date().addingTimeInterval(120)
+        var lastRetry = Date.distantPast
         while !play.exists && Date() < feedDeadline {
-            if retry.waitForExistence(timeout: 5) {
-                print("SMOKE: feed unavailable; retrying live request")
+            if Date().timeIntervalSince(lastRetry) >= 15,
+               let retry = retries.first(where: { $0.exists && $0.isHittable && $0.isEnabled }) {
+                print("SMOKE: retrying real live feed via \(retry.label)")
                 retry.tap()
+                lastRetry = Date()
             }
             _ = play.waitForExistence(timeout: 5)
         }
@@ -199,6 +212,42 @@ final class PlayerSmokeTests: XCTestCase {
         discover.tap()
         XCTAssertTrue(app.navigationBars.firstMatch.waitForExistence(timeout: 10),
                       "Returning from Library must restore the Discover navigation stack.")
+    }
+
+    /// Open actual game details through the settled post's native More menu.
+    /// The details use the live feed model; no fabricated ratings or updates.
+    @MainActor
+    func testArcadePulseGameDetailsFromLiveFeed() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+        let more = app.descendants(matching: .any)["More game actions"].firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let until = Date().addingTimeInterval(120)
+        while !more.exists && Date() < until {
+            if retry.waitForExistence(timeout: 4) { retry.tap() }
+            _ = more.waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(more.exists && more.isHittable,
+                      "A real settled feed post must expose its More menu.")
+        more.tap()
+        let details = app.buttons["Game details"].firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        details.tap()
+        let title = app.descendants(matching: .any)["game.details.title"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 10),
+                      "Details must display the actual feed game's title.")
+        XCTAssertTrue(app.descendants(matching: .any)["game.details.preview"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["game.play"].firstMatch.exists,
+                      "The details screen must retain a working Play entry.")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "arcade-pulse-real-game-details"
+        shot.lifetime = .keepAlways
+        add(shot)
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["game.play"].firstMatch.waitForExistence(timeout: 10),
+                      "Closing game details must preserve the browsable origin post.")
     }
 
     /// Downsample two captured screenshots and report the fraction of
