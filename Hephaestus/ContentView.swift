@@ -40,7 +40,10 @@ private enum AppSection: String, CaseIterable, Identifiable, Hashable {
 /// is used rather than device identity so Split View and resizable windows adapt too.
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var selection: AppSection? = .discover
+    // UI-test launch selects the genuine iPad Studio without injecting
+    // fake accounts, projects, metrics, API results or artwork.
+    @State private var selection: AppSection? =
+        ProcessInfo.processInfo.arguments.contains("--ui-test-studio") ? .studio : .discover
     // On regular-width iPads, enter the full-screen playable feed first.
     // The system sidebar button still lets people reveal navigation.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .detailOnly
