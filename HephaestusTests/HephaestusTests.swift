@@ -78,6 +78,28 @@ struct HephaestusTests {
         }
     }
 
+    @Test func studioProjectDecodingNeverMistakesPrivateDraftForPublishedPlayableGame() throws {
+        let payload = """
+        {"projects":[
+            {"game_id":"private-draft-1","title":"My draft","status":"draft",
+             "visibility":"private","created_at":"2026-11-10T12:00:00Z",
+             "updated_at":"2026-11-10T12:30:00Z"},
+            {"game_id":"public-ready-2","title":"Public title","status":"ready",
+             "visibility":"public","moderation_status":"approved","published_version":1,
+             "created_at":"2026-11-09T12:00:00Z","updated_at":"2026-11-10T12:00:00Z"}
+        ],"next_cursor":null}
+        """
+        let response = try JSONDecoder().decode(
+            CreatorProjectsResponse.self, from: Data(payload.utf8))
+        #expect(response.projects.count == 2)
+        #expect(response.projects[0].id == "private-draft-1")
+        #expect(response.projects[0].displayStatus == "Draft")
+        #expect(!response.projects[0].isPubliclyPlayable)
+        #expect(response.projects[1].displayStatus == "Published")
+        #expect(response.projects[1].isPubliclyPlayable)
+        #expect(response.nextCursor == nil)
+    }
+
     @Test func socialFeedScopesAreStableAndDistinct() {
         #expect(SocialFeedScope.allCases.map(\.rawValue) == ["for_you", "following", "friends"])
         #expect(SocialFeedScope.allCases.map(\.title) == ["For You", "Following", "Friends"])
