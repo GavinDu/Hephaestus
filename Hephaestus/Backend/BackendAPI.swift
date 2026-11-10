@@ -264,6 +264,17 @@ struct CreatorProfile: Decodable {
     var is_friend: Bool
 }
 
+struct RemixEligibility: Decodable {
+    let eligible: Bool
+    let reason: String
+    let gameID: String
+
+    enum CodingKeys: String, CodingKey {
+        case eligible, reason
+        case gameID = "game_id"
+    }
+}
+
 struct CreatorDiscoveryEntry: Decodable, Identifiable {
     var creator_id: String
     var post_count: Int
@@ -631,6 +642,30 @@ final class BackendAPI: ObservableObject {
         guard let req = try? makeRequest("v1/telemetry/social-event", method: "POST",
                                          body: EventBody(event_id: eventID, game_id: gameID, kind: kind, duration_ms: durationMS, expected_duration_ms: expectedMS, preview_dwell_ms: previewDwellMS, time_to_interactive_ms: timeToInteractiveMS, time_to_first_input_ms: timeToFirstInputMS, frame_time_p95_ms: frameTimeP95MS, frame_time_avg_ms: frameTimeAvgMS, frame_count: frameCount)) else { return }
         _ = try? await session.data(for: req)
+    }
+
+    private struct CreateRemixBody: Encodable {
+        let parent_game_id: String
+        let intent: String
+    }
+
+    /// Advisory UI eligibility only. The backend independently enforces
+    /// the same source rights when creating the child game/job.
+    func fetchRemixEligibility(gameID: String) async throws -> RemixEligibility {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        guard let id = gameID.addingPercentEncoding(withAllowedCharacters: allowed),
+              !id.isEmpty else {
+            throw APIError.invalidInput("Invalid source game.")
+        }
+        let request = try makeRequest("v1/games/\(id)/remix-eligibility")
+        return try await send(RemixEligibility.self, request)
+    }
+
+    func createRemix(parentGameID: String, intent: String) async throws -> CreateGameResponse {
+        let request = try makeRequest(
+            "v1/games", method: "POST",
+            body: CreateRemixBody(parent_game_id: parentGameID, intent: intent))
+        return try await send(CreateGameResponse.self, request)
     }
 
     func fetchCreatorProfile(id: String) async throws -> CreatorProfile {
