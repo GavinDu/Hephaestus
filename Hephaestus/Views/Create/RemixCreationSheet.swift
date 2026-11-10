@@ -15,6 +15,7 @@ struct RemixCreationSheet: View {
     @State private var publishCaption = ""
     @State private var publishTopics = ""
     @State private var isPublishing = false
+    @State private var didSubmitPublication = false
     @State private var publishMessage: String?
     @State private var playerRequest: PixiPlayerRequest?
 
@@ -224,7 +225,7 @@ struct RemixCreationSheet: View {
                         .frame(maxWidth: .infinity, minHeight: 44) }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!hasPublicPublishConsent || isPublishing || publishMessage != nil)
+            .disabled(!hasPublicPublishConsent || isPublishing || didSubmitPublication)
             .accessibilityIdentifier("remix.publish")
         }
         .padding(18)
@@ -306,6 +307,7 @@ struct RemixCreationSheet: View {
                 gameID: gameID, caption: publishCaption,
                 topics: topics, remixParentID: source.id,
                 allowRemixes: allowOtherRemixes)
+            didSubmitPublication = true
             publishMessage = "Submitted for moderation. This remix is not in public feeds until approved."
         } catch {
             publishMessage = "Couldn't publish: \(error.localizedDescription)"
