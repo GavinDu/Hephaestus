@@ -383,7 +383,20 @@ final class PlayerSmokeTests: XCTestCase {
                 }
             }
             print("UI EVALUATOR pager frame orientation=\(profile.1): \(pagerFrame)")
-            pager.swipeUp()
+            if expectedLandscape {
+                // A one-card, scroll-disabled pager is driven by its own
+                // DragGesture, not the UIScrollView's content scrolling.
+                // Use a real touch trace inside its content area in compact
+                // landscape, where XCTest's generic scroll gesture may be
+                // routed to the disabled scroll view and never reach the card.
+                // Only a changed LIVE game identity may pass the gate.
+                let start = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.82))
+                let end = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.18))
+                print("UI_EVALUATOR_PHYSICAL_DRAG orientation=landscape start=0.50,0.82 end=0.50,0.18")
+                start.press(forDuration: 0.1, thenDragTo: end)
+            } else {
+                pager.swipeUp()
+            }
 
             // A title merely intersecting app.frame can be a neighbor under
             // the tab bar, and the accessibility tree may be sampled while
