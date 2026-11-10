@@ -326,6 +326,25 @@ final class PlayerSmokeTests: XCTestCase {
                                      "Portrait rail targets should not overlap.")
             }
 
+            // An interaction score of 100 never means a playable poster
+            // or approved clip exists. Audit the actual settled media surface
+            // separately using its live accessibility label; "poster" here
+            // means the native AsyncImage rendered, NOT a media-approval
+            // or screenshot-pixel-quality certification.
+            let mediaSurface = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed.preview.media."))
+                .firstMatch
+            let mediaLabel = mediaSurface.exists ? mediaSurface.label : ""
+            let mediaReadiness: String
+            if mediaLabel.hasPrefix("Gameplay preview not available for ") {
+                mediaReadiness = "placeholder"
+            } else if mediaLabel.hasPrefix("Game artwork or preview for ") {
+                mediaReadiness = "poster_displayed_unverified"
+            } else {
+                mediaReadiness = "unmeasured"
+            }
+            print("UI_EVALUATOR_VISUAL_AUDIT orientation=\(profile.1) media=\(mediaReadiness) label=\(mediaLabel) interaction_score_is_not_visual_approval=true")
+
             let beforeCapture = app.screenshot()
             // Landscape xcresult exports have shown sideways feed chrome and a
             // large black region even while the swipe evaluator scores 100.
@@ -338,7 +357,21 @@ final class PlayerSmokeTests: XCTestCase {
                 fullScreenAttachment.name = "feed-full-screen-before-swipe-landscape"
                 fullScreenAttachment.lifetime = .keepAlways
                 add(fullScreenAttachment)
-                print("UI_EVALUATOR_LANDSCAPE_CAPTURE app_px=\(beforeCapture.image.cgImage?.width ?? 0)x\(beforeCapture.image.cgImage?.height ?? 0) screen_px=\(fullScreen.image.cgImage?.width ?? 0)x\(fullScreen.image.cgImage?.height ?? 0) app_frame=\(app.frame)")
+                let appImageWidth = beforeCapture.image.cgImage?.width ?? 0
+                let appImageHeight = beforeCapture.image.cgImage?.height ?? 0
+                let fullScreenWidth = fullScreen.image.cgImage?.width ?? 0
+                let fullScreenHeight = fullScreen.image.cgImage?.height ?? 0
+                print("UI_EVALUATOR_LANDSCAPE_CAPTURE app_px=\(appImageWidth)x\(appImageHeight) screen_px=\(fullScreenWidth)x\(fullScreenHeight) app_frame=\(app.frame)")
+                // Report the simulator snapshot-orientation mismatch
+                // explicitly instead of letting a passing swipe score hide
+                // a sideways/black screenshot. Preserve the ORIGINAL full
+                // screen and app-window attachments for review.
+                let rawStorageAspectMismatch = appImageWidth > appImageHeight &&
+                    fullScreenWidth < fullScreenHeight
+                // Raw pixel dimensions do not account for PNG eXIf/TIFF
+                // orientation. The CI artifact verifier validates actual
+                // displayed geometry and keeps every original attachment.
+                print("UI_EVALUATOR_SCREENSHOT_ORIENTATION orientation=landscape app_raw_wider=\(appImageWidth > appImageHeight) screen_raw_wider=\(fullScreenWidth > fullScreenHeight) raw_storage_aspect_mismatch=\(rawStorageAspectMismatch) display_orientation_requires_exif=true raw_attachments_kept=true")
             }
             let beforeSwipe = XCTAttachment(screenshot: beforeCapture)
             beforeSwipe.name = "feed-ui-evaluator-before-swipe-\(profile.1)"

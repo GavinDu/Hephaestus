@@ -141,6 +141,16 @@ jobs:
           else
             echo "No .xcresult from this run; consult the preceding test failure log."
           fi
+      # A raw app-window PNG may carry an EXIF orientation that makes its
+      # stored width/height misleading. Validate the original full-screen
+      # landscape attachments with the same byte-preserving verifier used
+      # for the iPad; never silently rotate, crop, or approve media.
+      - name: Validate native iPhone screenshot orientation and review evidence
+        if: always() && hashFiles('tools/test-feedback/verify-ui-screenshot-evidence.py') != ''
+        run: |
+          python3 tools/test-feedback/verify-ui-screenshot-evidence.py \
+            --input /tmp/iphone-smoke-screenshots \
+            --out /tmp/iphone-smoke-review
       - name: Upload smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -150,6 +160,7 @@ jobs:
             /tmp/smoke.log
             /tmp/smoke.xcresult
             /tmp/iphone-smoke-screenshots
+            /tmp/iphone-smoke-review
             /tmp/test-feedback.json
           if-no-files-found: ignore
 
