@@ -49,6 +49,14 @@ struct HephaestusTests {
             verticalSizeClass: .regular, searchText: ""))
         #expect(!ForYouPageLayout.prefersCompactScopeMenu(
             verticalSizeClass: nil, searchText: ""))
+        #expect(ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .regular, horizontalSizeClass: .compact, searchText: ""))
+        #expect(ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .regular, horizontalSizeClass: .compact, searchText: "   "))
+        #expect(!ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .regular, horizontalSizeClass: .compact, searchText: "Bobo"))
+        #expect(!ForYouPageLayout.prefersCompactScopeMenu(
+            verticalSizeClass: .regular, horizontalSizeClass: .regular, searchText: ""))
     }
 
     @Test func socialFeedScopesAreStableAndDistinct() {

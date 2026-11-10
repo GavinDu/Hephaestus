@@ -91,12 +91,14 @@ struct DiscoverView: View {
             searchText: searchText, hasGames: !visibleGames.isEmpty)
     }
 
-    // On short iPhone landscape viewports, put social-feed scopes in an
-    // accessible toolbar menu instead of sacrificing the game playfield
-    // to a permanent segmented picker. Search restores the explicit picker.
+    // The iPhone feed is content-first in both orientations. Search and
+    // tablet-wide layouts still expose the segmented picker; portrait phone
+    // scopes remain available in the labeled, 44pt toolbar menu.
     private var usesCompactFeedScopeMenu: Bool {
         ForYouPageLayout.prefersCompactScopeMenu(
-            verticalSizeClass: verticalSizeClass, searchText: searchText)
+            verticalSizeClass: verticalSizeClass,
+            horizontalSizeClass: horizontalSizeClass,
+            searchText: searchText)
     }
 
     /// Feed stack, extracted from `body` so the body expression

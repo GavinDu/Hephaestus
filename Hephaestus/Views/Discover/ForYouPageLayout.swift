@@ -43,12 +43,16 @@ enum ForYouPageLayout {
         return vertical < 0 ? 1 : -1
     }
 
-    /// Recover vertical play space on compact-height landscapes, including
-    /// when Following/Friends feed content has not loaded yet.
+    /// A media-first post should not lose an entire row to feed scopes on
+    /// compact-width iPhones, in portrait *or* landscape. Keep one accessible
+    /// toolbar menu; explicit search still restores the segmented picker.
+    /// Regular-width iPad can retain its visible scope picker.
     static func prefersCompactScopeMenu(
-        verticalSizeClass: UserInterfaceSizeClass?, searchText: String
+        verticalSizeClass: UserInterfaceSizeClass?,
+        horizontalSizeClass: UserInterfaceSizeClass? = nil,
+        searchText: String
     ) -> Bool {
-        verticalSizeClass == .compact &&
+        (verticalSizeClass == .compact || horizontalSizeClass == .compact) &&
             searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
