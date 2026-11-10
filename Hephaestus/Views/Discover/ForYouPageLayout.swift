@@ -27,6 +27,31 @@ enum ForYouPageLayout {
         return min(containerWidth * 0.86, min(containerHeight * 0.64, 820))
     }
 
+    /// Only spacious regular-width iPad landscapes get a contextual side
+    /// panel. Keep Split View, portrait, compact iPad and accessibility-sized
+    /// text as one full-width stage without cramped secondary controls.
+    static func contextPanelWidth(containerWidth: CGFloat, isRegular: Bool,
+                                  isLandscape: Bool, isAccessibilityText: Bool) -> CGFloat {
+        guard isRegular && isLandscape && !isAccessibilityText && containerWidth >= 1_200
+        else { return 0 }
+        return 260
+    }
+
+    static func stageWidthWithContext(containerWidth: CGFloat, containerHeight: CGFloat,
+                                      isRegular: Bool, isLandscape: Bool,
+                                      isAccessibilityText: Bool) -> CGFloat {
+        let contextWidth = contextPanelWidth(
+            containerWidth: containerWidth, isRegular: isRegular,
+            isLandscape: isLandscape, isAccessibilityText: isAccessibilityText)
+        guard contextWidth > 0 else {
+            return stageWidth(containerWidth: containerWidth, containerHeight: containerHeight,
+                              isRegular: isRegular, isLandscape: isLandscape)
+        }
+        // Preserve a very large media stage and at least 18pt separation,
+        // while reserving regular-width margins for iPad window resizing.
+        return min(960, containerWidth - contextWidth - 56)
+    }
+
     /// Page swipes must respond to quick, deliberate vertical flicks, not only
     /// slow 80-point drags. Require a real 35-point drag first so a tap on
     /// Play / Like cannot advance the feed. Predicted momentum counts only
