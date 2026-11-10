@@ -1220,6 +1220,11 @@ private struct ForYouGamePage: View {
 
 private struct ForYouPagerView: View {
     @Binding var settledGameID: String?
+    // Diagnostic-only instrumentation: distinguish a gesture that never
+    // arrived from one whose direction, or selected-page state, was wrong.
+    @State private var diagnosticDragCount = 0
+    @State private var diagnosticLastDragY = 0
+    @State private var diagnosticLastOffset = 0
     let scope: SocialFeedScope
     let games: [FeedGame]
     let savedGameIDs: Set<String>
@@ -1273,6 +1278,14 @@ private struct ForYouPagerView: View {
         games.firstIndex(where: { $0.id == selectedGame?.id }) ?? 0
     }
 
+    private var pagerAccessibilityValue: String {
+        #if DEBUG
+        return "Drag \(diagnosticDragCount) dy \(diagnosticLastDragY) offset \(diagnosticLastOffset); Game \(games.isEmpty ? 0 : currentIndex + 1) of \(games.count)"
+        #else
+        return "Game \(games.isEmpty ? 0 : currentIndex + 1) of \(games.count)"
+        #endif
+    }
+
     private func movePage(by offset: Int) {
         guard !games.isEmpty, offset != 0 else { return }
         let targetIndex = min(max(currentIndex + offset, 0), games.count - 1)
@@ -1298,7 +1311,7 @@ private struct ForYouPagerView: View {
             }
             .accessibilityIdentifier("feed.forYou.pager")
             .accessibilityLabel("\(scope.title) game feed")
-            .accessibilityValue("Game \(games.isEmpty ? 0 : currentIndex + 1) of \(games.count)")
+            .accessibilityValue(pagerAccessibilityValue)
             .accessibilityHint("Scroll up for the next game, or down for the previous game")
             .accessibilityScrollAction { edge in
                 if edge == .top {
@@ -1324,6 +1337,9 @@ private struct ForYouPagerView: View {
                             translation: value.translation,
                             predictedEndTranslation: value.predictedEndTranslation
                         )
+                        diagnosticDragCount += 1
+                        diagnosticLastDragY = Int(value.translation.height)
+                        diagnosticLastOffset = offset
                         movePage(by: offset)
                     }
             )
