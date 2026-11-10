@@ -63,62 +63,142 @@ struct CreateView: View {
         }
     }
 
+    /// Arcade Pulse's creation entry is honest about the currently shipped
+    /// capability: a consented drawing can be analyzed, turned into a game,
+    /// played and submitted for moderation. No non-functional template or
+    /// remix tiles are presented until their backend contracts are available.
     private var pickView: some View {
-        VStack(spacing: 20) {
-            if let previewImage {
-                Image(uiImage: previewImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 300)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.secondary.opacity(0.15))
-                    .frame(height: 220)
-                    .overlay {
-                        VStack {
-                            Image(systemName: "photo")
-                                .font(.largeTitle)
-                            Text("No drawing selected")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("ARCADE PULSE • CREATE", systemImage: "sparkles")
+                        .font(.caption.weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                    Text("Your drawing. Your game.")
+                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Start with artwork you can use. Shape the story, try the generated game, and choose when to publish.")
+                        .font(.subheadline)
+                        .foregroundStyle(ArcadePulseTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("create.pick.hero")
 
-            PhotosPicker(selection: $pickerItem, matching: .images) {
-                Label("Choose a drawing", systemImage: "photo.badge.plus")
-            }
-            .buttonStyle(.bordered)
-            .onChange(of: pickerItem) { _, newItem in
-                Task {
-                    guard let newItem else { return }
-                    if let data = try? await newItem.loadTransferable(type: Data.self) {
-                        imageData = data
-                        previewImage = UIImage(data: data)
+                ZStack {
+                    RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius, style: .continuous)
+                        .fill(LinearGradient(
+                            colors: [ArcadePulseTheme.raisedSurface,
+                                     ArcadePulseTheme.electricViolet.opacity(0.28),
+                                     ArcadePulseTheme.canvas],
+                            startPoint: .topLeading, endPoint: .bottomTrailing))
+                    if let previewImage {
+                        Image(uiImage: previewImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 300)
+                            .padding(12)
+                            .accessibilityLabel("Selected drawing preview")
+                    } else {
+                        VStack(spacing: 14) {
+                            Image(systemName: "photo.artframe")
+                                .font(.system(size: 48, weight: .light))
+                                .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                            Text("No drawing selected")
+                                .font(.headline)
+                            Text("Choose a drawing to begin")
+                                .font(.subheadline)
+                                .foregroundStyle(ArcadePulseTheme.textSecondary)
+                        }
+                        .foregroundStyle(.white)
+                        .padding(20)
                     }
                 }
+                .frame(height: horizontalSizeClass == .regular ? 320 : 245)
+                .overlay {
+                    RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius, style: .continuous)
+                        .strokeBorder(ArcadePulseTheme.subtleBorder, lineWidth: 1)
+                }
+
+                PhotosPicker(selection: $pickerItem, matching: .images) {
+                    Label(previewImage == nil ? "Choose a drawing" : "Change drawing",
+                          systemImage: "photo.badge.plus")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(ArcadePulseTheme.playGradient(),
+                                    in: RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("create.pick.chooseDrawing")
+                .onChange(of: pickerItem) { _, newItem in
+                    Task {
+                        guard let newItem else { return }
+                        if let data = try? await newItem.loadTransferable(type: Data.self) {
+                            imageData = data
+                            previewImage = UIImage(data: data)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Label("Before we start", systemImage: "checkmark.shield")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Toggle("I have permission to use this image and agree to upload it for game generation", isOn: $hasSourceConsent)
+                        .tint(ArcadePulseTheme.electricViolet)
+                        .accessibilityIdentifier("create.sourceConsent")
+                    Text("Your image is sent to the service for analysis and game generation. Public sharing requires separate consent later.")
+                        .font(.caption)
+                        .foregroundStyle(ArcadePulseTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    TextField("Optional keywords, separated by commas", text: $keywordsText)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("create.pick.keywords")
+                    Button {
+                        Task { await analyze() }
+                    } label: {
+                        Label("Analyze my drawing", systemImage: "sparkles")
+                            .font(.headline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ArcadePulseTheme.electricViolet)
+                    .disabled(!PlayableExpression.canSubmitSource(hasImage: imageData != nil,
+                                                                  hasConsent: hasSourceConsent))
+                    .accessibilityIdentifier("create.pick.analyze")
+                }
+                .padding(18)
+                .background(ArcadePulseTheme.surface,
+                            in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
+                .foregroundStyle(.white)
+
+                HStack(spacing: 8) {
+                    stepChip("1 • Add art", icon: "photo")
+                    stepChip("2 • Shape game", icon: "wand.and.stars")
+                    stepChip("3 • Play", icon: "gamecontroller")
+                }
+                .accessibilityElement(children: .combine)
             }
-
-            Toggle("I have permission to use this image and agree to upload it for game generation", isOn: $hasSourceConsent)
-                .accessibilityIdentifier("create.sourceConsent")
-            Text("Your image is sent to the service for analysis and generation. Publishing the resulting game is a separate action.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            TextField("Keywords (comma separated)", text: $keywordsText)
-                .textFieldStyle(.roundedBorder)
-                .padding(.horizontal)
-
-            Button("Analyze drawing") {
-                Task { await analyze() }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(!PlayableExpression.canSubmitSource(hasImage: imageData != nil, hasConsent: hasSourceConsent))
-
-            Spacer()
+            .frame(maxWidth: horizontalSizeClass == .regular ? 760 : 520)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 20)
         }
-        .padding()
+        .background(ArcadePulseTheme.canvas)
+        .preferredColorScheme(.dark)
+        .accessibilityIdentifier("create.pick.root")
+    }
+
+    private func stepChip(_ label: String, icon: String) -> some View {
+        Label(label, systemImage: icon)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(ArcadePulseTheme.textSecondary)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(ArcadePulseTheme.raisedSurface,
+                        in: RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius))
     }
 
     private func reviewView(result: IngestResult, image: UIImage) -> some View {
