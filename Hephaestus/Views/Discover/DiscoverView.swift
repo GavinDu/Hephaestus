@@ -63,6 +63,7 @@ struct DiscoverView: View {
     @State private var isLoadingMore = false
     @State private var loadMoreError: String?
     @State private var commentsGame: FeedGame?
+    @State private var remixGame: FeedGame?
     @State private var reportingGame: FeedGame?
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
@@ -362,6 +363,7 @@ struct DiscoverView: View {
                             if let id = game.ownerID { Task { await blockCreator(id) } }
                         },
                         onNotInterested: { game in Task { await markNotInterested(game) } },
+                        onCheckRemix: { remixGame = $0 },
                         onImpression: { game in
                             Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") }
                         },
@@ -433,6 +435,9 @@ struct DiscoverView: View {
             }
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
+            }
+            .sheet(item: $remixGame) { game in
+                RemixCreationSheet(source: game)
             }
             .sheet(item: $reportingGame) { game in
                 ReportGameSheet(game: game)
@@ -734,6 +739,7 @@ private struct ForYouGamePage: View {
     let onReport: () -> Void
     let onBlockCreator: () -> Void
     let onNotInterested: () -> Void
+    let onCheckRemix: () -> Void
     let onImpression: () -> Void
 
     private var shareURL: URL {
@@ -853,6 +859,7 @@ private struct ForYouGamePage: View {
         iconAction("bubble.right", label: "View comments",
                    caption: vertical ? "Comment" : nil, action: onOpenComments)
         Menu {
+            Button("Check remix options", systemImage: "arrow.triangle.2.circlepath", action: onCheckRemix)
             Button("Report game", role: .destructive, action: onReport)
             Button("Not interested", action: onNotInterested)
             if game.ownerID != nil {
@@ -1272,6 +1279,7 @@ private struct ForYouPagerView: View {
     let onReport: (FeedGame) -> Void
     let onBlockCreator: (FeedGame) -> Void
     let onNotInterested: (FeedGame) -> Void
+    let onCheckRemix: (FeedGame) -> Void
     let onImpression: (FeedGame) -> Void
     let onNearEnd: () -> Void
 
@@ -1295,6 +1303,7 @@ private struct ForYouPagerView: View {
             onReport: { onReport(game) },
             onBlockCreator: { onBlockCreator(game) },
             onNotInterested: { onNotInterested(game) },
+            onCheckRemix: { onCheckRemix(game) },
             onImpression: { onImpression(game) }
         )
     }
