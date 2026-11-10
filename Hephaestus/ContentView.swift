@@ -63,8 +63,12 @@ struct ContentView: View {
                         Label(section.title, systemImage: section.symbol)
                     }
                     .tag(section)
+                    .accessibilityIdentifier("navigation.tab.\(section.rawValue)")
             }
         }
+        .tint(ArcadePulseTheme.electricViolet)
+        .toolbarBackground(ArcadePulseTheme.canvas, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
     }
 
     private var expandedLayout: some View {
@@ -80,6 +84,10 @@ struct ContentView: View {
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(ArcadePulseTheme.canvas)
+            .foregroundStyle(ArcadePulseTheme.textPrimary)
+            .tint(ArcadePulseTheme.electricViolet)
             .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 250)
             .navigationTitle("Hephaestus")
         } detail: {
@@ -87,10 +95,15 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationSplitViewStyle(.balanced)
+        .preferredColorScheme(.dark)
+        .tint(ArcadePulseTheme.electricViolet)
     }
 
     private func navigationRow(_ section: AppSection) -> some View {
         Label(section.title, systemImage: section.symbol)
+            .font(.subheadline.weight(.semibold))
+            .frame(minHeight: ArcadePulseTheme.minimumTarget, alignment: .leading)
+            .accessibilityIdentifier("navigation.sidebar.\(section.rawValue)")
             .lineLimit(1)
             .minimumScaleFactor(0.9)
             .tag(Optional(section))
