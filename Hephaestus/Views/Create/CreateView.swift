@@ -281,10 +281,10 @@ struct CreateView: View {
                 .font(.system(size: 64))
                 .foregroundStyle(.green)
             Text("Your game is ready!").font(.title2)
-            Button("Play now") {
+            ArcadePulsePlayCTA {
                 playerRequest = PixiPlayerRequest(gameID: gameID, title: "Your game")
             }
-            .buttonStyle(.borderedProminent)
+            .frame(maxWidth: 420)
             Divider()
             VStack(alignment: .leading, spacing: 10) {
                 Text("Share it with the community").font(.headline)
