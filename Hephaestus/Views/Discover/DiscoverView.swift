@@ -1245,11 +1245,11 @@ private struct ForYouGamePage: View {
                                         .background(.black.opacity(0.28), in: Capsule())
                                 }
                                 Spacer(minLength: 0)
-                                if !dynamicTypeSize.isAccessibilitySize && isLandscape && verticalSizeClass != .compact {
-                                    // On a short phone landscape viewport the
-                                    // title overlay reaches the upper-left
-                                    // corner. Keep the gesture hint on the
-                                    // opposite side rather than over title text.
+                                if !dynamicTypeSize.isAccessibilitySize && isLandscape {
+                                    // Keep the vertical-swipe hint visible on short iPhone
+                                    // landscape viewports, opposite the title.
+                                    // It is noninteractive and does not take
+                                    // touch space away from the media stage.
                                     Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
                                         .font(.caption2.weight(.bold))
                                         .tracking(0.8)
