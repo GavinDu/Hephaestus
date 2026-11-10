@@ -1313,6 +1313,20 @@ private struct ForYouPagerView: View {
             .scrollDisabled(true)
             .scrollIndicators(.hidden)
             .clipped()
+            // Attach the physical page drag to the actual scroll viewport.
+            // With compact landscape removing the scope picker, a gesture on
+            // the outer GeometryReader could miss swipes begun on the page.
+            .contentShape(Rectangle())
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 35)
+                    .onEnded { value in
+                        let offset = ForYouPageLayout.pageOffsetForSwipe(
+                            translation: value.translation,
+                            predictedEndTranslation: value.predictedEndTranslation
+                        )
+                        movePage(by: offset)
+                    }
+            )
             .onAppear {
                 settledGameID = ForYouPageLayout.reconciledSelection(
                     currentID: settledGameID,
@@ -1330,16 +1344,6 @@ private struct ForYouPagerView: View {
                 if index >= max(0, games.count - 2) { onNearEnd() }
             }
         }
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 35)
-                .onEnded { value in
-                    let offset = ForYouPageLayout.pageOffsetForSwipe(
-                        translation: value.translation,
-                        predictedEndTranslation: value.predictedEndTranslation
-                    )
-                    movePage(by: offset)
-                }
-        )
     }
 }
 
