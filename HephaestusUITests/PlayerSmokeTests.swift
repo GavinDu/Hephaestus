@@ -363,11 +363,17 @@ final class PlayerSmokeTests: XCTestCase {
                               "Portrait feed-scope menu must remain reachable after removing the permanent picker.")
             }
             if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
-                let scopeMenu = app.descendants(matching: .any)["feed.scope.menu"].firstMatch
+                let scopeMenu = app.descendants(matching: .any)["feed.landscape.scope"].firstMatch
+                let searchButton = app.descendants(matching: .any)["feed.landscape.search"].firstMatch
+                let moreMenu = app.descendants(matching: .any)["feed.landscape.more"].firstMatch
                 XCTAssertTrue(scopeMenu.waitForExistence(timeout: 5),
-                              "Compact landscape needs an accessible For You/Following/Friends menu.")
+                              "Compact landscape needs its overlaid social-feed scope menu.")
                 XCTAssertTrue(scopeMenu.isHittable,
                               "Landscape feed-scope switcher must remain reachable.")
+                XCTAssertTrue(searchButton.waitForExistence(timeout: 5) && searchButton.isHittable,
+                              "Landscape search must stay available after hiding navigation chrome.")
+                XCTAssertTrue(moreMenu.waitForExistence(timeout: 5) && moreMenu.isHittable,
+                              "Feed preferences, creators and refresh must stay reachable.")
                 let visiblePager = app.scrollViews.firstMatch
                 XCTAssertTrue(visiblePager.waitForExistence(timeout: 5))
                 let ratio = visiblePager.frame.height / max(app.frame.height, 1)
@@ -497,6 +503,18 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertEqual(pages.count, 1,
                            "Only the settled game page may enter the accessibility tree in \(profile.1).")
             let pagerFrame = pager.frame
+            // Swiping correctly does not excuse an undersized visual stage.
+            // Geometry is checked separately from actual preview-media provenance.
+            XCTAssertTrue(mediaSurface.exists,
+                          "Arcade Pulse needs a media surface even when approved previews are unavailable.")
+            let mediaFrame = mediaSurface.frame
+            let visibleMedia = mediaFrame.intersection(pagerFrame)
+            let pagerArea = max(1, pagerFrame.width * pagerFrame.height)
+            let mediaOccupancy = visibleMedia.isNull ? 0 :
+                max(0, visibleMedia.width * visibleMedia.height) / pagerArea
+            print("UI_EVALUATOR_MEDIA_OCCUPANCY orientation=\(profile.1) ratio=\(mediaOccupancy) media_frame=\(mediaFrame) pager_frame=\(pagerFrame) preview_status=\(mediaReadiness)")
+            XCTAssertGreaterThanOrEqual(mediaOccupancy, 0.55,
+                "Arcade Pulse must devote 55% of its visible pager to the media stage; do not weaken this to hide a compact-layout defect.")
             let visiblePages = pages.allElementsBoundByIndex.filter {
                 let frame = $0.frame
                 // SwiftUI may report the layout frame for the next card

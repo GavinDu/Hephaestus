@@ -41,6 +41,22 @@ final class FeedRequestCoordinator {
     }
 }
 
+/// Keep the native search drawer out of compact iPhone landscape's tiny
+/// media viewport. The floating 44pt search button opens an actual sheet,
+/// while search results return to the standard native searchable grid.
+private struct FeedSearchVisibilityModifier: ViewModifier {
+    @Binding var text: String
+    let hidesNativeSearch: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if hidesNativeSearch {
+            content
+        } else {
+            content.searchable(text: $text, prompt: "Find a game")
+        }
+    }
+}
+
 /// Backend-backed social feeds use the verified bearer session when present.
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
@@ -48,6 +64,8 @@ struct DiscoverView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedFeed: SocialFeedScope = .forYou
+    @State private var compactSearchPresented = false
+    @State private var compactSearchDraft = ""
     @State private var games: [FeedGame] = []
     @State private var playerRequest: PixiPlayerRequest?
     @State private var errorMessage: String?
@@ -101,6 +119,93 @@ struct DiscoverView: View {
             searchText: searchText)
     }
 
+    /// Compact phone landscape floats critical controls over the media stage.
+    /// The app's bottom tab bar still provides Create, Library and Profile.
+    private var usesCompactLandscapeOverlay: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone &&
+        ForYouPageLayout.usesCompactLandscapeOverlay(
+            verticalSizeClass: verticalSizeClass,
+            horizontalSizeClass: horizontalSizeClass,
+            hasImmersivePager: showsImmersivePager)
+    }
+
+    private var compactLandscapeOverlay: some View {
+        HStack(spacing: 6) {
+            Menu {
+                ForEach(SocialFeedScope.allCases) { scope in
+                    Button {
+                        selectedFeed = scope
+                    } label: {
+                        if selectedFeed == scope {
+                            Label(scope.title, systemImage: "checkmark")
+                        } else {
+                            Text(scope.title)
+                        }
+                    }
+                }
+            } label: {
+                Label(selectedFeed.title, systemImage: "rectangle.stack")
+                    .font(.caption.weight(.bold))
+                    .frame(minHeight: 44)
+                    .padding(.horizontal, 10)
+            }
+            .accessibilityIdentifier("feed.landscape.scope")
+            Button {
+                compactSearchDraft = searchText
+                compactSearchPresented = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Search games")
+            .accessibilityIdentifier("feed.landscape.search")
+            Menu {
+                Button("Feed preferences", systemImage: "slider.horizontal.3") {
+                    isFeedPreferencesPresented = true
+                }
+                Button("Discover creators", systemImage: "person.2") {
+                    isCreatorDiscoveryPresented = true
+                }
+                Button("Refresh games", systemImage: "arrow.clockwise") {
+                    Task { await load() }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("More feed controls")
+            .accessibilityIdentifier("feed.landscape.more")
+        }
+        .foregroundStyle(.white)
+        .background(.black.opacity(0.72), in: Capsule())
+    }
+
+    private var compactSearchSheet: some View {
+        NavigationStack {
+            Form {
+                TextField("Find a game", text: $compactSearchDraft)
+                    .textInputAutocapitalization(.never)
+                    .submitLabel(.search)
+                    .onSubmit { applyCompactSearch() }
+                    .accessibilityIdentifier("feed.landscape.searchField")
+            }
+            .navigationTitle("Search games")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { compactSearchPresented = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Search") { applyCompactSearch() }
+                }
+            }
+        }
+    }
+
+    private func applyCompactSearch() {
+        searchText = compactSearchDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        compactSearchPresented = false
+    }
+
     /// Feed stack, extracted from `body` so the body expression
     /// stays type-checkable: picker + pager/grid branches + the
     /// sheet/cover modifiers together timed out the compiler.
@@ -122,6 +227,13 @@ struct DiscoverView: View {
                 if showsImmersivePager {
                     forYouPager
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .topTrailing) {
+                        if usesCompactLandscapeOverlay {
+                            compactLandscapeOverlay
+                                .padding(.trailing, 12)
+                                .padding(.top, 4)
+                        }
+                    }
                     .overlay(alignment: .top) {
                         if let loadMoreError {
                             HStack(spacing: 10) {
@@ -285,7 +397,9 @@ struct DiscoverView: View {
             .preferredColorScheme(.dark)
             .navigationTitle(usesCompactFeedScopeMenu ? selectedFeed.title : "Discover")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Find a game")
+            .toolbar(usesCompactLandscapeOverlay ? .hidden : .visible, for: .navigationBar)
+            .modifier(FeedSearchVisibilityModifier(
+                text: $searchText, hidesNativeSearch: usesCompactLandscapeOverlay))
             .toolbar {
                 if usesCompactFeedScopeMenu {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -430,6 +544,9 @@ struct DiscoverView: View {
                     onNextGame: { Task { await advanceToNextGame(after: presentation.game) } },
                     onToggleLike: { toggleLike(presentation.game) }
                 )
+            }
+            .sheet(isPresented: $compactSearchPresented) {
+                compactSearchSheet
             }
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
@@ -1129,10 +1246,10 @@ private struct ForYouGamePage: View {
                                 }
                                 Spacer(minLength: 0)
                                 if !dynamicTypeSize.isAccessibilitySize && isLandscape {
-                                    // On a short phone landscape viewport the
-                                    // title overlay reaches the upper-left
-                                    // corner. Keep the gesture hint on the
-                                    // opposite side rather than over title text.
+                                    // Keep the vertical-swipe hint visible on short iPhone
+                                    // landscape viewports, opposite the title.
+                                    // It is noninteractive and does not take
+                                    // touch space away from the media stage.
                                     Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
                                         .font(.caption2.weight(.bold))
                                         .tracking(0.8)

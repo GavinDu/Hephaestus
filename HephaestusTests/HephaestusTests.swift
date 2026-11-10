@@ -78,6 +78,17 @@ struct HephaestusTests {
         }
     }
 
+    @Test func compactLandscapeOverlayPreservesPlayerSpaceAndNavigation() {
+        #expect(ForYouPageLayout.usesCompactLandscapeOverlay(
+            verticalSizeClass: .compact, horizontalSizeClass: .compact, hasImmersivePager: true))
+        #expect(!ForYouPageLayout.usesCompactLandscapeOverlay(
+            verticalSizeClass: .regular, horizontalSizeClass: .compact, hasImmersivePager: true))
+        #expect(ForYouPageLayout.usesCompactLandscapeOverlay(
+            verticalSizeClass: .compact, horizontalSizeClass: .regular, hasImmersivePager: true))
+        #expect(!ForYouPageLayout.usesCompactLandscapeOverlay(
+            verticalSizeClass: .compact, horizontalSizeClass: .compact, hasImmersivePager: false))
+    }
+
     @Test func socialFeedScopesAreStableAndDistinct() {
         #expect(SocialFeedScope.allCases.map(\.rawValue) == ["for_you", "following", "friends"])
         #expect(SocialFeedScope.allCases.map(\.title) == ["For You", "Following", "Friends"])

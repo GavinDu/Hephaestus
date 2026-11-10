@@ -74,6 +74,18 @@ enum ForYouPageLayout {
             searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Keep iPhone landscape's search and scope reachable without reducing
+    /// the game media stage to a narrow letterboxed strip.
+    static func usesCompactLandscapeOverlay(
+        verticalSizeClass: UserInterfaceSizeClass?,
+        horizontalSizeClass: UserInterfaceSizeClass?,
+        hasImmersivePager: Bool
+    ) -> Bool {
+        // iPhone Plus/Pro Max can report a REGULAR horizontal class when landscape.
+        // Height is the decisive signal; the caller checks phone idiom.
+        hasImmersivePager && verticalSizeClass == .compact
+    }
+
     // All social feeds use the same immersive vertical pager whenever real
     // cards are available. Searching still exposes the compact grid.
     static func shouldShowImmersivePager(searchText: String, hasGames: Bool) -> Bool {
