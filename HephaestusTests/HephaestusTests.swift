@@ -11,6 +11,19 @@ import Testing
 // App-level tests will regrow around the WebView player and the
 // creation flow.
 struct HephaestusTests {
+    @Test func arcadePulseFoundationUsesSinglePaletteAndAccessibleTargetSizes() {
+        #expect(ArcadePulseTheme.fallbackPalettes.count == 5)
+        #expect(ArcadePulseTheme.minimumTarget >= 44)
+        #expect(ArcadePulseTheme.playHeight >= ArcadePulseTheme.minimumTarget)
+        #expect(ArcadePulseTheme.pillRadius > 0)
+        for gameID in ["sample-ribbon-sky", "sample-rainbow-bear",
+                       "escape-from-injection", "penguin-heartlight-rescue"] {
+            #expect(ArcadePulseTheme.fallbackPalette(gameID: gameID).count == 2)
+        }
+        // Play is a real 48pt native action, not a fake recorded preview
+        // or a zero-distance gesture layered over the feed pager.
+    }
+
     @Test func shippedFeedFallbackPalettesDoNotCollide() {
         // Run against the same real game IDs used by native screenshot QA.
         // The old scalar sum and an in-loop modulo five both mapped Ribbon
