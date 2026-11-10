@@ -452,6 +452,10 @@ struct DiscoverView: View {
     }
 
     private func play(_ game: FeedGame) {
+        // Prime the WebView on the actual Play action, rather than using a
+        // zero-distance finger-drag recognizer on the card CTA. This keeps
+        // vertical feed navigation independent of player prewarming.
+        PlayerWebViewPool.prewarm(gameID: game.id)
         RecentGames.record(gameID: game.id, title: game.title)
         // #58: the tap timestamp and poster travel with the request so
         // the sheet can measure tap-to-nav-ready and hold the poster
@@ -1037,9 +1041,10 @@ private struct ForYouGamePage: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("game.play")
                 .accessibilityHint("Opens this game in the player")
-                .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in
-                    PlayerWebViewPool.prewarm(gameID: game.id)
-                })
+                // Do not attach a zero-distance drag to Play. On short
+                // landscape screens that button fills the lower swipe
+                // start region and steals the parent page gesture.
+                // Prewarm in the button's action instead.
             }
             .accessibilitySortPriority(60)
         }
