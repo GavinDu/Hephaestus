@@ -41,14 +41,7 @@ struct LibraryView: View {
                             playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: "gamecontroller.fill")
-                                    .font(.title3)
-                                    .foregroundStyle(.white)
-                                    .frame(width: 48, height: 48)
-                                    .background(
-                                        LinearGradient(colors: [.purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing),
-                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    )
+                                libraryThumbnail(gameID: game.id, posterURL: game.previewPosterURL, symbol: "gamecontroller.fill")
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(game.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
                                     if let caption = game.caption, !caption.isEmpty {
@@ -56,12 +49,13 @@ struct LibraryView: View {
                                     }
                                 }
                                 Spacer(minLength: 4)
-                                Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(.tint)
+                                Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(ArcadePulseTheme.playOrange)
                             }
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 7)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .listRowBackground(ArcadePulseTheme.surface)
                         .accessibilityHint("Opens the game player")
                         .contextMenu {
                             Button("Remove from saved", systemImage: "bookmark.slash", role: .destructive) {
@@ -90,25 +84,19 @@ struct LibraryView: View {
                             playerRequest = PixiPlayerRequest(gameID: game.gameID, title: game.title)
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: "clock.arrow.circlepath")
-                                    .font(.title3)
-                                    .foregroundStyle(.white)
-                                    .frame(width: 48, height: 48)
-                                    .background(
-                                        LinearGradient(colors: [.indigo, .teal], startPoint: .topLeading, endPoint: .bottomTrailing),
-                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    )
+                                libraryThumbnail(gameID: game.gameID, posterURL: nil, symbol: "clock.arrow.circlepath")
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(game.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
                                     Text("Recently played").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 4)
-                                Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(.tint)
+                                Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(ArcadePulseTheme.playOrange)
                             }
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 7)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .listRowBackground(ArcadePulseTheme.surface)
                         .accessibilityHint("Opens the game player")
                         .contextMenu {
                             Button("Remove from recent", systemImage: "clock.badge.xmark", role: .destructive) {
@@ -125,6 +113,12 @@ struct LibraryView: View {
                     }
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(ArcadePulseTheme.canvas)
+            .foregroundStyle(ArcadePulseTheme.textPrimary)
+            .preferredColorScheme(.dark)
+            .tint(ArcadePulseTheme.electricViolet)
             .navigationTitle("Library")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -150,6 +144,36 @@ struct LibraryView: View {
                 PixiPlayerSheet(gameID: request.gameID, title: request.title)
             }
         }
+    }
+
+    /// A poster is shown only when the server has supplied an actual URL.
+    /// Saved/recent games without approved media use their stable palette
+    /// and a generic icon, never concept art masquerading as gameplay.
+    private func libraryThumbnail(gameID: String, posterURL: String?, symbol: String) -> some View {
+        ZStack {
+            LinearGradient(
+                colors: ArcadePulseTheme.fallbackPalette(gameID: gameID),
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            if let posterURL, let url = URL(string: posterURL) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        Image(systemName: symbol)
+                            .font(.title3)
+                            .foregroundStyle(.white)
+                    }
+                }
+            } else {
+                Image(systemName: symbol)
+                    .font(.title3)
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: 56, height: 56)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityHidden(true)
     }
 
     private func load() async {
