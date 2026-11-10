@@ -106,6 +106,40 @@ final class PlayerSmokeTests: XCTestCase {
     }
 
 
+    /// Open a genuine creator from a published feed game, then capture
+    /// its server-backed game counts and profile layout. Never inject
+    /// invented profile numbers or avatars for screenshot convenience.
+    @MainActor
+    func testArcadePulseCreatorProfileRendersLiveData() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+        let creator = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "View profile for ")).firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let until = Date().addingTimeInterval(120)
+        while !creator.exists && Date() < until {
+            if retry.waitForExistence(timeout: 4) { retry.tap() }
+            _ = creator.waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(creator.exists,
+                      "The live published game must provide a real creator identity.")
+        creator.tap()
+        let header = app.descendants(matching: .any)["creator.profile.header"].firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 30),
+                      "Creator profile must render server-backed identity and metrics.")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "arcade-pulse-creator-profile"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let done = app.buttons["Done"].firstMatch
+        XCTAssertTrue(done.exists && done.isHittable)
+        done.tap()
+        XCTAssertTrue(app.buttons["game.play"].firstMatch.waitForExistence(timeout: 10),
+                      "Closing creator profile must preserve the playable feed.")
+    }
+
     /// Downsample two captured screenshots and report the fraction of
     /// pixels whose RGB distance exceeds a small threshold. The evaluator
     /// uses this as a visual evidence signal alongside semantic page IDs.
