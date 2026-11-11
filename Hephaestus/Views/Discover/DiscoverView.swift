@@ -883,20 +883,36 @@ private struct ForYouGamePage: View {
 
     // A missing or stale version-bound poster is not a recorded preview.
     // Keep the card playable and say so, without inventing visual evidence.
+    // When no approved media exists, make the blank stage feel intentionally
+    // designed, but NEVER present a made-up screenshot as gameplay. All copy
+    // comes from the live game; the fallback is visually distinct from media.
     private var unavailablePreview: some View {
         VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 6 : 12) {
-            Image(systemName: "gamecontroller.fill")
-                .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 38 : 60, weight: .medium))
-            Text("Preview unavailable")
-                // The decorative media hint must not become a giant label
-                // covering the real game title and accessible Play action.
-                .font(dynamicTypeSize.isAccessibilitySize ? .system(size: 15, weight: .semibold) : .subheadline.weight(.semibold))
-            Text("Tap Play now to explore")
-                .font(dynamicTypeSize.isAccessibilitySize ? .system(size: 12) : .caption)
-                .foregroundStyle(.white.opacity(0.85))
+            ZStack {
+                Circle()
+                    .strokeBorder(.white.opacity(0.20), lineWidth: 1)
+                    .frame(width: 116, height: 116)
+                Circle()
+                    .fill(.white.opacity(0.07))
+                    .frame(width: 94, height: 94)
+                Image(systemName: "gamecontroller.fill")
+                    .font(.system(size: 42, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.95))
+            }
+            Text(game.title)
+                .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 15 : 23,
+                              weight: .bold, design: .rounded))
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
+                .multilineTextAlignment(.center)
+            Text("Preview unavailable · Play the real game")
+                .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 12 : 13))
+                .foregroundStyle(.white.opacity(0.82))
+                .multilineTextAlignment(.center)
         }
-        .foregroundStyle(.white.opacity(0.94))
+        .foregroundStyle(.white)
         .padding(20)
+        .frame(maxWidth: 360)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityHidden(true)
     }
