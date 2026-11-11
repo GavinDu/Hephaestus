@@ -569,7 +569,21 @@ final class BackendAPI: ObservableObject {
         var path = "v1/feed?scope=\(scope.rawValue)&limit=20"
         if let cursor, !cursor.isEmpty { path += "&cursor=\(cursor)" }
         let req = try makeRequest(path)
-        return try await send(FeedResponse.self, req, using: feedSession)
+        do {
+            return try await send(FeedResponse.self, req, using: feedSession)
+        } catch {
+            // The public feed sometimes takes longer than the transport budget
+            // while a cold production worker starts. Retry only transient
+            // network failures, never invalid responses, HTTP errors or a
+            // cancelled request. The UI remains actionable if retry fails.
+            guard let urlError = error as? URLError,
+                  [.timedOut, .networkConnectionLost, .cannotConnectToHost].contains(urlError.code) else {
+                throw error
+            }
+            try Task.checkCancellation()
+            try await Task.sleep(for: .seconds(1))
+            return try await send(FeedResponse.self, req, using: feedSession)
+        }
     }
 
     func fetchVerifiedRunResult(runID: String) async throws -> VerifiedRunResult {
