@@ -327,6 +327,7 @@ final class PlayerSmokeTests: XCTestCase {
     /// analytics when no authenticated session or backend evidence exists.
     @MainActor
     func testArcadePulseStudioSignedOutState() throws {
+        XCUIDevice.shared.orientation = .portrait
         guard UIDevice.current.userInterfaceIdiom == .pad else {
             throw XCTSkip("Creator Studio is a native iPad sidebar destination.")
         }
@@ -348,9 +349,25 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(app.frame.intersects(openProfile.frame),
                       "Studio sign-in must be visible in the actual iPad viewport.")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "arcade-pulse-ipad-creator-studio-signed-out"
+        screenshot.name = "arcade-pulse-ipad-creator-studio-signed-out-portrait"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+
+        // A regular-width iPad also needs a usable Studio in landscape.
+        // Capture the actual simulator screen rather than rotating a portrait
+        // attachment after the fact; the image exporter retains orientation.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(openProfile.waitForExistence(timeout: 10) && openProfile.isHittable,
+                      "Studio sign-in must remain visible after iPad rotation.")
+        XCTAssertGreaterThanOrEqual(openProfile.frame.height, 44,
+                                    "Landscape Studio sign-in must remain a 44pt target.")
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-ipad-creator-studio-signed-out-landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(openProfile.waitForExistence(timeout: 10) && openProfile.isHittable)
         openProfile.tap()
         XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
                       "The Studio CTA must navigate to the actual Profile sign-in flow.")
