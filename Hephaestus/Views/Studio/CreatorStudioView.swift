@@ -17,6 +17,7 @@ struct CreatorStudioView: View {
     @State private var nextCursor: String?
     @State private var isLoading = false
     @State private var isLoadingMore = false
+    @State private var requestRevision = 0
     @State private var loadError: String?
     @State private var playerRequest: PixiPlayerRequest?
 
@@ -251,20 +252,40 @@ struct CreatorStudioView: View {
     }
 
     private func load(reset: Bool) async {
-        guard !isSignedOut else { return }
-        if reset {
-            isLoading = true
+        let ownerID = BackendConfig.currentUserID
+        guard !ownerID.isEmpty else {
+            requestRevision += 1
+            projects = []
             nextCursor = nil
+            loadError = nil
+            return
+        }
+        if reset {
+            requestRevision += 1
+            isLoading = true
+            projects = []
+            nextCursor = nil
+            loadError = nil
         } else {
-            guard nextCursor != nil, !isLoadingMore else { return }
+            guard nextCursor != nil, !isLoadingMore, !isLoading else { return }
             isLoadingMore = true
         }
-        defer { isLoading = false; isLoadingMore = false }
+        let revision = requestRevision
+        let filter = selectedStatus
+        let cursor = reset ? nil : nextCursor
+        defer {
+            if requestRevision == revision {
+                isLoading = false
+                isLoadingMore = false
+            }
+        }
         do {
             let response = try await BackendAPI.shared.fetchMyProjects(
-                status: selectedStatus.rawValue,
-                cursor: reset ? nil : nextCursor
+                status: filter.rawValue, cursor: cursor
             )
+            guard !Task.isCancelled, requestRevision == revision,
+                  BackendConfig.currentUserID == ownerID,
+                  selectedStatus == filter else { return }
             if reset {
                 projects = response.projects
             } else {
@@ -274,6 +295,9 @@ struct CreatorStudioView: View {
             nextCursor = response.nextCursor
             loadError = nil
         } catch {
+            guard !Task.isCancelled, requestRevision == revision,
+                  BackendConfig.currentUserID == ownerID,
+                  selectedStatus == filter else { return }
             loadError = "Projects aren't available right now: \(error.localizedDescription)"
         }
     }
