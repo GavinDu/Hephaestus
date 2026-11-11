@@ -43,22 +43,7 @@ struct CreatorStudioView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     header
                     if isSignedOut {
-                        VStack(spacing: 16) {
-                            ContentUnavailableView(
-                                "Sign in to see your projects",
-                                systemImage: "lock.shield",
-                                description: Text("Your private drafts are only visible to your account. Sign in from Profile to manage your games."))
-                            Button(action: onOpenProfile) {
-                                Label("Go to Profile to sign in", systemImage: "person.crop.circle")
-                                    .frame(minWidth: 220, minHeight: 44)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(ArcadePulseTheme.electricViolet)
-                            .accessibilityIdentifier("studio.openProfile")
-                        }
-                        .frame(maxWidth: 560, minHeight: 280)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
+                        signedOutGate
                     } else {
                         Picker("Project status", selection: $selectedStatus) {
                             ForEach(ProjectFilter.allCases) { filter in
@@ -148,6 +133,56 @@ struct CreatorStudioView: View {
             }
             .accessibilityIdentifier("studio.arcadePulse.root")
         }
+    }
+
+    /// Deliberately useful signed-out state, rather than a tiny button in a
+    /// mostly empty iPad workspace. No projects, counts or analytics are faked.
+    private var signedOutGate: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "lock.square.stack.fill")
+                .font(.system(size: 42, weight: .medium))
+                .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                .frame(width: 76, height: 76)
+                .background(ArcadePulseTheme.electricViolet.opacity(0.18),
+                            in: RoundedRectangle(cornerRadius: 20))
+
+            Text("Sign in to see your projects")
+                .font(.system(.title2, design: .rounded).weight(.bold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+
+            Text("Your private drafts, generation status and published games belong to your account. Sign in from Profile to manage them.")
+                .font(.body)
+                .foregroundStyle(ArcadePulseTheme.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(action: onOpenProfile) {
+                Label("Go to Profile to sign in", systemImage: "person.crop.circle")
+                    .font(.headline)
+                    .frame(maxWidth: 380, minHeight: 48)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(ArcadePulseTheme.electricViolet)
+            .accessibilityIdentifier("studio.openProfile")
+        }
+        .frame(maxWidth: 620)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 36)
+        .background(
+            LinearGradient(colors: [
+                ArcadePulseTheme.surface,
+                ArcadePulseTheme.electricViolet.opacity(0.14)
+            ], startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius)
+                .strokeBorder(ArcadePulseTheme.subtleBorder, lineWidth: 1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 370)
+        .accessibilityElement(children: .contain)
     }
 
     private var header: some View {
