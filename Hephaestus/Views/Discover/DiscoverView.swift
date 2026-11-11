@@ -257,8 +257,12 @@ struct DiscoverView: View {
                 } else {
                     ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("PLAYABLE STORIES", systemImage: "sparkles")
+                    // Keep real loading/error actions reachable at Accessibility XXXL.
+                    // A decorative hero above a failed request previously pushed Retry
+                    // below the iPhone viewport, leaving the feed unusable.
+                    if !games.isEmpty || (!isLoading && errorMessage == nil) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("PLAYABLE STORIES", systemImage: "sparkles")
                             .font(.caption.weight(.bold))
                             .tracking(1.2)
                             .foregroundStyle(.purple)
@@ -271,7 +275,8 @@ struct DiscoverView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.vertical, 6)
-                    .accessibilityElement(children: .combine)
+                        .accessibilityElement(children: .combine)
+                    }
 
                     if isLoading && games.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
@@ -318,9 +323,11 @@ struct DiscoverView: View {
                                 .multilineTextAlignment(.center)
                             Button("Try again") { Task { await load() } }
                                 .buttonStyle(.borderedProminent)
+                                .frame(minHeight: 44)
+                                .accessibilityIdentifier("feed.retryError")
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 44)
+                        .padding(.vertical, 12)
                     } else if visibleGames.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "magnifyingglass")
