@@ -264,6 +264,65 @@ struct CreatorProfile: Decodable {
     var is_friend: Bool
 }
 
+// Authenticated Creator Studio data only. Never substitute public creator posts
+// for the owner's private draft/project list.
+struct CreatorProject: Decodable, Identifiable {
+    let gameID: String
+    let title: String
+    let status: String
+    let visibility: String
+    let moderationStatus: String?
+    let jobStatus: String?
+    let createdAt: String
+    let updatedAt: String
+    let remixParentID: String?
+    let publishedVersion: Int?
+    let previewPosterURL: String?
+
+    var id: String { gameID }
+
+    enum CodingKeys: String, CodingKey {
+        case gameID = "game_id", title, status, visibility
+        case moderationStatus = "moderation_status"
+        case jobStatus = "job_status"
+        case createdAt = "created_at", updatedAt = "updated_at"
+        case remixParentID = "remix_parent_id"
+        case publishedVersion = "published_version"
+        case previewPosterURL = "preview_poster_url"
+    }
+
+    var displayStatus: String {
+        if moderationStatus == "pending" { return "In review" }
+        if moderationStatus == "rejected" { return "Rejected" }
+        if moderationStatus == "quarantined" { return "Restricted" }
+        switch status {
+        case "draft": return "Draft"
+        case "generating":
+            return jobStatus == "awaiting_confirm" ? "Review design" : "Generating"
+        case "ready":
+            return visibility == "public" && moderationStatus == "approved"
+                ? "Published" : "Ready · private"
+        case "failed": return "Failed"
+        default: return "Status unavailable"
+        }
+    }
+
+    var isPubliclyPlayable: Bool {
+        status == "ready" && visibility == "public" &&
+        moderationStatus == "approved" && (publishedVersion ?? 0) > 0
+    }
+}
+
+struct CreatorProjectsResponse: Decodable {
+    let projects: [CreatorProject]
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case projects
+        case nextCursor = "next_cursor"
+    }
+}
+
 struct CreatorDiscoveryEntry: Decodable, Identifiable {
     var creator_id: String
     var post_count: Int
@@ -536,6 +595,26 @@ final class BackendAPI: ObservableObject {
     func fetchSavedGames() async throws -> [FeedGame] {
         let req = try makeRequest("v1/users/me/saved")
         return try await send(FeedResponse.self, req).games
+    }
+
+    func fetchMyProjects(status: String = "all", cursor: String? = nil) async throws -> CreatorProjectsResponse {
+        var components = URLComponents(
+            url: url("v1/users/me/projects"), resolvingAgainstBaseURL: false)!
+        var items = [
+            URLQueryItem(name: "limit", value: "20"),
+            URLQueryItem(name: "status", value: status)
+        ]
+        if let cursor, !cursor.isEmpty {
+            items.append(URLQueryItem(name: "cursor", value: cursor))
+        }
+        components.queryItems = items
+        guard let endpoint = components.url else {
+            throw APIError.invalidInput("Invalid projects URL.")
+        }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "GET"
+        BackendConfig.applyAuthentication(to: &request)
+        return try await send(CreatorProjectsResponse.self, request)
     }
 
     func fetchSavedGameIDs() async throws -> Set<String> {
