@@ -4,6 +4,12 @@ import UIKit
 
 /// Photograph a drawing → analyze → generate → confirm → play.
 struct CreateView: View {
+    let onOpenProfile: () -> Void
+
+    init(onOpenProfile: @escaping () -> Void = {}) {
+        self.onOpenProfile = onOpenProfile
+    }
+
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     enum Phase {
         case pick
@@ -28,6 +34,7 @@ struct CreateView: View {
     @State private var publishMessage: String?
     @State private var isPublishing = false
     @State private var playerRequest: PixiPlayerRequest?
+    @State private var showsProjects = false
 
     var body: some View {
         NavigationStack {
@@ -60,6 +67,12 @@ struct CreateView: View {
             .fullScreenCover(item: $playerRequest) { req in
                 PixiPlayerSheet(gameID: req.gameID, title: req.title)
             }
+            .sheet(isPresented: $showsProjects) {
+                CreatorStudioView(onOpenProfile: {
+                    showsProjects = false
+                    onOpenProfile()
+                })
+            }
         }
     }
 
@@ -86,6 +99,22 @@ struct CreateView: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("create.pick.hero")
+
+                // Studio lives in the iPad sidebar. On a compact iPhone, use
+                // one discoverable project entry inside Create, not a fifth
+                // tab that squeezes the feed and its touch targets.
+                if horizontalSizeClass != .regular {
+                    Button {
+                        showsProjects = true
+                    } label: {
+                        Label("My projects", systemImage: "square.stack.3d.up")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(ArcadePulseTheme.electricViolet)
+                    .accessibilityIdentifier("create.myProjects")
+                }
 
                 ZStack {
                     RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius, style: .continuous)
