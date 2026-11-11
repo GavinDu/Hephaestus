@@ -14,6 +14,8 @@ struct RemixCreationSheet: View {
     @State private var allowOtherRemixes = false
     @State private var publishCaption = ""
     @State private var publishTopics = ""
+    @State private var isCreating = false
+    @State private var isConfirming = false
     @State private var isPublishing = false
     @State private var didSubmitPublication = false
     @State private var publishMessage: String?
@@ -155,7 +157,7 @@ struct RemixCreationSheet: View {
             .buttonStyle(.borderedProminent)
             .tint(ArcadePulseTheme.playOrangeDeep)
             .disabled(intent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                      !sourceAcknowledged)
+                      !sourceAcknowledged || isCreating)
             .accessibilityIdentifier("remix.create")
         }
         .padding(18)
@@ -185,6 +187,7 @@ struct RemixCreationSheet: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(ArcadePulseTheme.electricViolet)
+            .disabled(isConfirming)
             .accessibilityIdentifier("remix.confirm")
         }
         .padding(18)
@@ -249,8 +252,10 @@ struct RemixCreationSheet: View {
     }
 
     private func create() async {
-        guard sourceAcknowledged,
+        guard !isCreating, sourceAcknowledged,
               !intent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        isCreating = true
+        defer { isCreating = false }
         do {
             let created = try await BackendAPI.shared.createRemix(
                 parentGameID: source.id, intent: intent.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -287,6 +292,9 @@ struct RemixCreationSheet: View {
     }
 
     private func confirm(_ job: JobStatus) async {
+        guard !isConfirming else { return }
+        isConfirming = true
+        defer { isConfirming = false }
         do {
             try await BackendAPI.shared.confirmGame(id: job.game_id)
             phase = .building(job)
