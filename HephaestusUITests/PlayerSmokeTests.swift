@@ -323,6 +323,42 @@ final class PlayerSmokeTests: XCTestCase {
                       "Closing comments must return to the same browsable game feed.")
     }
 
+    /// Real source attribution and authorization must be checked before
+    /// any Remix Create action is exposed. CI has no logged-in user, so
+    /// capture the truthful permissions/sign-in state rather than fake data.
+    @MainActor
+    func testArcadePulseRemixRightsGateAndSourceAttribution() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+        let more = app.descendants(matching: .any)["More game actions"].firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let deadline = Date().addingTimeInterval(120)
+        while !more.exists && Date() < deadline {
+            if retry.waitForExistence(timeout: 4) { retry.tap() }
+            _ = more.waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        more.tap()
+        let open = app.buttons["Check remix options"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        open.tap()
+        let root = app.descendants(matching: .any)["remix.arcadePulse.root"].firstMatch
+        XCTAssertTrue(root.waitForExistence(timeout: 10))
+        let locked = app.staticTexts["Remix not available"].firstMatch
+        XCTAssertTrue(locked.waitForExistence(timeout: 15),
+                      "Unsigned user must not silently create a remix or copy another creator's source.")
+        XCTAssertFalse(app.buttons["remix.create"].firstMatch.exists,
+                       "Actual Create remix action requires authenticated source eligibility and consent.")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "arcade-pulse-remix-permission-gate"
+        shot.lifetime = .keepAlways
+        add(shot)
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["game.play"].firstMatch.waitForExistence(timeout: 10))
+    }
+
     /// Downsample two captured screenshots and report the fraction of
     /// pixels whose RGB distance exceeds a small threshold. The evaluator
     /// uses this as a visual evidence signal alongside semantic page IDs.
