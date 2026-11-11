@@ -343,6 +343,10 @@ final class PlayerSmokeTests: XCTestCase {
         let openProfile = app.buttons["studio.openProfile"].firstMatch
         XCTAssertTrue(openProfile.waitForExistence(timeout: 5) && openProfile.isHittable,
                       "The signed-out Studio must offer a reachable route to real Apple sign-in.")
+        XCTAssertGreaterThanOrEqual(openProfile.frame.height, 44,
+                                    "The Studio sign-in CTA must meet the minimum touch target.")
+        XCTAssertTrue(app.frame.intersects(openProfile.frame),
+                      "Studio sign-in must be visible in the actual iPad viewport.")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "arcade-pulse-ipad-creator-studio-signed-out"
         screenshot.lifetime = .keepAlways
