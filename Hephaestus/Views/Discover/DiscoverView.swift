@@ -2099,36 +2099,133 @@ private struct CommentsSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if isLoading { ProgressView().padding() }
-                List(comments) { comment in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(comment.user_id).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        Text(comment.body)
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: "gamecontroller.fill")
+                        .font(.headline)
+                        .foregroundStyle(ArcadePulseTheme.playOrange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("COMMENTS ON")
+                            .font(.caption2.weight(.bold))
+                            .tracking(0.7)
+                            .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                        Text(game.title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
                     }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if comment.user_id == BackendConfig.currentUserID {
-                            Button(role: .destructive) {
-                                Task { await delete(comment) }
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                    Spacer(minLength: 0)
+                    Text("\(comments.count)")
+                        .font(.caption.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(ArcadePulseTheme.textSecondary)
+                        .accessibilityLabel("\(comments.count) loaded comments")
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .background(ArcadePulseTheme.surface)
+
+                if isLoading {
+                    ProgressView("Loading comments…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if comments.isEmpty && errorMessage == nil {
+                    ContentUnavailableView(
+                        "No comments yet",
+                        systemImage: "bubble.left.and.bubble.right",
+                        description: Text("Start the conversation about this game."))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(comments) { comment in
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "person.crop.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(ArcadePulseTheme.electricViolet)
+                                .frame(width: 32, height: 32)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(comment.user_id)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                                Text(comment.body)
+                                    .font(.body)
+                                    .foregroundStyle(.white)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
-                            .disabled(deletingCommentIDs.contains(comment.id))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.vertical, 8)
+                        .listRowBackground(ArcadePulseTheme.surface.opacity(0.55))
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if comment.user_id == BackendConfig.currentUserID {
+                                Button(role: .destructive) {
+                                    Task { await delete(comment) }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                .disabled(deletingCommentIDs.contains(comment.id))
+                            }
                         }
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .accessibilityIdentifier("comments.list")
                 }
-                if let errorMessage { Text(errorMessage).font(.caption).foregroundStyle(.red).padding(.horizontal) }
-                HStack {
-                    TextField("Add a comment…", text: $draft, axis: .vertical).textFieldStyle(.roundedBorder)
-                    Button("Send") { Task { await submit() } }
-                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSubmitting)
+
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .accessibilityIdentifier("comments.error")
                 }
-                .padding()
+            }
+            .background(ArcadePulseTheme.canvas)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack(spacing: 10) {
+                    TextField("Add a comment…", text: $draft, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...4)
+                        .submitLabel(.send)
+                        .accessibilityIdentifier("comments.composer")
+                    if isSubmitting {
+                        ProgressView()
+                            .frame(width: 44, height: 44)
+                            .accessibilityLabel("Sending comment")
+                    } else if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button {
+                            Task { await submit() }
+                        } label: {
+                            Image(systemName: "paperplane.fill")
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(ArcadePulseTheme.playOrangeDeep)
+                        .accessibilityLabel("Send comment")
+                        .accessibilityIdentifier("comments.send")
+                    } else {
+                        // Disabled SwiftUI icon-buttons were misreported as enabled
+                        // by XCUI in the sheet's safe-area inset. Make the unavailable
+                        // action structurally non-interactive, not just greyed out.
+                        Image(systemName: "paperplane.fill")
+                            .frame(width: 44, height: 44)
+                            .foregroundStyle(.white.opacity(0.42))
+                            .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                            .accessibilityLabel("Enter a comment to enable Send")
+                            .accessibilityIdentifier("comments.send.unavailable")
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(ArcadePulseTheme.surface)
             }
             .navigationTitle("Comments")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .preferredColorScheme(.dark)
             .task { await load() }
         }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     private func load() async {
