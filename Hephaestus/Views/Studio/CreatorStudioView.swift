@@ -3,6 +3,14 @@ import SwiftUI
 /// Private owner workspace. The backend, not the device, authorizes every
 /// project. No invented draft, graph, editor, remix or analytics affordance.
 struct CreatorStudioView: View {
+    // Make the signed-out empty state a navigable entry into the REAL
+    // authentication flow. Studio never manufactures a project or session.
+    let onOpenProfile: () -> Void
+
+    init(onOpenProfile: @escaping () -> Void = {}) {
+        self.onOpenProfile = onOpenProfile
+    }
+
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var projects: [CreatorProject] = []
     @State private var selectedStatus: ProjectFilter = .all
@@ -34,11 +42,22 @@ struct CreatorStudioView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     header
                     if isSignedOut {
-                        ContentUnavailableView(
-                            "Sign in to see your projects",
-                            systemImage: "lock.shield",
-                            description: Text("Your private games and drafts are visible only after you sign in on the Profile tab."))
-                            .frame(maxWidth: .infinity, minHeight: 250)
+                        VStack(spacing: 16) {
+                            ContentUnavailableView(
+                                "Sign in to see your projects",
+                                systemImage: "lock.shield",
+                                description: Text("Your private drafts are only visible to your account. Sign in from Profile to manage your games."))
+                            Button(action: onOpenProfile) {
+                                Label("Go to Profile to sign in", systemImage: "person.crop.circle")
+                                    .frame(minWidth: 220, minHeight: 44)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(ArcadePulseTheme.electricViolet)
+                            .accessibilityIdentifier("studio.openProfile")
+                        }
+                        .frame(maxWidth: 560, minHeight: 280)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
                     } else {
                         Picker("Project status", selection: $selectedStatus) {
                             ForEach(ProjectFilter.allCases) { filter in
