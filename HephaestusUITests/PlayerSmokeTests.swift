@@ -204,6 +204,26 @@ final class PlayerSmokeTests: XCTestCase {
         screenshot.name = isPad ? "arcade-pulse-create-entry-ipad" : "arcade-pulse-create-entry-iphone"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+
+        if !isPad {
+            let projects = app.buttons["create.myProjects"].firstMatch
+            XCTAssertTrue(projects.waitForExistence(timeout: 10) && projects.isHittable,
+                          "Compact Create must expose an accessible My projects entry.")
+            XCTAssertGreaterThanOrEqual(projects.frame.height, 44)
+            projects.tap()
+            let studio = app.descendants(matching: .any)["studio.arcadePulse.root"].firstMatch
+            XCTAssertTrue(studio.waitForExistence(timeout: 10),
+                          "My projects must open the real owner-only Studio, not a dead CTA.")
+            let evidence = XCTAttachment(screenshot: app.screenshot())
+            evidence.name = "arcade-pulse-iphone-studio-signed-out"
+            evidence.lifetime = .keepAlways
+            add(evidence)
+            let signIn = app.buttons["studio.openProfile"].firstMatch
+            XCTAssertTrue(signIn.waitForExistence(timeout: 5) && signIn.isHittable)
+            signIn.tap()
+            XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
+                          "Studio must return to the real Profile authentication entry.")
+        }
     }
 
     /// Verify the real saved/recent game library remains reachable through
