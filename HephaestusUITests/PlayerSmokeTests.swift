@@ -65,13 +65,24 @@ final class PlayerSmokeTests: XCTestCase {
             app.buttons["Try again"].firstMatch,
             app.buttons["Refresh games"].firstMatch
         ]
-        let feedDeadline = Date().addingTimeInterval(120)
-        var lastRetry = Date.distantPast
+        // URLSession may need up to two 30-second transport windows during a
+        // cold worker start. Retrying every 15 seconds cancelled each in-flight
+        // request before it could complete and manufactured a stuck spinner.
+        // Keep the smoke strict: always require a real playable card and fail
+        // after a bounded deadline rather than substituting a mock game.
+        let feedDeadline = Date().addingTimeInterval(150)
+        var lastRetry = Date()
         while !play.exists && Date() < feedDeadline {
-            // XCTest can throw while evaluating isHittable for a loading-state
-            // accessibility button whose frame is temporarily invalid. Inspect
-            // geometry first, and only activate a control with a real hit point.
-            if Date().timeIntervalSince(lastRetry) >= 15 {
+            // A completed failed request can be retried immediately. While a
+            // request is in flight, allow the fetch + network retry to finish
+            // before cancelling it with the "Retry loading" action.
+            let failedRequest = app.buttons["Try again"].firstMatch
+            let hasError = failedRequest.exists && failedRequest.isEnabled
+            if hasError || Date().timeIntervalSince(lastRetry) >= 65 {
+                // XCTest can throw while evaluating isHittable for a loading
+                // accessibility button whose frame is temporarily invalid.
+                // Inspect geometry before tapping and preserve screenshot
+                // failure evidence when no playable post arrives.
                 for retry in retries where retry.exists && retry.isEnabled {
                     let frame = retry.frame
                     guard !frame.isNull, !frame.isEmpty,
