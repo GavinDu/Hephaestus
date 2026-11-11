@@ -68,11 +68,21 @@ final class PlayerSmokeTests: XCTestCase {
         let feedDeadline = Date().addingTimeInterval(120)
         var lastRetry = Date.distantPast
         while !play.exists && Date() < feedDeadline {
-            if Date().timeIntervalSince(lastRetry) >= 15,
-               let retry = retries.first(where: { $0.exists && $0.isHittable && $0.isEnabled }) {
-                print("SMOKE: retrying real live feed via \(retry.label)")
-                retry.tap()
-                lastRetry = Date()
+            // XCTest can throw while evaluating isHittable for a loading-state
+            // accessibility button whose frame is temporarily invalid. Inspect
+            // geometry first, and only activate a control with a real hit point.
+            if Date().timeIntervalSince(lastRetry) >= 15 {
+                for retry in retries where retry.exists && retry.isEnabled {
+                    let frame = retry.frame
+                    guard !frame.isNull, !frame.isEmpty,
+                          frame.width.isFinite, frame.height.isFinite,
+                          frame.midX.isFinite, frame.midY.isFinite,
+                          app.frame.intersects(frame) else { continue }
+                    print("SMOKE: retrying real live feed via \(retry.label)")
+                    retry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                    lastRetry = Date()
+                    break
+                }
             }
             _ = play.waitForExistence(timeout: 5)
         }
