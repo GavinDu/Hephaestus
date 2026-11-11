@@ -340,10 +340,16 @@ final class PlayerSmokeTests: XCTestCase {
                       "Signed-out Studio must explain that private drafts require sign-in.")
         XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
                        "Without an authenticated owner there can be no playable project card.")
+        let openProfile = app.buttons["studio.openProfile"].firstMatch
+        XCTAssertTrue(openProfile.waitForExistence(timeout: 5) && openProfile.isHittable,
+                      "The signed-out Studio must offer a reachable route to real Apple sign-in.")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "arcade-pulse-ipad-creator-studio-signed-out"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+        openProfile.tap()
+        XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
+                      "The Studio CTA must navigate to the actual Profile sign-in flow.")
     }
 
     /// Downsample two captured screenshots and report the fraction of
