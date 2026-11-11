@@ -118,7 +118,7 @@ struct ContentView: View {
         case .discover:
             DiscoverView()
         case .create:
-            CreateView()
+            CreateView(onOpenProfile: { selection = .profile })
         case .studio:
             CreatorStudioView(onOpenProfile: { selection = .profile })
         case .library:
