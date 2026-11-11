@@ -179,6 +179,16 @@ jobs:
           else
             echo "No .xcresult from this run; consult the preceding test failure log."
           fi
+      # Archive Xcode's 1,000+ small bundle files before artifact upload.
+      # Retain the full result and the independently exported PNG evidence;
+      # uploading the directory itself caused repeated ArtifactService timeouts.
+      - name: Package iPhone result bundle
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d /tmp/player-presentation-smoke.xcresult ]]; then
+            ditto -c -k --keepParent /tmp/player-presentation-smoke.xcresult /tmp/player-presentation-smoke.xcresult.zip
+          fi
       - name: Upload player smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -186,7 +196,7 @@ jobs:
           name: player-presentation-iphone-smoke
           path: |
             /tmp/player-presentation-smoke.log
-            /tmp/player-presentation-smoke.xcresult
+            /tmp/player-presentation-smoke.xcresult.zip
             /tmp/player-presentation-iphone-screenshots
           if-no-files-found: ignore
 
@@ -244,6 +254,13 @@ jobs:
           else
             echo "No .xcresult from this run; consult the preceding test failure log."
           fi
+      - name: Package iPad result bundle
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d /tmp/player-presentation-ipad.xcresult ]]; then
+            ditto -c -k --keepParent /tmp/player-presentation-ipad.xcresult /tmp/player-presentation-ipad.xcresult.zip
+          fi
       - name: Upload iPad smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -251,7 +268,7 @@ jobs:
           name: player-presentation-ipad-smoke
           path: |
             /tmp/player-presentation-ipad.log
-            /tmp/player-presentation-ipad.xcresult
+            /tmp/player-presentation-ipad.xcresult.zip
             /tmp/player-presentation-ipad-screenshots
           if-no-files-found: ignore
 
