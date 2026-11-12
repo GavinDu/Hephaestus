@@ -212,6 +212,18 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(hero.waitForExistence(timeout: 10))
         XCTAssertTrue(choose.exists && choose.isHittable)
         XCTAssertTrue(consent.exists && consent.isHittable)
+        // The initial native Remix screenshot showed consent text hidden behind
+        // the bottom tab even though the toggle was hittable. The full
+        // disclosure must remain visible before choosing to upload art.
+        let disclosure = app.staticTexts["create.sourceConsent.disclosure"].firstMatch
+        XCTAssertTrue(disclosure.exists && disclosure.isHittable,
+                      "The source disclosure must remain visible before consent.")
+        if !isPad {
+            let tabBar = app.tabBars.firstMatch
+            XCTAssertTrue(tabBar.exists)
+            XCTAssertLessThanOrEqual(disclosure.frame.maxY, tabBar.frame.minY - 4,
+                "The source disclosure must clear the compact iPhone tab bar.")
+        }
         XCTAssertTrue(analyze.exists && !analyze.isEnabled,
                       "Analyze must stay disabled until artwork and source consent exist.")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
