@@ -828,8 +828,28 @@ struct DiscoverView: View {
             }
         } catch {
             if requestedScope == selectedFeed && feedRequestCoordinator.isCurrent(generation) {
-                errorMessage = error.localizedDescription
+                errorMessage = FeedErrorPresentation.message(for: error)
             }
+        }
+    }
+}
+
+/// User-facing Discover error copy. Never claim the feed loaded, and avoid
+/// surfacing raw TLS/transport jargon as the primary recovery explanation.
+/// The UI still exposes Retry and the actual saved-game Library route.
+enum FeedErrorPresentation {
+    static func message(for error: Error) -> String {
+        switch (error as? URLError)?.code {
+        case .secureConnectionFailed, .serverCertificateHasBadDate,
+             .serverCertificateNotYetValid, .serverCertificateUntrusted,
+             .serverCertificateHasUnknownRoot:
+            return "The game service couldn't establish a secure connection. Check your network and try again."
+        case .notConnectedToInternet, .networkConnectionLost:
+            return "You seem to be offline. Check your internet connection and try again."
+        case .timedOut:
+            return "The game service is taking too long to respond. Try again."
+        default:
+            return "The game feed isn't available right now. Try again in a moment."
         }
     }
 }
