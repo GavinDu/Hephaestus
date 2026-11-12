@@ -120,7 +120,9 @@ struct CreateView: View {
                         .foregroundStyle(ArcadePulseTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .accessibilityElement(children: .combine)
+                // The Projects button is now inside the header. A combined
+                // accessibility element would swallow that interactive child.
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("create.pick.hero")
 
                 ZStack {
