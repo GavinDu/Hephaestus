@@ -60,18 +60,22 @@ final class PlayerSmokeTests: XCTestCase {
         // label and therefore never exercised the actual Retry loading
         // button visible in the failing native screenshot.
         let retries = [
-            app.buttons["feed.retryLoading"].firstMatch,
-            app.buttons["Retry loading"].firstMatch,
+            app.descendants(matching: .any)["feed.retryLoading"].firstMatch,
+            app.descendants(matching: .any)["Retry loading"].firstMatch,
             app.buttons["Try again"].firstMatch,
             app.buttons["Refresh games"].firstMatch
         ]
-        let feedDeadline = Date().addingTimeInterval(120)
-        var lastRetry = Date.distantPast
+        // Preserve the full transport budget: early taps cancel live requests.
+        // The strict player smoke still fails when no real playable post arrives.
+        let feedDeadline = Date().addingTimeInterval(150)
+        var lastRetry = Date()
         while !play.exists && Date() < feedDeadline {
             // XCTest can throw while evaluating isHittable for a loading-state
             // accessibility button whose frame is temporarily invalid. Inspect
             // geometry first, and only activate a control with a real hit point.
-            if Date().timeIntervalSince(lastRetry) >= 15 {
+            let failedRequest = app.descendants(matching: .any)["feed.error.retry"].firstMatch
+            let hasError = failedRequest.exists && failedRequest.isEnabled
+            if hasError || Date().timeIntervalSince(lastRetry) >= 65 {
                 for retry in retries where retry.exists && retry.isEnabled {
                     let frame = retry.frame
                     guard !frame.isNull, !frame.isEmpty,
