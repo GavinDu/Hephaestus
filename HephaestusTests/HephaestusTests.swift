@@ -828,3 +828,57 @@ struct HephaestusTests {
     let canonical = try JSONDecoder().decode(FeedGame.self, from: Data("{\"game_id\":\"old\",\"title\":\"Old\",\"game_ir\":{\"game\":{\"orientation\":\"landscape\"}}}".utf8))
     #expect(canonical.orientationLabel == "Landscape game")
 }
+
+@Test func nativeRuntimeRejectsUnboundedOrMalformedFirstRenderMetrics() {
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(0) == 0)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(16) == 16)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(3_600_000) == 3_600_000)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(-1) == nil)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(3_600_001) == nil)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS("16") == nil)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(nil) == nil)
+}
+
+@Test func firstAcceptedRuntimeInputStartsSessionExactlyOnce() {
+    var gate = PlayerFirstInputGate()
+    #expect(gate.accepted == false)
+    // Swift Testing expectation macros wrap operands in immutable closures:
+    // evaluate every mutating state-machine transition *before* #expect.
+    let missing = gate.accept(milliseconds: nil)
+    let negative = gate.accept(milliseconds: -1)
+    let excessive = gate.accept(milliseconds: 86_400_001)
+    #expect(missing == false)
+    #expect(negative == false)
+    #expect(excessive == false)
+    let first = gate.accept(milliseconds: 0)
+    #expect(first == true)
+    #expect(gate.accepted == true)
+    let duplicate = gate.accept(milliseconds: 16)
+    let later = gate.accept(milliseconds: 86_400_000)
+    #expect(duplicate == false)
+    #expect(later == false)
+}
+
+@Test func firstInputGateAcceptsMaximumValidDuration() {
+    var gate = PlayerFirstInputGate()
+    let first = gate.accept(milliseconds: 86_400_000)
+    let duplicate = gate.accept(milliseconds: 86_400_000)
+    #expect(first == true)
+    #expect(duplicate == false)
+}
+
+@Test func speculativePlayerPrewarmExpiresOnlyIfUnattachedAndNotSuperseded() {
+    #expect(PlayerPrewarmBudgetPolicy.expiryNanoseconds == 15_000_000_000)
+    #expect(PlayerPrewarmBudgetPolicy.shouldExpire(
+        isAttached: false, scheduledEpoch: 8, currentEpoch: 8
+    ))
+    #expect(!PlayerPrewarmBudgetPolicy.shouldExpire(
+        isAttached: true, scheduledEpoch: 8, currentEpoch: 8
+    ))
+    #expect(!PlayerPrewarmBudgetPolicy.shouldExpire(
+        isAttached: false, scheduledEpoch: 8, currentEpoch: 9
+    ))
+    #expect(!PlayerPrewarmBudgetPolicy.shouldExpire(
+        isAttached: true, scheduledEpoch: 8, currentEpoch: 9
+    ))
+}

@@ -74,6 +74,21 @@ enum GameplayTelemetryPolicy {
     }
 }
 
+/// Navigation completion means HTML loaded, not gameplay started. Accept one
+/// bounded, validated first-input milestone from the trusted runtime, even
+/// if a later event uses a new telemetry sequence number.
+struct PlayerFirstInputGate {
+    private(set) var accepted = false
+
+    mutating func accept(milliseconds: Int?) -> Bool {
+        guard !accepted, let milliseconds, (0...86_400_000).contains(milliseconds) else {
+            return false
+        }
+        accepted = true
+        return true
+    }
+}
+
 /// Maps a WKWebView load failure to the player-facing error state
 /// (Hephaestus #53). Two rules, both fail-closed:
 ///   - the UI shows only a fixed message per category, never the raw
@@ -192,6 +207,18 @@ enum PlayerWebContentTerminationPolicy {
     }
 }
 
+// The runtime's initial explicit Pixi render can be measured independently
+// of WKNavigationDelegate.didFinish. This is renderer submission, not proof
+// that the GPU/compositor displayed a frame, nor that input is accepted.
+// Strict limits also prevent an untrusted or malformed page metric from
+// feeding unbounded values into native telemetry.
+enum PlayerRuntimeMetricPolicy {
+    static func firstSceneRenderSubmitMS(_ value: Any?) -> Int? {
+        guard let ms = value as? Int, (0...3_600_000).contains(ms) else { return nil }
+        return ms
+    }
+}
+
 // MARK: - Telemetry (monitoring)
 
 /// Fire-and-forget reports to the backend's telemetry endpoint — the
@@ -241,6 +268,21 @@ final class PlayerPathMonitor: ObservableObject {
     deinit { monitor.cancel() }
 }
 
+// A warm page is a speculative resource, not a durable entitlement or a
+// verified package cache. If the Play sheet never attaches, expire it before
+// an abandoned request can retain a whole WebKit scene indefinitely.
+enum PlayerPrewarmBudgetPolicy {
+    static let expiryNanoseconds: UInt64 = 15_000_000_000
+
+    static func shouldExpire(
+        isAttached: Bool,
+        scheduledEpoch: UInt64,
+        currentEpoch: UInt64
+    ) -> Bool {
+        !isAttached && scheduledEpoch == currentEpoch
+    }
+}
+
 // MARK: - Single pooled player web view
 //
 // Prewarming starts only after an explicit Play press begins. The same
@@ -254,6 +296,8 @@ enum PlayerWebViewPool {
     private static var currentURL: URL?
     private static var loadedURL: URL?
     private static var isAttached = false
+    private static var prewarmEpoch: UInt64 = 0
+    private static var prewarmExpiryTask: Task<Void, Never>?
     private static let warmupDelegate = WarmupDelegate()
 
     static func playerURL(gameID: String, quality: String? = nil) -> URL? {
@@ -289,10 +333,31 @@ enum PlayerWebViewPool {
         loadedURL = nil
         view.navigationDelegate = warmupDelegate
         view.load(URLRequest(url: url))
+        // A prewarm that is never attached must not hold a loaded game,
+        // authenticated resources, or an entire WebContent process forever.
+        prewarmExpiryTask?.cancel()
+        prewarmEpoch &+= 1
+        let epoch = prewarmEpoch
+        prewarmExpiryTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: PlayerPrewarmBudgetPolicy.expiryNanoseconds)
+            guard !Task.isCancelled,
+                  PlayerPrewarmBudgetPolicy.shouldExpire(
+                    isAttached: isAttached,
+                    scheduledEpoch: epoch,
+                    currentEpoch: prewarmEpoch
+                  ), pooledView === view else { return }
+            discardUnattachedPrewarm()
+            DevLog.info(.player, "abandoned speculative player prewarm expired")
+        }
         DevLog.info(.player, "prewarming player page for \(gameID)")
     }
 
     static func take(url: URL) -> (webView: WKWebView, shouldLoad: Bool, didFinish: Bool) {
+        // Ownership moves to a real interactive sheet. An expiry task must
+        // never stop or blank the WebView after that handoff.
+        prewarmExpiryTask?.cancel()
+        prewarmExpiryTask = nil
+        prewarmEpoch &+= 1
         let view = pooledView ?? makeWebView()
         pooledView = view
         let didFinish = currentURL == url && loadedURL == url && view.url == url
@@ -324,12 +389,31 @@ enum PlayerWebViewPool {
 
     static func recycle(_ webView: WKWebView) {
         guard pooledView === webView else { return }
+        prewarmExpiryTask?.cancel()
+        prewarmExpiryTask = nil
+        prewarmEpoch &+= 1
         isAttached = false
         currentURL = nil
         loadedURL = nil
         webView.navigationDelegate = warmupDelegate
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
+    }
+
+    /// Only speculative, *unattached* prewarms are discarded. Never
+    /// invalidate an interactive player or its verified-run session.
+    private static func discardUnattachedPrewarm() {
+        guard !isAttached else { return }
+        prewarmExpiryTask?.cancel()
+        prewarmExpiryTask = nil
+        prewarmEpoch &+= 1
+        let stale = pooledView
+        pooledView = nil
+        currentURL = nil
+        loadedURL = nil
+        stale?.stopLoading()
+        stale?.navigationDelegate = nil
+        stale?.loadHTMLString("", baseURL: nil)
     }
 
     private static func makeWebView() -> WKWebView {
@@ -448,7 +532,6 @@ struct PixiPlayerSheet: View {
     @State private var reportedMemoryWarning = false
     @State private var gameplayStartedAt: Date?
     @State private var didTrackGameplayStart = false
-    @State private var didReportInteractive = false
     @State private var verifiedResult: VerifiedRunResult?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
     @StateObject private var pathMonitor = PlayerPathMonitor()
@@ -529,25 +612,12 @@ struct PixiPlayerSheet: View {
         DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
         PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
                                message: "loaded in \(ms)ms quality=\(effectiveQuality)")
-        if !didReportInteractive {
-            didReportInteractive = true
-            let eventID = "ios-tti:\(gameID):\(loadStartedAt.timeIntervalSince1970)"
-            Task {
-                await BackendAPI.shared.trackSocialEvent(
-                    gameID: gameID,
-                    kind: "player_ready",
-                    timeToInteractiveMS: max(0, ms),
-                    eventID: eventID
-                )
-            }
-        }
-        // The backend derives play_start/replay/completion from
-        // runtime session_start/run_end events. Only track the
-        // sheet lifecycle here to avoid double-counting starts.
-        if !didTrackGameplayStart {
-            gameplayStartedAt = Date()
-            didTrackGameplayStart = true
-        }
+        // Navigation completion is NOT proof that the game has rendered or
+        // can accept input. Only the trusted runtime reports player_ready;
+        // this native callback records PlayerLoad/TapToNavReady separately.
+        // The runtime's first accepted input owns the gameplay-start
+        // clock. Navigation finish may still precede the start card or
+        // rendering; starting a quick-exit timer here mislabels latency.
         // #58 handoff, once: tap-to-nav-ready is tap time
         // to navigation finish (the shell definition
         // Gavin confirmed), and the hold poster fades
@@ -625,6 +695,12 @@ struct PixiPlayerSheet: View {
                             }
                         },
                         onPrewarmHit: { prewarmHit = true },
+                        onFirstInput: {
+                            if !didTrackGameplayStart {
+                                gameplayStartedAt = Date()
+                                didTrackGameplayStart = true
+                            }
+                        },
                         onVerifiedRun: { result in
                             verifiedResult = result
                         }
@@ -755,7 +831,10 @@ struct PixiPlayerSheet: View {
     }
 
     private func finishToFeed() {
-        if didTrackGameplayStart, let verifiedResult, verifiedResult.isVerified {
+        // A server-verified outcome is authoritative even when an auto-play
+        // game finishes without a first touch. Do not couple score handoff
+        // to the native quick-exit timer (which starts on first input).
+        if let verifiedResult, verifiedResult.isVerified {
             onFinish(verifiedResult)
         }
         dismiss()
@@ -803,6 +882,15 @@ struct PixiPlayerSheet: View {
                 // Apply the saved quality on the next game launch, not during
                 // an active session: reloading would discard progress.
                 DevLog.info(.player, "quality preference saved for next game -> \(qualityRaw) (effective \(effectiveQuality))")
+            }
+            .onChange(of: attempt) { _, _ in
+                // Each recreated player WebView has its own runtime session.
+                // A prior quick-exit start and completed prewarm must not
+                // leak into retry, connectivity recovery or crash reload.
+                prewarmHit = false
+                gameplayStartedAt = nil
+                didTrackGameplayStart = false
+                verifiedResult = nil
             }
             .onChange(of: pathMonitor.isOffline) { _, offline in
                 if !offline, loadError != nil {
@@ -1013,6 +1101,7 @@ private struct PlayerWebView: UIViewRepresentable {
     /// Declared between onTerminate and onVerifiedRun to match the
     /// call-site argument order (Swift requires the same order).
     var onPrewarmHit: () -> Void = {}
+    let onFirstInput: () -> Void
     let onVerifiedRun: (VerifiedRunResult) -> Void
 
     private static let messageName = "hephaestusRunResult"
@@ -1020,7 +1109,8 @@ private struct PlayerWebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator {
         Coordinator(gameID: gameID, onProgress: onProgress,
                     onLoadFinish: onLoadFinish, onLoadFail: onLoadFail,
-                    onTerminate: onTerminate, onVerifiedRun: onVerifiedRun)
+                    onTerminate: onTerminate, onFirstInput: onFirstInput,
+                    onVerifiedRun: onVerifiedRun)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -1060,11 +1150,13 @@ private struct PlayerWebView: UIViewRepresentable {
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
-    let onVerifiedRun: (VerifiedRunResult) -> Void
+        let onFirstInput: () -> Void
+        let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
         private var acceptedRunIDs = Set<String>()
         private var navigationFailureGate = PlayerNavigationFailureGate()
         private var acceptedMetricIDs = Set<String>()
+        private var firstInputGate = PlayerFirstInputGate()
         private var runtimeSessionID: String?
         private var isActive = true
         lazy var messageProxy = WeakScriptMessageHandler(delegate: self)
@@ -1074,12 +1166,14 @@ private struct PlayerWebView: UIViewRepresentable {
              onLoadFinish: @escaping () -> Void,
              onLoadFail: @escaping (Error) -> Void,
              onTerminate: @escaping () -> Void,
+             onFirstInput: @escaping () -> Void,
              onVerifiedRun: @escaping (VerifiedRunResult) -> Void) {
             self.expectedGameID = gameID
             self.onProgress = onProgress
             self.onLoadFinish = onLoadFinish
             self.onLoadFail = onLoadFail
             self.onTerminate = onTerminate
+            self.onFirstInput = onFirstInput
             self.onVerifiedRun = onVerifiedRun
         }
 
@@ -1128,8 +1222,24 @@ private struct PlayerWebView: UIViewRepresentable {
             let metricID = "\(runtimeSessionID):\(metric):\(sequence)"
             guard acceptedMetricIDs.insert(metricID).inserted else { return }
             switch metric {
+            case "first_scene_render_submit":
+                guard let ms = PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(body["ms"]) else { return }
+                // This metric may be lost when a pooled WebView was already
+                // warmed before the Coordinator attached. The backend also
+                // captures the milestone independently for that case.
+                PlayerTelemetry.report(
+                    gameID: expectedGameID, kind: "perf",
+                    name: "FirstSceneRenderSubmitted",
+                    message: "renderer-submitted-ms=\(ms); not display-presented or interactive"
+                )
             case "first_input":
-                guard let ms = body["ms"] as? Int, (0...86_400_000).contains(ms) else { return }
+                guard let ms = body["ms"] as? Int,
+                      firstInputGate.accept(milliseconds: ms) else { return }
+                Task { @MainActor [weak self] in
+                    guard let self, self.isActive,
+                          self.runtimeSessionID == runtimeSessionID else { return }
+                    self.onFirstInput()
+                }
                 Task { await BackendAPI.shared.trackSocialEvent(
                     gameID: expectedGameID, kind: "player_first_input",
                     timeToFirstInputMS: ms, eventID: "ios-metric:\(metricID)"
