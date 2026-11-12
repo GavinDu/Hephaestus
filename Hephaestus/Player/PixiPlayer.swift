@@ -756,12 +756,11 @@ struct PixiPlayerSheet: View {
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(300))
                         guard !Task.isCancelled,
-                              PlayerLaunchCallbackGate.accepts(
-                                expectedEpoch: fadeEpoch,
-                                currentEpoch: attempt,
-                                sessionRevoked: sessionRevoked
-                              ),
-                              !isLoading, loadError == nil else { return }
+                              PlayerTransientPresentationPolicy.mayFinishPosterFade(
+                                expectedEpoch: fadeEpoch, currentEpoch: attempt,
+                                sessionRevoked: sessionRevoked,
+                                isLoading: isLoading, hasLoadError: loadError != nil
+                              ) else { return }
                         holdVisible = false
                     }
                 }
@@ -1128,11 +1127,11 @@ struct PixiPlayerSheet: View {
                 let hintEpoch = attempt
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
                 guard !Task.isCancelled,
-                      PlayerLaunchCallbackGate.accepts(
-                        expectedEpoch: hintEpoch,
-                        currentEpoch: attempt,
-                        sessionRevoked: sessionRevoked
-                      ), isLoading, loadError == nil else { return }
+                      PlayerTransientPresentationPolicy.mayShowSlowLoadHint(
+                        expectedEpoch: hintEpoch, currentEpoch: attempt,
+                        sessionRevoked: sessionRevoked,
+                        isLoading: isLoading, hasLoadError: loadError != nil
+                      ) else { return }
                 showSlowHint = true
             }
             .onAppear {
