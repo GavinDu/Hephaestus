@@ -5,6 +5,13 @@ import SwiftUI
 /// the permission/IR checks before any new job exists.
 struct RemixCreationSheet: View {
     let source: FeedGame
+    let onOpenProfile: (() -> Void)?
+
+    init(source: FeedGame, onOpenProfile: (() -> Void)? = nil) {
+        self.source = source
+        self.onOpenProfile = onOpenProfile
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var phase: Phase = .checking
@@ -48,11 +55,26 @@ struct RemixCreationSheet: View {
                             ProgressView("Checking creator permissions…")
                                 .frame(maxWidth: .infinity, minHeight: 180)
                         case .denied(let reason):
-                            ContentUnavailableView(
-                                "Remix not available",
-                                systemImage: "lock.shield",
-                                description: Text(reason))
-                            .frame(maxWidth: .infinity, minHeight: 180)
+                            VStack(spacing: 14) {
+                                ContentUnavailableView(
+                                    "Remix not available",
+                                    systemImage: "lock.shield",
+                                    description: Text(reason))
+                                if BackendConfig.currentUserID.isEmpty, let onOpenProfile {
+                                    // Authentication is a genuine route to Profile, not
+                                    // a bypass of source rights or an automatic remix.
+                                    Button(action: onOpenProfile) {
+                                        Label("Go to Profile to sign in",
+                                              systemImage: "person.crop.circle")
+                                            .frame(maxWidth: .infinity, minHeight: 48)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(ArcadePulseTheme.electricViolet)
+                                    .accessibilityIdentifier("remix.openProfile")
+                                }
+                            }
+                            .frame(maxWidth: 520, minHeight: 180)
+                            .frame(maxWidth: .infinity)
                         case .unavailable(let message):
                             // An unreachable or outdated backend is not evidence
                             // that the original creator refused remix permission.
