@@ -60,18 +60,22 @@ final class PlayerSmokeTests: XCTestCase {
         // label and therefore never exercised the actual Retry loading
         // button visible in the failing native screenshot.
         let retries = [
-            app.buttons["feed.retryLoading"].firstMatch,
-            app.buttons["Retry loading"].firstMatch,
+            app.descendants(matching: .any)["feed.retryLoading"].firstMatch,
+            app.descendants(matching: .any)["Retry loading"].firstMatch,
             app.buttons["Try again"].firstMatch,
             app.buttons["Refresh games"].firstMatch
         ]
-        let feedDeadline = Date().addingTimeInterval(120)
-        var lastRetry = Date.distantPast
+        // Never cancel live cold-worker requests prematurely.
+        // The player smoke still fails without a real playable post.
+        let feedDeadline = Date().addingTimeInterval(170)
+        var lastRetry = Date()
         while !play.exists && Date() < feedDeadline {
             // XCTest can throw while evaluating isHittable for a loading-state
             // accessibility button whose frame is temporarily invalid. Inspect
             // geometry first, and only activate a control with a real hit point.
-            if Date().timeIntervalSince(lastRetry) >= 15 {
+            let errorRetry = app.descendants(matching: .any)["feed.error.retry"].firstMatch
+            let hasError = errorRetry.exists && errorRetry.isEnabled
+            if hasError || Date().timeIntervalSince(lastRetry) >= 65 {
                 for retry in retries where retry.exists && retry.isEnabled {
                     let frame = retry.frame
                     guard !frame.isNull, !frame.isEmpty,
@@ -516,16 +520,16 @@ final class PlayerSmokeTests: XCTestCase {
             }
 
             let retry = app.buttons["Try again"].firstMatch
-            let pendingRetry = app.buttons["feed.retryLoading"].firstMatch
+            let pendingRetry = app.descendants(matching: .any)["feed.retryLoading"].firstMatch
             let startedLoading = Date()
-            let feedDeadline = startedLoading.addingTimeInterval(120)
+            let feedDeadline = startedLoading.addingTimeInterval(180)
             var pendingRetryUsed = false
             while !play.exists && Date() < feedDeadline {
                 if retry.waitForExistence(timeout: 4) {
                     print("UI EVALUATOR: feed error in \(profile.1); retrying live backend")
                     retry.tap()
                 } else if !pendingRetryUsed &&
-                            Date().timeIntervalSince(startedLoading) > 40 &&
+                            Date().timeIntervalSince(startedLoading) > 70 &&
                             pendingRetry.exists {
                     // A network response can swap the skeleton for a real
                     // page between XCTest's isHittable query and tap(). In
