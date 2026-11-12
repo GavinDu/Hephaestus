@@ -492,6 +492,39 @@ final class PlayerSmokeTests: XCTestCase {
                       "The Studio CTA must navigate to the actual Profile sign-in flow.")
     }
 
+    /// In accessibility text sizes the multi-column explainer is intentionally
+    /// hidden, keeping the single owner sign-in route legible and reachable.
+    @MainActor
+    func testArcadePulseStudioSignedOutAccessibilityTextSize() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Creator Studio is an iPad-only sidebar destination.")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "--ui-test-studio",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityM"
+        ]
+        app.launch()
+        let studio = app.descendants(matching: .any)["studio.arcadePulse.root"].firstMatch
+        XCTAssertTrue(studio.waitForExistence(timeout: 15))
+        let signIn = app.buttons["studio.openProfile"].firstMatch
+        XCTAssertTrue(signIn.waitForExistence(timeout: 10) && signIn.isHittable,
+                      "Large text must keep the real Profile sign-in reachable.")
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        XCTAssertFalse(app.descendants(matching: .any)["studio.signedOutGuide"].firstMatch.exists,
+                       "Accessibility text sizes must prioritize the compact single-column sign-in.")
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
+                       "Accessible signed-out UI must not imply private games exist.")
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "arcade-pulse-ipad-studio-accessibility-large-text-landscape"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// Downsample two captured screenshots and report the fraction of
     /// pixels whose RGB distance exceeds a small threshold. The evaluator
     /// uses this as a visual evidence signal alongside semantic page IDs.
