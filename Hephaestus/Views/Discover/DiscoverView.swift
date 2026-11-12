@@ -60,6 +60,14 @@ private struct FeedSearchVisibilityModifier: ViewModifier {
 /// Backend-backed social feeds use the verified bearer session when present.
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
+    // A live-feed outage must not trap the user on an empty swipe stage.
+    // The host owns navigation, so this is an actual route to Library,
+    // never a substitute game list or a fabricated preview.
+    let onOpenLibrary: (() -> Void)?
+    init(onOpenLibrary: (() -> Void)? = nil) {
+        self.onOpenLibrary = onOpenLibrary
+    }
+
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
@@ -306,21 +314,54 @@ struct DiscoverView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                     } else if let errorMessage, games.isEmpty {
-                        VStack(spacing: 12) {
+                        VStack(spacing: 16) {
                             Image(systemName: "wifi.exclamationmark")
-                                .font(.largeTitle)
-                                .foregroundStyle(.secondary)
+                                .font(.system(size: 38, weight: .medium))
+                                .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                                .frame(width: 76, height: 76)
+                                .background(ArcadePulseTheme.electricViolet.opacity(0.16),
+                                            in: RoundedRectangle(cornerRadius: 20))
+                                .accessibilityHidden(true)
                             Text("Couldn't load the feed")
-                                .font(.headline)
+                                .font(.system(.title2, design: .rounded).weight(.bold))
+                                .foregroundStyle(.white)
+                                .accessibilityAddTraits(.isHeader)
                             Text(errorMessage)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .font(.subheadline)
+                                .foregroundStyle(ArcadePulseTheme.textSecondary)
                                 .multilineTextAlignment(.center)
-                            Button("Try again") { Task { await load() } }
-                                .buttonStyle(.borderedProminent)
+                            Text("You can still check Library for games you've saved.")
+                                .font(.subheadline)
+                                .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button {
+                                Task { await load() }
+                            } label: {
+                                Label("Try again", systemImage: "arrow.clockwise")
+                                    .frame(maxWidth: .infinity, minHeight: 48)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(ArcadePulseTheme.electricViolet)
+                            .accessibilityIdentifier("feed.error.retry")
+                            if let onOpenLibrary {
+                                Button(action: onOpenLibrary) {
+                                    Label("Open Library", systemImage: "bookmark")
+                                        .frame(maxWidth: .infinity, minHeight: 48)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(ArcadePulseTheme.neonMagenta)
+                                .accessibilityIdentifier("feed.error.library")
+                            }
                         }
+                        .padding(24)
+                        .frame(maxWidth: 520)
+                        .background(ArcadePulseTheme.surface,
+                                    in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 44)
+                        .padding(.vertical, 32)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("feed.error.recovery")
                     } else if visibleGames.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "magnifyingglass")
@@ -526,7 +567,16 @@ struct DiscoverView: View {
             }
             .task {
                 savedGameIDs = Set(UserDefaults.standard.stringArray(forKey: "hephaestus.savedGames") ?? [])
-                await load()
+                if ProcessInfo.processInfo.arguments.contains("--ui-test-feed-error-state") {
+                    // Deterministic visual QA of the network-error recovery,
+                    // explicitly isolated from the normal LIVE-feed smoke.
+                    // Never synthesize a feed game, player, or login session.
+                    games = []
+                    isLoading = false
+                    errorMessage = "Test-only: public feed request unavailable."
+                } else {
+                    await load()
+                }
             }
             .fullScreenCover(item: $playerRequest) { request in
                 PixiPlayerSheet(gameID: request.gameID, title: request.title,

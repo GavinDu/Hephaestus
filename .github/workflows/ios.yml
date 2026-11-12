@@ -201,6 +201,7 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedUIEvaluationAndSwipe \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedSupportsAccessibilityDynamicType \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateEntryConsentAndControls \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedUnavailableRecoveryToLibrary \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/ipad-feed-ui.log || {
               grep -E "error:|XCTAssert" /tmp/ipad-feed-ui.log | sort -u | head -30 | while read -r l; do
