@@ -129,6 +129,25 @@ struct CreatorStudioView: View {
             .task {
                 if !isSignedOut { await load(reset: true) }
             }
+            .onReceive(NotificationCenter.default.publisher(
+                for: .hephaestusBackendSessionDidChange
+            )) { _ in
+                // Clear owner-only data synchronously when the session changes.
+                // Scheduling the purge in a Task leaves a privacy-visible gap
+                // during which the previous owner's cards may still render.
+                requestRevision += 1
+                projects = []
+                nextCursor = nil
+                loadError = nil
+                isLoading = false
+                isLoadingMore = false
+                playerRequest = nil
+                // Only the new account's fetch is asynchronous. The exact
+                // credential snapshot in load rejects stale responses.
+                if !BackendConfig.currentUserID.isEmpty {
+                    Task { await load(reset: true) }
+                }
+            }
             .fullScreenCover(item: $playerRequest) { req in
                 PixiPlayerSheet(gameID: req.gameID, title: req.title)
             }
@@ -359,6 +378,9 @@ struct CreatorStudioView: View {
 
     private func load(reset: Bool) async {
         let ownerID = BackendConfig.currentUserID
+        // A same-subject credential rotation revokes an old response even
+        // before SwiftUI receives the session-change notification.
+        let sessionToken = BackendConfig.loadSessionToken()
         guard !ownerID.isEmpty else {
             requestRevision += 1
             projects = []
@@ -389,9 +411,12 @@ struct CreatorStudioView: View {
             let response = try await BackendAPI.shared.fetchMyProjects(
                 status: filter.rawValue, cursor: cursor
             )
-            guard !Task.isCancelled, requestRevision == revision,
-                  BackendConfig.currentUserID == ownerID,
-                  selectedStatus == filter else { return }
+            guard !Task.isCancelled,
+                  CreatorStudioRequestPolicy.canApply(
+                    startedRevision: revision, currentRevision: requestRevision,
+                    startedOwner: ownerID, currentOwner: BackendConfig.currentUserID,
+                    startedToken: sessionToken, currentToken: BackendConfig.loadSessionToken()
+                  ), selectedStatus == filter else { return }
             if reset {
                 projects = response.projects
             } else {
@@ -401,10 +426,29 @@ struct CreatorStudioView: View {
             nextCursor = response.nextCursor
             loadError = nil
         } catch {
-            guard !Task.isCancelled, requestRevision == revision,
-                  BackendConfig.currentUserID == ownerID,
-                  selectedStatus == filter else { return }
+            guard !Task.isCancelled,
+                  CreatorStudioRequestPolicy.canApply(
+                    startedRevision: revision, currentRevision: requestRevision,
+                    startedOwner: ownerID, currentOwner: BackendConfig.currentUserID,
+                    startedToken: sessionToken, currentToken: BackendConfig.loadSessionToken()
+                  ), selectedStatus == filter else { return }
             loadError = "Projects aren't available right now: \(error.localizedDescription)"
         }
+    }
+}
+
+/// Pure privacy invariant for asynchronous owner-project responses. Comparing
+/// the actual credential snapshot also covers a same-subject token rotation
+/// before SwiftUI processes the payload-free session-change notification.
+/// Never log or persist either token here.
+enum CreatorStudioRequestPolicy {
+    static func canApply(
+        startedRevision: Int, currentRevision: Int,
+        startedOwner: String, currentOwner: String,
+        startedToken: String?, currentToken: String?
+    ) -> Bool {
+        startedRevision == currentRevision &&
+        !startedOwner.isEmpty && startedOwner == currentOwner &&
+        startedToken == currentToken
     }
 }

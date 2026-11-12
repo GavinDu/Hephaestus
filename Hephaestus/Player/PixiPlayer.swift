@@ -635,6 +635,7 @@ struct PixiPlayerSheet: View {
     @State private var wasBackgrounded = false
     @State private var isLoading = true
     @State private var loadError: String?
+    @State private var sessionRevoked = false
     @State private var attempt = 0
     @State private var progress: Double = 0
     @State private var showSlowHint = false
@@ -749,8 +750,17 @@ struct PixiPlayerSheet: View {
                     holdVisible = false
                 } else {
                     withAnimation(.easeOut(duration: 0.25)) { holdOpacity = 0 }
-                    Task {
+                    // A retry/account swap can occur during the 300 ms fade.
+                    // The old sheet must never mutate its successor's poster.
+                    let fadeEpoch = attempt
+                    Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(300))
+                        guard !Task.isCancelled,
+                              PlayerTransientPresentationPolicy.mayFinishPosterFade(
+                                expectedEpoch: fadeEpoch, currentEpoch: attempt,
+                                sessionRevoked: sessionRevoked,
+                                isLoading: isLoading, hasLoadError: loadError != nil
+                              ) else { return }
                         holdVisible = false
                     }
                 }
@@ -763,14 +773,30 @@ struct PixiPlayerSheet: View {
     /// overlays + toolbar + lifecycle modifiers) timed out the
     /// compiler after the #58 additions.
     private var playerContent: some View {
-        ZStack {
+        // Value captured when .id(attempt) creates the WebView. Callbacks from
+        // a retired/retried sheet cannot mutate the current presentation.
+        let callbackEpoch = attempt
+        return ZStack {
                 if let url = playerURL {
                     PlayerWebView(
                         url: url,
                         gameID: gameID,
-                        onProgress: { progress = $0 },
-                        onLoadFinish: { handleLoadFinish() },
+                        onProgress: { value in
+                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                                                         currentEpoch: attempt,
+                                                         sessionRevoked: sessionRevoked) else { return }
+                            progress = value
+                        },
+                        onLoadFinish: {
+                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                                                         currentEpoch: attempt,
+                                                         sessionRevoked: sessionRevoked) else { return }
+                            handleLoadFinish()
+                        },
                         onLoadFail: { error in
+                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                                                         currentEpoch: attempt,
+                                                         sessionRevoked: sessionRevoked) else { return }
                             isLoading = false
                             holdOpacity = 0
                             holdVisible = false
@@ -783,6 +809,9 @@ struct PixiPlayerSheet: View {
                                                    name: "LoadFailed", message: message)
                         },
                         onTerminate: {
+                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                                                         currentEpoch: attempt,
+                                                         sessionRevoked: sessionRevoked) else { return }
                             // The web content process died (usually
                             // memory pressure): the page is a white
                             // void unless we reload it ourselves.
@@ -807,14 +836,25 @@ struct PixiPlayerSheet: View {
                                                        message: "gave up after 2 auto-reloads")
                             }
                         },
-                        onPrewarmHit: { prewarmHit = true },
+                        onPrewarmHit: {
+                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                                                         currentEpoch: attempt,
+                                                         sessionRevoked: sessionRevoked) else { return }
+                            prewarmHit = true
+                        },
                         onFirstInput: {
+                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                                                         currentEpoch: attempt,
+                                                         sessionRevoked: sessionRevoked) else { return }
                             if !didTrackGameplayStart {
                                 gameplayStartedAt = Date()
                                 didTrackGameplayStart = true
                             }
                         },
                         onVerifiedRun: { result in
+                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                                                         currentEpoch: attempt,
+                                                         sessionRevoked: sessionRevoked) else { return }
                             verifiedResult = result
                         }
                     )
@@ -897,6 +937,7 @@ struct PixiPlayerSheet: View {
                             .buttonStyle(.borderedProminent)
                             .frame(minHeight: HephaestusDesign.minimumActionHeight)
                             .accessibilityIdentifier("player.retry")
+                            .disabled(sessionRevoked)
                             Button("Return to feed") {
                                 finishToFeed()
                             }
@@ -1006,7 +1047,7 @@ struct PixiPlayerSheet: View {
                 verifiedResult = nil
             }
             .onChange(of: pathMonitor.isOffline) { _, offline in
-                if !offline, loadError != nil {
+                if !offline, loadError != nil, !sessionRevoked {
                     // Back online after a failed load: one quiet retry.
                     loadError = nil
                     isLoading = true
@@ -1033,7 +1074,7 @@ struct PixiPlayerSheet: View {
                     // Retry only a failed load, and only when connectivity is back.
                     // A successfully loaded game stays on screen; foregrounding does
                     // not trigger a disruptive reload or reset current gameplay.
-                    if PlayerLifecyclePolicy.shouldRetryAfterForeground(
+                    if !sessionRevoked && PlayerLifecyclePolicy.shouldRetryAfterForeground(
                         wasBackgrounded: true, isOffline: pathMonitor.isOffline, hasError: loadError != nil
                     ) {
                         loadError = nil
@@ -1050,6 +1091,7 @@ struct PixiPlayerSheet: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .hephaestusBackendSessionDidChange)) { _ in
+                sessionRevoked = true
                 // Changing the Keychain identity invalidates all prewarmed
                 // or attached pages, pending callbacks and prior results.
                 PlayerWebViewPool.invalidateForSessionChange()
@@ -1078,11 +1120,19 @@ struct PixiPlayerSheet: View {
                                            name: "ThermalState", message: "thermal state serious/critical during play")
                 }
             }
-            .task {
-                // Slow-load hint: still loading after 8s deserves an
-                // explanation, not just a longer stare at the spinner.
+            .task(id: attempt) {
+                // Start an independent 8s timer per actual WebView attempt.
+                // Retired timers are canceled by SwiftUI when attempt changes
+                // and may not surface premature hints in the new session.
+                let hintEpoch = attempt
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
-                if isLoading { showSlowHint = true }
+                guard !Task.isCancelled,
+                      PlayerTransientPresentationPolicy.mayShowSlowLoadHint(
+                        expectedEpoch: hintEpoch, currentEpoch: attempt,
+                        sessionRevoked: sessionRevoked,
+                        isLoading: isLoading, hasLoadError: loadError != nil
+                      ) else { return }
+                showSlowHint = true
             }
             .onAppear {
                 loadStartedAt = Date()
