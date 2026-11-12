@@ -89,6 +89,32 @@ struct HephaestusTests {
             verticalSizeClass: .compact, horizontalSizeClass: .compact, hasImmersivePager: false))
     }
 
+    @Test func studioProjectDecodingNeverMistakesPrivateDraftForPublishedPlayableGame() throws {
+        let payload = """
+        {"projects":[
+            {"game_id":"private-draft-1","title":"My draft","status":"draft",
+             "visibility":"private","created_at":"2026-11-10T12:00:00Z",
+             "updated_at":"2026-11-10T12:30:00Z"},
+            {"game_id":"public-ready-2","title":"Public title","status":"ready",
+             "visibility":"public","moderation_status":"approved","published_version":1,
+             "preview_poster_url":"/v1/games/public-ready-2/previews/1/poster.png",
+             "created_at":"2026-11-09T12:00:00Z","updated_at":"2026-11-10T12:00:00Z"}
+        ],"next_cursor":null}
+        """
+        let response = try JSONDecoder().decode(
+            CreatorProjectsResponse.self, from: Data(payload.utf8))
+        #expect(response.projects.count == 2)
+        #expect(response.projects[0].id == "private-draft-1")
+        #expect(response.projects[0].displayStatus == "Draft")
+        #expect(!response.projects[0].isPubliclyPlayable)
+        #expect(response.projects[1].displayStatus == "Published")
+        #expect(response.projects[1].isPubliclyPlayable)
+        #expect(response.projects[0].resolvedPosterURL == nil)
+        #expect(response.projects[1].resolvedPosterURL?.absoluteString ==
+            BackendConfig.baseURL.absoluteString + "/v1/games/public-ready-2/previews/1/poster.png")
+        #expect(response.nextCursor == nil)
+    }
+
     @Test func remixEligibilityIsServerDecidedNotDerivedFromPublicFeedPresence() throws {
         let blocked = try JSONDecoder().decode(
             RemixEligibility.self,
@@ -880,5 +906,23 @@ struct HephaestusTests {
     ))
     #expect(!PlayerPrewarmBudgetPolicy.shouldExpire(
         isAttached: true, scheduledEpoch: 8, currentEpoch: 9
+    ))
+}
+
+@Test func playerSessionCacheIsBoundToOneCredentialFingerprint() {
+    #expect(!PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: nil, currentFingerprint: "anonymous"
+    ))
+    #expect(!PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: "session-A", currentFingerprint: "session-A"
+    ))
+    #expect(PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: "session-A", currentFingerprint: "session-B"
+    ))
+    #expect(PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: "session-A", currentFingerprint: "anonymous"
+    ))
+    #expect(PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: "anonymous", currentFingerprint: "session-B"
     ))
 }

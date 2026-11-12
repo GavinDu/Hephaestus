@@ -1,6 +1,12 @@
 import Foundation
 import Security
 
+extension Notification.Name {
+    /// No token or account details are included in this notification.
+    static let hephaestusBackendSessionDidChange =
+        Notification.Name("HephaestusBackendSessionDidChange")
+}
+
 /// Backend configuration for the Hephaestus iOS app.
 ///
 /// Base URL for the Game IR package and game-generation APIs.
@@ -63,6 +69,7 @@ enum BackendConfig {
     @discardableResult
     static func saveSessionToken(_ token: String) -> Bool {
         guard let data = token.data(using: .utf8) else { return false }
+        let previousToken = loadSessionToken()
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: tokenService,
@@ -73,20 +80,36 @@ enum BackendConfig {
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
         let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecSuccess { return true }
-        guard status == errSecItemNotFound else { return false }
-        var insert = query
-        attributes.forEach { insert[$0.key] = $0.value }
-        return SecItemAdd(insert as CFDictionary, nil) == errSecSuccess
+        let saved: Bool
+        if status == errSecSuccess {
+            saved = true
+        } else if status == errSecItemNotFound {
+            var insert = query
+            attributes.forEach { insert[$0.key] = $0.value }
+            saved = SecItemAdd(insert as CFDictionary, nil) == errSecSuccess
+        } else {
+            return false
+        }
+        // Successful credential replacement invalidates every cached player
+        // page. Never include token bytes, account ID, or token digest in
+        // the notification, log or telemetry.
+        if saved && previousToken != token {
+            NotificationCenter.default.post(name: .hephaestusBackendSessionDidChange, object: nil)
+        }
+        return saved
     }
 
     static func clearSessionToken() {
+        let hadSession = loadSessionToken() != nil
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: tokenService,
             kSecAttrAccount as String: tokenAccount
         ]
-        SecItemDelete(query as CFDictionary)
+        let result = SecItemDelete(query as CFDictionary)
+        if hadSession && (result == errSecSuccess || result == errSecItemNotFound) {
+            NotificationCenter.default.post(name: .hephaestusBackendSessionDidChange, object: nil)
+        }
     }
 
     /// Attach a verified bearer session; the legacy identity header is

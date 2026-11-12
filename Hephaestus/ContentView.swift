@@ -9,6 +9,7 @@ import SwiftUI
 private enum AppSection: String, CaseIterable, Identifiable, Hashable {
     case discover
     case create
+    case studio
     case library
     case profile
 
@@ -18,6 +19,7 @@ private enum AppSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .discover: "Discover"
         case .create: "Create"
+        case .studio: "Studio"
         case .library: "Library"
         case .profile: "Profile"
         }
@@ -27,6 +29,7 @@ private enum AppSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .discover: "play.rectangle.on.rectangle"
         case .create: "plus.circle"
+        case .studio: "square.stack.3d.up"
         case .library: "bookmark"
         case .profile: "person.crop.circle"
         }
@@ -40,7 +43,8 @@ struct ContentView: View {
     // UI-only simulator entry for capturing the actual Create screen on iPad.
     // No fake projects, media or backend responses are injected.
     @State private var selection: AppSection? =
-        ProcessInfo.processInfo.arguments.contains("--ui-test-create-entry") ? .create : .discover
+        ProcessInfo.processInfo.arguments.contains("--ui-test-studio") ? .studio :
+        (ProcessInfo.processInfo.arguments.contains("--ui-test-create-entry") ? .create : .discover)
     // On regular-width iPads, enter the full-screen playable feed first.
     // The system sidebar button still lets people reveal navigation.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .detailOnly
@@ -60,7 +64,7 @@ struct ContentView: View {
             get: { selection ?? .discover },
             set: { selection = $0 }
         )) {
-            ForEach(AppSection.allCases) { section in
+            ForEach(AppSection.allCases.filter { $0 != .studio }) { section in
                 destination(for: section)
                     .tabItem {
                         Label(section.title, systemImage: section.symbol)
@@ -82,6 +86,7 @@ struct ContentView: View {
                     navigationRow(.create)
                 }
                 Section("Your space") {
+                    navigationRow(.studio)
                     navigationRow(.library)
                     navigationRow(.profile)
                 }
@@ -114,7 +119,9 @@ struct ContentView: View {
             DiscoverView(onOpenLibrary: { selection = .library },
                          onOpenProfile: { selection = .profile })
         case .create:
-            CreateView()
+            CreateView(onOpenProfile: { selection = .profile })
+        case .studio:
+            CreatorStudioView(onOpenProfile: { selection = .profile })
         case .library:
             LibraryView()
         case .profile:

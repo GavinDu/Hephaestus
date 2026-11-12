@@ -4,6 +4,12 @@ import UIKit
 
 /// Photograph a drawing → analyze → generate → confirm → play.
 struct CreateView: View {
+    let onOpenProfile: () -> Void
+
+    init(onOpenProfile: @escaping () -> Void = {}) {
+        self.onOpenProfile = onOpenProfile
+    }
+
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     enum Phase {
         case pick
@@ -28,6 +34,7 @@ struct CreateView: View {
     @State private var publishMessage: String?
     @State private var isPublishing = false
     @State private var playerRequest: PixiPlayerRequest?
+    @State private var showsProjects = false
 
     var body: some View {
         NavigationStack {
@@ -57,8 +64,15 @@ struct CreateView: View {
                 }
             }
             .navigationTitle("Create")
+            .navigationBarTitleDisplayMode(.inline)
             .fullScreenCover(item: $playerRequest) { req in
                 PixiPlayerSheet(gameID: req.gameID, title: req.title)
+            }
+            .sheet(isPresented: $showsProjects) {
+                CreatorStudioView(onOpenProfile: {
+                    showsProjects = false
+                    onOpenProfile()
+                })
             }
         }
     }
@@ -71,10 +85,32 @@ struct CreateView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("ARCADE PULSE • CREATE", systemImage: "sparkles")
-                        .font(.caption.weight(.bold))
-                        .tracking(1.2)
-                        .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                    HStack(alignment: .center, spacing: 8) {
+                        Label("ARCADE PULSE • CREATE", systemImage: "sparkles")
+                            .font(.caption.weight(.bold))
+                            .tracking(1.2)
+                            .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                            .lineLimit(2)
+                        Spacer(minLength: 0)
+                        if horizontalSizeClass != .regular {
+                            // Navigation-bar toolbar buttons were only 36pt on
+                            // the real iPhone simulator. This in-content CTA
+                            // retains a measured 48pt tap area without adding
+                            // an extra row ahead of consent.
+                            Button {
+                                showsProjects = true
+                            } label: {
+                                Label("Projects", systemImage: "square.stack.3d.up")
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 8)
+                                    .frame(minHeight: 48)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(ArcadePulseTheme.electricViolet)
+                            .accessibilityLabel("My projects")
+                            .accessibilityIdentifier("create.myProjects")
+                        }
+                    }
                     Text("Your drawing. Your game.")
                         .font(.system(.largeTitle, design: .rounded).weight(.bold))
                         .foregroundStyle(.white)
@@ -84,7 +120,9 @@ struct CreateView: View {
                         .foregroundStyle(ArcadePulseTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .accessibilityElement(children: .combine)
+                // The Projects button is now inside the header. A combined
+                // accessibility element would swallow that interactive child.
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("create.pick.hero")
 
                 ZStack {
@@ -116,8 +154,9 @@ struct CreateView: View {
                         .padding(horizontalSizeClass == .regular ? 20 : 12)
                     }
                 }
-                // Artwork is secondary to informed permission. On compact
-                // iPhone, keep the complete source disclosure above the tab bar.
+                // The empty artwork placeholder is secondary to informed upload
+                // consent. Keep it compact on iPhone so the full disclosure stays
+                // above the tab bar at initial load; retain the large iPad stage.
                 .frame(height: horizontalSizeClass == .regular ? 320 : 160)
                 .overlay {
                     RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius, style: .continuous)
