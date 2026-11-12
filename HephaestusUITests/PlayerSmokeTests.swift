@@ -575,6 +575,20 @@ final class PlayerSmokeTests: XCTestCase {
             let hasSwipeCue = swipeCue.waitForExistence(timeout: 10)
             XCTAssertTrue(hasSwipeCue,
                           "The feed should communicate its vertical swipe interaction in \(profile.1).")
+            if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
+                // Exact native screenshot evidence exposed the swipe label and
+                // orientation badge directly under the floating scope menu.
+                // Assert non-overlap, independently of the swipe/delta score.
+                let scope = app.descendants(matching: .any)["feed.landscape.scope"].firstMatch
+                XCTAssertTrue(scope.exists && swipeCue.exists)
+                XCTAssertLessThanOrEqual(swipeCue.frame.maxX + 4, scope.frame.minX,
+                      "Landscape swipe guidance must not overlap the top-trailing feed controls.")
+                let orientation = app.descendants(matching: .any)["feed.orientation"].firstMatch
+                if orientation.exists {
+                    XCTAssertLessThanOrEqual(orientation.frame.maxX + 4, scope.frame.minX,
+                          "The game-orientation badge must not cover feed scope/search controls.")
+                }
+            }
 
             @discardableResult
             func assertTouchTarget(_ element: XCUIElement, named name: String) -> Bool {
