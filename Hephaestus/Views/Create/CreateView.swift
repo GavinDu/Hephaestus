@@ -64,6 +64,24 @@ struct CreateView: View {
                 }
             }
             .navigationTitle("Create")
+            // Preserve the Create consent controls in the first viewport.
+            // iPhone Studio is a labeled, 44pt toolbar destination; iPad uses
+            // the existing sidebar instead of inserting another top-level tab.
+            .toolbar {
+                if horizontalSizeClass != .regular {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showsProjects = true
+                        } label: {
+                            Label("My projects", systemImage: "square.stack.3d.up")
+                                .labelStyle(.iconOnly)
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("My projects")
+                        .accessibilityIdentifier("create.myProjects")
+                    }
+                }
+            }
             .fullScreenCover(item: $playerRequest) { req in
                 PixiPlayerSheet(gameID: req.gameID, title: req.title)
             }
@@ -99,22 +117,6 @@ struct CreateView: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("create.pick.hero")
-
-                // Studio lives in the iPad sidebar. On a compact iPhone, use
-                // one discoverable project entry inside Create, not a fifth
-                // tab that squeezes the feed and its touch targets.
-                if horizontalSizeClass != .regular {
-                    Button {
-                        showsProjects = true
-                    } label: {
-                        Label("My projects", systemImage: "square.stack.3d.up")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(ArcadePulseTheme.electricViolet)
-                    .accessibilityIdentifier("create.myProjects")
-                }
 
                 ZStack {
                     RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius, style: .continuous)
