@@ -100,6 +100,31 @@ struct PlayerFirstInputGate {
 /// Network failures get a retry-first message; anything else gets the
 /// generic message. Both states offer Retry and Return to feed, so a
 /// failed load never leaves a blank player with no next action.
+/// Recover only a live, unfinished in-flight warmup whose delegate
+/// handoff lost the terminal navigation callback.
+enum PlayerPrewarmHandoffPolicy {
+    static func shouldRecoverUnobservedFinish(
+        isActive: Bool, stillLoading: Bool, hasObservedTerminalNavigation: Bool,
+        recoveryArmed: Bool
+    ) -> Bool {
+        recoveryArmed && isActive && !stillLoading && !hasObservedTerminalNavigation
+    }
+}
+
+/// A game may not navigate the main frame to another document.
+enum PlayerMainFrameNavigationPolicy {
+    static func shouldAllow(
+        requestURL: URL?, expectedURL: URL?,
+        isMainFrame: Bool, isDisposing: Bool
+    ) -> Bool {
+        if !isMainFrame { return true }
+        guard let requestURL else { return false }
+        if isDisposing { return requestURL.absoluteString == "about:blank" }
+        guard let expectedURL else { return false }
+        return requestURL == expectedURL
+    }
+}
+
 enum PlayerPrewarmResponsePolicy {
     /// A prewarmed page is reusable only when the main document did not
     /// return an HTTP error. Otherwise the attached player must retry and
@@ -388,6 +413,22 @@ enum PlayerWebViewPool {
         return (view, shouldLoad, didFinish)
     }
 
+    /// Only the currently attached navigation may be recovered. A previously
+    /// dismissed sheet must never reload a WebView now owned by another game.
+    static func ownsAttachedNavigation(_ webView: WKWebView, url: URL) -> Bool {
+        pooledView === webView && isAttached && currentURL == url
+    }
+
+    /// A detached/stale WebView cannot navigate on the pooled game's behalf.
+    static func allowsMainFrameNavigation(_ webView: WKWebView, requestURL: URL?, isMainFrame: Bool) -> Bool {
+        if !isMainFrame { return true }
+        guard pooledView === webView else { return false }
+        return PlayerMainFrameNavigationPolicy.shouldAllow(
+            requestURL: requestURL, expectedURL: currentURL,
+            isMainFrame: isMainFrame, isDisposing: !isAttached && currentURL == nil
+        )
+    }
+
     static func markLoaded(_ webView: WKWebView) {
         guard let currentURL, webView.url == currentURL else { return }
         loadedURL = currentURL
@@ -486,7 +527,24 @@ enum PlayerWebViewPool {
     }
 
     private final class WarmupDelegate: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+            let allow = PlayerWebViewPool.allowsMainFrameNavigation(
+                webView, requestURL: navigationAction.request.url, isMainFrame: isMainFrame
+            )
+            decisionHandler(allow ? .allow : .cancel)
+        }
+
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            // A redirect response must not bypass the action-level allowlist.
+            if navigationResponse.isForMainFrame &&
+               !PlayerWebViewPool.allowsMainFrameNavigation(
+                   webView, requestURL: navigationResponse.response.url, isMainFrame: true
+               ) {
+                decisionHandler(.cancel)
+                return
+            }
             guard navigationResponse.isForMainFrame,
                   let response = navigationResponse.response as? HTTPURLResponse,
                   !PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: response.statusCode) else {
@@ -1207,7 +1265,7 @@ private struct PlayerWebView: UIViewRepresentable {
     private static let messageName = "hephaestusRunResult"
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(gameID: gameID, onProgress: onProgress,
+        Coordinator(gameID: gameID, expectedURL: url, onProgress: onProgress,
                     onLoadFinish: onLoadFinish, onLoadFail: onLoadFail,
                     onTerminate: onTerminate, onFirstInput: onFirstInput,
                     onVerifiedRun: onVerifiedRun)
@@ -1226,9 +1284,13 @@ private struct PlayerWebView: UIViewRepresentable {
             // attached its delegate. Deliver readiness after the view mounts.
             onPrewarmHit()
             DispatchQueue.main.async {
-                context.coordinator.onProgress(1)
-                context.coordinator.onLoadFinish()
+                context.coordinator.reportPrewarmedFinishIfActive()
             }
+        } else {
+            // Completion can race the warmup delegate swap. Recover only if
+            // the navigation is no longer in flight and neither delegate
+            // has observed a terminal callback; never infer readiness.
+            context.coordinator.observePrewarmHandoff(of: webView, expectedURL: url)
         }
         return webView
     }
@@ -1246,6 +1308,7 @@ private struct PlayerWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         let expectedGameID: String
+        let expectedURL: URL
         let onProgress: (Double) -> Void
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
@@ -1253,15 +1316,18 @@ private struct PlayerWebView: UIViewRepresentable {
         let onFirstInput: () -> Void
         let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
+        private var prewarmLoadingObservation: NSKeyValueObservation?
+        private var prewarmRecoveryArmed = false
         private var acceptedRunIDs = Set<String>()
         private var navigationFailureGate = PlayerNavigationFailureGate()
         private var acceptedMetricIDs = Set<String>()
         private var firstInputGate = PlayerFirstInputGate()
         private var runtimeSessionID: String?
         private var isActive = true
+        private var hasObservedTerminalNavigation = false
         lazy var messageProxy = WeakScriptMessageHandler(delegate: self)
 
-        init(gameID: String,
+        init(gameID: String, expectedURL: URL,
              onProgress: @escaping (Double) -> Void,
              onLoadFinish: @escaping () -> Void,
              onLoadFail: @escaping (Error) -> Void,
@@ -1269,6 +1335,7 @@ private struct PlayerWebView: UIViewRepresentable {
              onFirstInput: @escaping () -> Void,
              onVerifiedRun: @escaping (VerifiedRunResult) -> Void) {
             self.expectedGameID = gameID
+            self.expectedURL = expectedURL
             self.onProgress = onProgress
             self.onLoadFinish = onLoadFinish
             self.onLoadFail = onLoadFail
@@ -1279,7 +1346,7 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
-            guard message.name == PlayerWebView.messageName,
+            guard isActive, message.name == PlayerWebView.messageName,
                   message.frameInfo.isMainFrame,
                   sameOrigin(message.frameInfo.securityOrigin),
                   let body = message.body as? [String: Any],
@@ -1369,27 +1436,111 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func observeProgress(of webView: WKWebView) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
-                self?.onProgress(view.estimatedProgress)
+                guard let self, self.isActive else { return }
+                self.onProgress(view.estimatedProgress)
             }
         }
 
         func stopObserving() {
             isActive = false
+            prewarmRecoveryArmed = false
+            prewarmLoadingObservation?.invalidate()
+            prewarmLoadingObservation = nil
             progressObservation?.invalidate()
             progressObservation = nil
+            acceptedRunIDs.removeAll()
+            acceptedMetricIDs.removeAll()
+            runtimeSessionID = nil
+        }
+
+        @MainActor
+        func observePrewarmHandoff(of webView: WKWebView, expectedURL: URL) {
+            // The warmup delegate can win the completion callback after take()
+            // switched delegates. A single next-loop check misses a later
+            // isLoading=true -> false transition; KVO observes that edge.
+            prewarmRecoveryArmed = true
+            prewarmLoadingObservation = webView.observe(\.isLoading, options: [.new]) { [weak self] view, _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.recoverUnobservedWarmupIfNeeded(view, expectedURL: expectedURL)
+                }
+            }
+            // Also cover completion before the KVO observation was installed.
+            DispatchQueue.main.async { [weak self] in
+                self?.recoverUnobservedWarmupIfNeeded(webView, expectedURL: expectedURL)
+            }
+        }
+
+        private func disarmPrewarmRecovery() {
+            prewarmRecoveryArmed = false
+            prewarmLoadingObservation?.invalidate()
+            prewarmLoadingObservation = nil
+        }
+
+        func reportPrewarmedFinishIfActive() {
+            guard isActive, !hasObservedTerminalNavigation else { return }
+            hasObservedTerminalNavigation = true
+            disarmPrewarmRecovery()
+            onProgress(1)
+            onLoadFinish()
+        }
+
+        @MainActor
+        func recoverUnobservedWarmupIfNeeded(_ webView: WKWebView, expectedURL: URL) {
+            guard PlayerWebViewPool.ownsAttachedNavigation(webView, url: expectedURL),
+                  PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
+                    isActive: isActive, stillLoading: webView.isLoading,
+                    hasObservedTerminalNavigation: hasObservedTerminalNavigation,
+                    recoveryArmed: prewarmRecoveryArmed
+                  ) else { return }
+            // One-shot recovery; disarm before reload so KVO cannot trigger a
+            // second reload and no terminal callback is fabricated.
+            disarmPrewarmRecovery()
+            webView.load(URLRequest(url: expectedURL))
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            guard isActive else { return }
+            hasObservedTerminalNavigation = false
             navigationFailureGate.beginNavigation()
             onProgress(0)
         }
 
         private func reportNavigationFailure(_ error: Error) {
-            guard navigationFailureGate.shouldReportFailure() else { return }
+            guard isActive, navigationFailureGate.shouldReportFailure() else { return }
+            hasObservedTerminalNavigation = true
+            disarmPrewarmRecovery()
             onLoadFail(error)
         }
 
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+            let allow = isActive && PlayerWebViewPool.allowsMainFrameNavigation(
+                webView, requestURL: navigationAction.request.url, isMainFrame: isMainFrame
+            ) && PlayerMainFrameNavigationPolicy.shouldAllow(
+                requestURL: navigationAction.request.url, expectedURL: expectedURL,
+                isMainFrame: isMainFrame, isDisposing: false
+            )
+            if !allow && isMainFrame && !hasObservedTerminalNavigation {
+                // A redirect during launch is an actionable security failure.
+                // A blocked link after didFinish leaves existing play intact.
+                reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: 403))
+            }
+            decisionHandler(allow ? .allow : .cancel)
+        }
+
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            // Recheck the final main-document URL even if a redirect did not
+            // generate a separate navigation-action policy callback.
+            if navigationResponse.isForMainFrame &&
+               !PlayerMainFrameNavigationPolicy.shouldAllow(
+                   requestURL: navigationResponse.response.url, expectedURL: expectedURL,
+                   isMainFrame: true, isDisposing: false
+               ) {
+                reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: 403))
+                decisionHandler(.cancel)
+                return
+            }
             guard navigationResponse.isForMainFrame,
                   let response = navigationResponse.response as? HTTPURLResponse,
                   response.statusCode >= 400 else {
@@ -1401,8 +1552,7 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            onProgress(1)
-            onLoadFinish()
+            reportPrewarmedFinishIfActive()
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -1414,6 +1564,9 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            guard isActive else { return }
+            hasObservedTerminalNavigation = true
+            disarmPrewarmRecovery()
             onTerminate()
         }
     }
