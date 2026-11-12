@@ -31,6 +31,10 @@ This is a pure policy with Swift Testing negative fixtures. The
 old `hephaestusRunResult` handler name **before adding the new one**,
 because WebKit throws when registering a duplicate name. A retired
 Coordinator's dismantle never removes its successor's handler.
+The same lease gate is also applied to delayed `isLoading`/KVO
+**prewarm handoff recovery**: a previously attached Coordinator may not
+reload a WebView now owned by the next retry, even when the game URL
+is byte-for-byte identical.
 
 On credential change the old view is removed from the pool, so stale
 dismantles also fail the exact pooled-view check. The handler proxy
