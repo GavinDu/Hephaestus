@@ -12,6 +12,7 @@ struct CreatorStudioView: View {
     }
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var projects: [CreatorProject] = []
     @State private var selectedStatus: ProjectFilter = .all
     @State private var nextCursor: String?
@@ -135,9 +136,32 @@ struct CreatorStudioView: View {
         }
     }
 
-    /// Deliberately useful signed-out state, rather than a tiny button in a
-    /// mostly empty iPad workspace. No projects, counts or analytics are faked.
+    /// An iPad is a workspace, not a phone sign-in card centered in empty
+    /// space. Keep every statement factual while the owner-project backend is
+    /// unavailable; the two-panel guidance is editorial, never fake analytics.
     private var signedOutGate: some View {
+        Group {
+            if horizontalSizeClass == .regular && !dynamicTypeSize.isAccessibilitySize {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: 24) {
+                        studioSignInCard.frame(minWidth: 430, maxWidth: 560)
+                        studioGuide.frame(minWidth: 320, maxWidth: 410)
+                    }
+                    .frame(maxWidth: 1_040)
+                    VStack(spacing: 20) {
+                        studioSignInCard.frame(maxWidth: 620)
+                        studioGuide.frame(maxWidth: 620)
+                    }
+                }
+            } else {
+                studioSignInCard.frame(maxWidth: 620)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 370)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var studioSignInCard: some View {
         VStack(spacing: 20) {
             Image(systemName: "lock.square.stack.fill")
                 .font(.system(size: 42, weight: .medium))
@@ -145,19 +169,16 @@ struct CreatorStudioView: View {
                 .frame(width: 76, height: 76)
                 .background(ArcadePulseTheme.electricViolet.opacity(0.18),
                             in: RoundedRectangle(cornerRadius: 20))
-
             Text("Sign in to see your projects")
                 .font(.system(.title2, design: .rounded).weight(.bold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
-
             Text("Your private drafts, generation status and published games belong to your account. Sign in from Profile to manage them.")
                 .font(.body)
                 .foregroundStyle(ArcadePulseTheme.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-
             Button(action: onOpenProfile) {
                 Label("Go to Profile to sign in", systemImage: "person.crop.circle")
                     .font(.headline)
@@ -167,7 +188,7 @@ struct CreatorStudioView: View {
             .tint(ArcadePulseTheme.electricViolet)
             .accessibilityIdentifier("studio.openProfile")
         }
-        .frame(maxWidth: 620)
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 32)
         .padding(.vertical, 36)
         .background(
@@ -181,8 +202,59 @@ struct CreatorStudioView: View {
             RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius)
                 .strokeBorder(ArcadePulseTheme.subtleBorder, lineWidth: 1)
         }
-        .frame(maxWidth: .infinity, minHeight: 370)
-        .accessibilityElement(children: .contain)
+    }
+
+    private func studioGuideRow(
+        _ title: String, symbol: String, detail: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.title3.weight(.medium))
+                .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                .frame(width: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.subheadline.weight(.bold)).foregroundStyle(.white)
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Informative content only; no fake counts, empty editor actions, or
+    /// dashboard widgets claiming the service is already deployed.
+    private var studioGuide: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("YOUR STUDIO", systemImage: "square.stack.3d.up")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(ArcadePulseTheme.neonMagenta)
+            Text("From idea to playable game")
+                .font(.system(.title3, design: .rounded).weight(.bold))
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+            studioGuideRow("Private drafts", symbol: "lock.shield",
+                           detail: "Projects appear only after sign-in and server ownership checks.")
+            studioGuideRow("Real progress", symbol: "clock.arrow.circlepath",
+                           detail: "Generation and moderation statuses come from the service, never sample data.")
+            studioGuideRow("Playable releases", symbol: "play.rectangle",
+                           detail: "Play opens only for games the service marks publicly playable.")
+            Text("These features require a connected, authorized project service.")
+                .font(.caption)
+                .foregroundStyle(ArcadePulseTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(24)
+        .background(ArcadePulseTheme.surface,
+                    in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius)
+                .strokeBorder(ArcadePulseTheme.subtleBorder, lineWidth: 1)
+        }
+        .accessibilityIdentifier("studio.signedOutGuide")
     }
 
     private var header: some View {
