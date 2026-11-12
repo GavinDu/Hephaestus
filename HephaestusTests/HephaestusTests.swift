@@ -852,3 +852,19 @@ struct HephaestusTests {
     #expect(first == true)
     #expect(duplicate == false)
 }
+
+@Test func speculativePlayerPrewarmExpiresOnlyIfUnattachedAndNotSuperseded() {
+    #expect(PlayerPrewarmBudgetPolicy.expiryNanoseconds == 15_000_000_000)
+    #expect(PlayerPrewarmBudgetPolicy.shouldExpire(
+        isAttached: false, scheduledEpoch: 8, currentEpoch: 8
+    ))
+    #expect(!PlayerPrewarmBudgetPolicy.shouldExpire(
+        isAttached: true, scheduledEpoch: 8, currentEpoch: 8
+    ))
+    #expect(!PlayerPrewarmBudgetPolicy.shouldExpire(
+        isAttached: false, scheduledEpoch: 8, currentEpoch: 9
+    ))
+    #expect(!PlayerPrewarmBudgetPolicy.shouldExpire(
+        isAttached: true, scheduledEpoch: 8, currentEpoch: 9
+    ))
+}
