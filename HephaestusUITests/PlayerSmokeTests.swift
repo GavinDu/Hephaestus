@@ -432,12 +432,19 @@ final class PlayerSmokeTests: XCTestCase {
                       "Unsigned user must not silently create a remix or copy another creator's source.")
         XCTAssertFalse(app.buttons["remix.create"].firstMatch.exists,
                        "Actual Create remix action requires authenticated source eligibility and consent.")
+        let openProfile = app.buttons["remix.openProfile"].firstMatch
+        XCTAssertTrue(openProfile.exists && openProfile.isHittable,
+                      "Unsigned remix should offer a real sign-in route, not a dead instruction.")
+        XCTAssertGreaterThanOrEqual(openProfile.frame.height, 44)
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "arcade-pulse-remix-permission-gate"
         shot.lifetime = .keepAlways
         add(shot)
-        app.buttons["Done"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["game.play"].firstMatch.waitForExistence(timeout: 10))
+        openProfile.tap()
+        XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
+                      "Remix sign-in CTA must dismiss the sheet and navigate to the native Profile screen.")
+        XCTAssertFalse(app.buttons["remix.create"].firstMatch.exists,
+                       "Navigating to Profile must not silently authorize or create a remix.")
     }
 
     /// Downsample two captured screenshots and report the fraction of
