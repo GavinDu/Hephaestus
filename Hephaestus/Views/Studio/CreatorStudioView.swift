@@ -311,6 +311,9 @@ struct CreatorStudioView: View {
 
     private func load(reset: Bool) async {
         let ownerID = BackendConfig.currentUserID
+        // Pin the exact credential across suspension. A replacement token for
+        // the same owner still revokes this response before onReceive runs.
+        let sessionToken = BackendConfig.loadSessionToken()
         guard !ownerID.isEmpty else {
             requestRevision += 1
             projects = []
@@ -341,9 +344,12 @@ struct CreatorStudioView: View {
             let response = try await BackendAPI.shared.fetchMyProjects(
                 status: filter.rawValue, cursor: cursor
             )
-            guard !Task.isCancelled, requestRevision == revision,
-                  BackendConfig.currentUserID == ownerID,
-                  selectedStatus == filter else { return }
+            guard !Task.isCancelled,
+                  CreatorStudioRequestPolicy.canApply(
+                    startedRevision: revision, currentRevision: requestRevision,
+                    startedOwner: ownerID, currentOwner: BackendConfig.currentUserID,
+                    startedToken: sessionToken, currentToken: BackendConfig.loadSessionToken()
+                  ), selectedStatus == filter else { return }
             if reset {
                 projects = response.projects
             } else {
@@ -353,10 +359,29 @@ struct CreatorStudioView: View {
             nextCursor = response.nextCursor
             loadError = nil
         } catch {
-            guard !Task.isCancelled, requestRevision == revision,
-                  BackendConfig.currentUserID == ownerID,
-                  selectedStatus == filter else { return }
+            guard !Task.isCancelled,
+                  CreatorStudioRequestPolicy.canApply(
+                    startedRevision: revision, currentRevision: requestRevision,
+                    startedOwner: ownerID, currentOwner: BackendConfig.currentUserID,
+                    startedToken: sessionToken, currentToken: BackendConfig.loadSessionToken()
+                  ), selectedStatus == filter else { return }
             loadError = "Projects aren't available right now: \(error.localizedDescription)"
         }
+    }
+}
+
+/// Pure privacy invariant for asynchronous owner-project responses. Comparing
+/// the actual credential snapshot also covers a same-subject token rotation
+/// before SwiftUI processes the payload-free session-change notification.
+/// Never log or persist either token here.
+enum CreatorStudioRequestPolicy {
+    static func canApply(
+        startedRevision: Int, currentRevision: Int,
+        startedOwner: String, currentOwner: String,
+        startedToken: String?, currentToken: String?
+    ) -> Bool {
+        startedRevision == currentRevision &&
+        !startedOwner.isEmpty && startedOwner == currentOwner &&
+        startedToken == currentToken
     }
 }
