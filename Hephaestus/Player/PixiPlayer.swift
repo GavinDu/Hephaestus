@@ -537,6 +537,14 @@ enum PlayerWebViewPool {
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            // A redirect response must not bypass the action-level allowlist.
+            if navigationResponse.isForMainFrame &&
+               !PlayerWebViewPool.allowsMainFrameNavigation(
+                   webView, requestURL: navigationResponse.response.url, isMainFrame: true
+               ) {
+                decisionHandler(.cancel)
+                return
+            }
             guard navigationResponse.isForMainFrame,
                   let response = navigationResponse.response as? HTTPURLResponse,
                   !PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: response.statusCode) else {
@@ -1489,6 +1497,17 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            // Recheck the final main-document URL even if a redirect did not
+            // generate a separate navigation-action policy callback.
+            if navigationResponse.isForMainFrame &&
+               !PlayerMainFrameNavigationPolicy.shouldAllow(
+                   requestURL: navigationResponse.response.url, expectedURL: expectedURL,
+                   isMainFrame: true, isDisposing: false
+               ) {
+                reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: 403))
+                decisionHandler(.cancel)
+                return
+            }
             guard navigationResponse.isForMainFrame,
                   let response = navigationResponse.response as? HTTPURLResponse,
                   response.statusCode >= 400 else {
