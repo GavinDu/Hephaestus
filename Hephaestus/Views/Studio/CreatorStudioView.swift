@@ -128,6 +128,30 @@ struct CreatorStudioView: View {
             .task {
                 if !isSignedOut { await load(reset: true) }
             }
+            // The owner-project workspace contains private metadata. Logout,
+            // account switch, and credential replacement must invalidate the
+            // visible cards immediately, not just on the next manual Refresh.
+            // BackendConfig posts this notification without token/ID payloads.
+            .onReceive(NotificationCenter.default.publisher(
+                for: .hephaestusBackendSessionDidChange
+            )) { _ in
+                Task { @MainActor in
+                    // Invalidate every in-flight owner request before clearing
+                    // so an old response can never repopulate this screen.
+                    requestRevision += 1
+                    projects = []
+                    nextCursor = nil
+                    loadError = nil
+                    isLoading = false
+                    isLoadingMore = false
+                    playerRequest = nil
+                    // The auth guard in load still requires the server-issued
+                    // bearer token. No sample project data is synthesized.
+                    if !BackendConfig.currentUserID.isEmpty {
+                        await load(reset: true)
+                    }
+                }
+            }
             .fullScreenCover(item: $playerRequest) { req in
                 PixiPlayerSheet(gameID: req.gameID, title: req.title)
             }
