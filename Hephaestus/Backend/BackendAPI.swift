@@ -281,6 +281,14 @@ struct CreatorProject: Decodable, Identifiable {
 
     var id: String { gameID }
 
+    /// Owner-project metadata uses the same versioned, often relative poster
+    /// routes as the public feed. AsyncImage requires an absolute HTTPS URL.
+    /// This does not turn a missing/unapproved preview into a playable clip.
+    var resolvedPosterURL: URL? {
+        guard let absolute = FeedGame.resolvePreviewURL(previewPosterURL) else { return nil }
+        return URL(string: absolute)
+    }
+
     enum CodingKeys: String, CodingKey {
         case gameID = "game_id", title, status, visibility
         case moderationStatus = "moderation_status"
