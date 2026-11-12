@@ -104,9 +104,10 @@ struct PlayerFirstInputGate {
 /// handoff lost the terminal navigation callback.
 enum PlayerPrewarmHandoffPolicy {
     static func shouldRecoverUnobservedFinish(
-        isActive: Bool, stillLoading: Bool, hasObservedTerminalNavigation: Bool
+        isActive: Bool, stillLoading: Bool, hasObservedTerminalNavigation: Bool,
+        recoveryArmed: Bool
     ) -> Bool {
-        isActive && !stillLoading && !hasObservedTerminalNavigation
+        recoveryArmed && isActive && !stillLoading && !hasObservedTerminalNavigation
     }
 }
 
@@ -1409,11 +1410,11 @@ private struct PlayerWebView: UIViewRepresentable {
 
         @MainActor
         func recoverUnobservedWarmupIfNeeded(_ webView: WKWebView, expectedURL: URL) {
-            guard prewarmRecoveryArmed,
-                  PlayerWebViewPool.ownsAttachedNavigation(webView, url: expectedURL),
+            guard PlayerWebViewPool.ownsAttachedNavigation(webView, url: expectedURL),
                   PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
                     isActive: isActive, stillLoading: webView.isLoading,
-                    hasObservedTerminalNavigation: hasObservedTerminalNavigation
+                    hasObservedTerminalNavigation: hasObservedTerminalNavigation,
+                    recoveryArmed: prewarmRecoveryArmed
                   ) else { return }
             // One-shot recovery; disarm before reload so KVO cannot trigger a
             // second reload and no terminal callback is fabricated.
