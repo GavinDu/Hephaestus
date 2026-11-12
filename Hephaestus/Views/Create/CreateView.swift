@@ -64,6 +64,7 @@ struct CreateView: View {
                 }
             }
             .navigationTitle("Create")
+            .navigationBarTitleDisplayMode(.inline)
             // Preserve the Create consent controls in the first viewport.
             // iPhone Studio is a labeled, 44pt toolbar destination; iPad uses
             // the existing sidebar instead of inserting another top-level tab.
@@ -147,7 +148,7 @@ struct CreateView: View {
                         .padding(20)
                     }
                 }
-                .frame(height: horizontalSizeClass == .regular ? 320 : 245)
+                .frame(height: horizontalSizeClass == .regular ? 320 : 205)
                 .overlay {
                     RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius, style: .continuous)
                         .strokeBorder(ArcadePulseTheme.subtleBorder, lineWidth: 1)
