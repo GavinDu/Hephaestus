@@ -1215,9 +1215,7 @@ private struct PlayerWebView: UIViewRepresentable {
             // Completion can race the warmup delegate swap. Recover only if
             // the navigation is no longer in flight and neither delegate
             // has observed a terminal callback; never infer readiness.
-            DispatchQueue.main.async {
-                context.coordinator.recoverUnobservedWarmupIfNeeded(webView, expectedURL: url)
-            }
+            context.coordinator.observePrewarmHandoff(of: webView, expectedURL: url)
         }
         return webView
     }
@@ -1242,6 +1240,8 @@ private struct PlayerWebView: UIViewRepresentable {
         let onFirstInput: () -> Void
         let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
+        private var prewarmLoadingObservation: NSKeyValueObservation?
+        private var prewarmRecoveryArmed = false
         private var acceptedRunIDs = Set<String>()
         private var navigationFailureGate = PlayerNavigationFailureGate()
         private var acceptedMetricIDs = Set<String>()
@@ -1366,6 +1366,9 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func stopObserving() {
             isActive = false
+            prewarmRecoveryArmed = false
+            prewarmLoadingObservation?.invalidate()
+            prewarmLoadingObservation = nil
             progressObservation?.invalidate()
             progressObservation = nil
             acceptedRunIDs.removeAll()
@@ -1373,23 +1376,48 @@ private struct PlayerWebView: UIViewRepresentable {
             runtimeSessionID = nil
         }
 
+        @MainActor
+        func observePrewarmHandoff(of webView: WKWebView, expectedURL: URL) {
+            // The warmup delegate can win the completion callback after take()
+            // switched delegates. A single next-loop check misses a later
+            // isLoading=true -> false transition; KVO observes that edge.
+            prewarmRecoveryArmed = true
+            prewarmLoadingObservation = webView.observe(\.isLoading, options: [.new]) { [weak self] view, _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.recoverUnobservedWarmupIfNeeded(view, expectedURL: expectedURL)
+                }
+            }
+            // Also cover completion before the KVO observation was installed.
+            DispatchQueue.main.async { [weak self] in
+                self?.recoverUnobservedWarmupIfNeeded(webView, expectedURL: expectedURL)
+            }
+        }
+
+        private func disarmPrewarmRecovery() {
+            prewarmRecoveryArmed = false
+            prewarmLoadingObservation?.invalidate()
+            prewarmLoadingObservation = nil
+        }
+
         func reportPrewarmedFinishIfActive() {
             guard isActive, !hasObservedTerminalNavigation else { return }
             hasObservedTerminalNavigation = true
+            disarmPrewarmRecovery()
             onProgress(1)
             onLoadFinish()
         }
 
         @MainActor
         func recoverUnobservedWarmupIfNeeded(_ webView: WKWebView, expectedURL: URL) {
-            guard PlayerWebViewPool.ownsAttachedNavigation(webView, url: expectedURL),
+            guard prewarmRecoveryArmed,
+                  PlayerWebViewPool.ownsAttachedNavigation(webView, url: expectedURL),
                   PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
                     isActive: isActive, stillLoading: webView.isLoading,
                     hasObservedTerminalNavigation: hasObservedTerminalNavigation
                   ) else { return }
-            // Do not fabricate a ready callback for a navigation whose final
-            // event was lost. Reload under the attached delegate, which can
-            // report HTTP denial, actual navigation finish or an error.
+            // One-shot recovery; disarm before reload so KVO cannot trigger a
+            // second reload and no terminal callback is fabricated.
+            disarmPrewarmRecovery()
             webView.load(URLRequest(url: expectedURL))
         }
 
@@ -1403,6 +1431,7 @@ private struct PlayerWebView: UIViewRepresentable {
         private func reportNavigationFailure(_ error: Error) {
             guard isActive, navigationFailureGate.shouldReportFailure() else { return }
             hasObservedTerminalNavigation = true
+            disarmPrewarmRecovery()
             onLoadFail(error)
         }
 
@@ -1432,6 +1461,7 @@ private struct PlayerWebView: UIViewRepresentable {
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             guard isActive else { return }
             hasObservedTerminalNavigation = true
+            disarmPrewarmRecovery()
             onTerminate()
         }
     }
