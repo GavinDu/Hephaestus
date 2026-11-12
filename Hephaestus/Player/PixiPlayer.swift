@@ -192,6 +192,18 @@ enum PlayerWebContentTerminationPolicy {
     }
 }
 
+// The runtime's initial explicit Pixi render can be measured independently
+// of WKNavigationDelegate.didFinish. This is renderer submission, not proof
+// that the GPU/compositor displayed a frame, nor that input is accepted.
+// Strict limits also prevent an untrusted or malformed page metric from
+// feeding unbounded values into native telemetry.
+enum PlayerRuntimeMetricPolicy {
+    static func firstSceneRenderSubmitMS(_ value: Any?) -> Int? {
+        guard let ms = value as? Int, (0...3_600_000).contains(ms) else { return nil }
+        return ms
+    }
+}
+
 // MARK: - Telemetry (monitoring)
 
 /// Fire-and-forget reports to the backend's telemetry endpoint — the
@@ -448,7 +460,6 @@ struct PixiPlayerSheet: View {
     @State private var reportedMemoryWarning = false
     @State private var gameplayStartedAt: Date?
     @State private var didTrackGameplayStart = false
-    @State private var didReportInteractive = false
     @State private var verifiedResult: VerifiedRunResult?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
     @StateObject private var pathMonitor = PlayerPathMonitor()
@@ -529,18 +540,9 @@ struct PixiPlayerSheet: View {
         DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
         PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
                                message: "loaded in \(ms)ms quality=\(effectiveQuality)")
-        if !didReportInteractive {
-            didReportInteractive = true
-            let eventID = "ios-tti:\(gameID):\(loadStartedAt.timeIntervalSince1970)"
-            Task {
-                await BackendAPI.shared.trackSocialEvent(
-                    gameID: gameID,
-                    kind: "player_ready",
-                    timeToInteractiveMS: max(0, ms),
-                    eventID: eventID
-                )
-            }
-        }
+        // Navigation completion is NOT proof that the game has rendered or
+        // can accept input. Only the trusted runtime reports player_ready;
+        // this native callback records PlayerLoad/TapToNavReady separately.
         // The backend derives play_start/replay/completion from
         // runtime session_start/run_end events. Only track the
         // sheet lifecycle here to avoid double-counting starts.
@@ -1128,6 +1130,16 @@ private struct PlayerWebView: UIViewRepresentable {
             let metricID = "\(runtimeSessionID):\(metric):\(sequence)"
             guard acceptedMetricIDs.insert(metricID).inserted else { return }
             switch metric {
+            case "first_scene_render_submit":
+                guard let ms = PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(body["ms"]) else { return }
+                // This metric may be lost when a pooled WebView was already
+                // warmed before the Coordinator attached. The backend also
+                // captures the milestone independently for that case.
+                PlayerTelemetry.report(
+                    gameID: expectedGameID, kind: "perf",
+                    name: "FirstSceneRenderSubmitted",
+                    message: "renderer-submitted-ms=\(ms); not display-presented or interactive"
+                )
             case "first_input":
                 guard let ms = body["ms"] as? Int, (0...86_400_000).contains(ms) else { return }
                 Task { await BackendAPI.shared.trackSocialEvent(

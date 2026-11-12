@@ -814,3 +814,13 @@ struct HephaestusTests {
     let canonical = try JSONDecoder().decode(FeedGame.self, from: Data("{\"game_id\":\"old\",\"title\":\"Old\",\"game_ir\":{\"game\":{\"orientation\":\"landscape\"}}}".utf8))
     #expect(canonical.orientationLabel == "Landscape game")
 }
+
+@Test func nativeRuntimeRejectsUnboundedOrMalformedFirstRenderMetrics() {
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(0) == 0)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(16) == 16)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(3_600_000) == 3_600_000)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(-1) == nil)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(3_600_001) == nil)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS("16") == nil)
+    #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(nil) == nil)
+}
