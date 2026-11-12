@@ -111,7 +111,8 @@ struct ContentView: View {
     private func destination(for section: AppSection) -> some View {
         switch section {
         case .discover:
-            DiscoverView(onOpenLibrary: { selection = .library })
+            DiscoverView(onOpenLibrary: { selection = .library },
+                         onOpenProfile: { selection = .profile })
         case .create:
             CreateView()
         case .library:
