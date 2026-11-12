@@ -128,10 +128,6 @@ struct CreatorStudioView: View {
             .task {
                 if !isSignedOut { await load(reset: true) }
             }
-            // The owner-project workspace contains private metadata. Logout,
-            // account switch, and credential replacement must invalidate the
-            // visible cards immediately, not just on the next manual Refresh.
-            // BackendConfig posts this notification without token/ID payloads.
             .onReceive(NotificationCenter.default.publisher(
                 for: .hephaestusBackendSessionDidChange
             )) { _ in
@@ -311,8 +307,8 @@ struct CreatorStudioView: View {
 
     private func load(reset: Bool) async {
         let ownerID = BackendConfig.currentUserID
-        // Pin the exact credential across suspension. A replacement token for
-        // the same owner still revokes this response before onReceive runs.
+        // A same-subject credential rotation revokes an old response even
+        // before SwiftUI receives the session-change notification.
         let sessionToken = BackendConfig.loadSessionToken()
         guard !ownerID.isEmpty else {
             requestRevision += 1

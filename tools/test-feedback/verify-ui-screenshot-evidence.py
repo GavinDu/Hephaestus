@@ -10,6 +10,7 @@ All inspection uses Python's standard library; macOS runner needs no PIL.
 This is a screenshot geometry/provenance gate, NOT gameplay/media approval.
 """
 import argparse
+import hashlib
 import json
 import shutil
 import struct
@@ -123,7 +124,17 @@ def verify_and_copy(attachments_dir, output_dir):
         preferred = logical in LANDSCAPE_PRIMARY + PORTRAIT_PRIMARY
         target = output_dir / (logical + ".raw.png")
         shutil.copyfile(src, target)
-        validated[logical] = {**info, "file": target.name, "preferred_for_visual_review": preferred}
+        validated[logical] = {**info, "file": target.name,
+                              "sha256": hashlib.sha256(src.read_bytes()).hexdigest(),
+                              "preferred_for_visual_review": preferred}
+    # A swipe test can report success while an export/capture pipeline silently
+    # reuses the same PNG for both states. Reject exact duplicates independently
+    # of geometry, orientation and the XCTest interaction score. Different byte
+    # hashes still require human visual inspection; this is not pixel-level QA.
+    for before, after in ((LANDSCAPE_PRIMARY[0], LANDSCAPE_PRIMARY[1]),
+                          (PORTRAIT_PRIMARY[0], PORTRAIT_PRIMARY[1])):
+        if validated[before]["sha256"] == validated[after]["sha256"]:
+            raise ValueError(f"{before} and {after}: duplicate raw screenshot bytes")
     report = {
         "status": "screen-orientation-verified",
         "capture_source": "native XCTest xcresulttool export attachments",
