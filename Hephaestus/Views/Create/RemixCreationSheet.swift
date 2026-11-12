@@ -24,6 +24,7 @@ struct RemixCreationSheet: View {
     private enum Phase {
         case checking
         case denied(String)
+        case unavailable(String)
         case ready
         case building(JobStatus)
         case confirming(JobStatus)
@@ -52,6 +53,26 @@ struct RemixCreationSheet: View {
                                 systemImage: "lock.shield",
                                 description: Text(reason))
                             .frame(maxWidth: .infinity, minHeight: 180)
+                        case .unavailable(let message):
+                            // An unreachable or outdated backend is not evidence
+                            // that the original creator refused remix permission.
+                            VStack(spacing: 16) {
+                                ContentUnavailableView(
+                                    "Couldn't check remix rights",
+                                    systemImage: "wifi.exclamationmark",
+                                    description: Text(message))
+                                Button {
+                                    Task { await checkEligibility() }
+                                } label: {
+                                    Label("Try permission check again", systemImage: "arrow.clockwise")
+                                        .frame(maxWidth: .infinity, minHeight: 48)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(ArcadePulseTheme.electricViolet)
+                                .accessibilityIdentifier("remix.retryEligibility")
+                            }
+                            .frame(maxWidth: 520, minHeight: 180)
+                            .frame(maxWidth: .infinity)
                         case .ready:
                             readyForm
                         case .building(let job):
@@ -246,8 +267,11 @@ struct RemixCreationSheet: View {
             let result = try await BackendAPI.shared.fetchRemixEligibility(gameID: source.id)
             phase = result.eligible ? .ready :
                 .denied(result.reason.isEmpty ? "The creator has not enabled remixing." : result.reason)
+        } catch is CancellationError {
+            return
         } catch {
-            phase = .denied("Couldn't verify this game's remix rights: \(error.localizedDescription)")
+            guard !Task.isCancelled else { return }
+            phase = .unavailable("The service couldn't verify source permissions right now. No remix was created.")
         }
     }
 
