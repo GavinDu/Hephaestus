@@ -198,6 +198,18 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(hero.waitForExistence(timeout: 10))
         XCTAssertTrue(choose.exists && choose.isHittable)
         XCTAssertTrue(consent.exists && consent.isHittable)
+        // The initial iPhone viewport must show the *entire* source-upload
+        // disclosure before an upload decision; a visible switch alone is
+        // insufficient when the tab bar obscures the explanatory copy.
+        let disclosure = app.staticTexts["create.sourceConsent.disclosure"].firstMatch
+        XCTAssertTrue(disclosure.exists && disclosure.isHittable,
+                      "Source upload disclosure must be readable without scrolling.")
+        if !isPad {
+            let tabBar = app.tabBars.firstMatch
+            XCTAssertTrue(tabBar.exists)
+            XCTAssertLessThanOrEqual(disclosure.frame.maxY, tabBar.frame.minY - 4,
+                                     "Source consent disclosure must not overlap the iPhone tab bar.")
+        }
         XCTAssertTrue(analyze.exists && !analyze.isEnabled,
                       "Analyze must stay disabled until artwork and source consent exist.")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
