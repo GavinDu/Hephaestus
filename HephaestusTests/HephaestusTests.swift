@@ -824,3 +824,21 @@ struct HephaestusTests {
     #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS("16") == nil)
     #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(nil) == nil)
 }
+
+@Test func firstAcceptedRuntimeInputStartsSessionExactlyOnce() {
+    var gate = PlayerFirstInputGate()
+    #expect(gate.accepted == false)
+    #expect(gate.accept(milliseconds: nil) == false)
+    #expect(gate.accept(milliseconds: -1) == false)
+    #expect(gate.accept(milliseconds: 86_400_001) == false)
+    #expect(gate.accept(milliseconds: 0) == true)
+    #expect(gate.accepted == true)
+    #expect(gate.accept(milliseconds: 16) == false)
+    #expect(gate.accept(milliseconds: 86_400_000) == false)
+}
+
+@Test func firstInputGateAcceptsMaximumValidDuration() {
+    var gate = PlayerFirstInputGate()
+    #expect(gate.accept(milliseconds: 86_400_000))
+    #expect(!gate.accept(milliseconds: 86_400_000))
+}
