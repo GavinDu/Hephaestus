@@ -865,6 +865,59 @@ struct HephaestusTests {
     #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(nil) == nil)
 }
 
+@Test func playerPrewarmHandoffCannotLoseCompletionOrReviveDetachedGame() {
+    // The handoff observer must be armed. Even then, only an active
+    // sheet with completed loading and no terminal callback can reload.
+    for isActive in [false, true] {
+        for stillLoading in [false, true] {
+            for hasObservedTerminalNavigation in [false, true] {
+                for recoveryArmed in [false, true] {
+                    let shouldRecover = PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
+                        isActive: isActive,
+                        stillLoading: stillLoading,
+                        hasObservedTerminalNavigation: hasObservedTerminalNavigation,
+                        recoveryArmed: recoveryArmed
+                    )
+                    #expect(shouldRecover == (
+                        recoveryArmed && isActive && !stillLoading && !hasObservedTerminalNavigation
+                    ))
+                }
+            }
+        }
+    }
+}
+
+@Test func nativeMainFrameNavigationAllowsOnlyOwnedGameDocument() {
+    let expected = URL(string: "https://game.example.test/player?game=one&quality=low&presentation=play")!
+    let otherGame = URL(string: "https://game.example.test/player?game=two&quality=low&presentation=play")!
+    let otherQuality = URL(string: "https://game.example.test/player?game=one&quality=high&presentation=play")!
+    let remote = URL(string: "https://attacker.example.test/player?game=one&quality=low&presentation=play")!
+    let downgraded = URL(string: "http://game.example.test/player?game=one&quality=low&presentation=play")!
+    let blank = URL(string: "about:blank")!
+
+    func allows(_ url: URL?, expected target: URL? = expected,
+                main: Bool = true, disposing: Bool = false) -> Bool {
+        PlayerMainFrameNavigationPolicy.shouldAllow(
+            requestURL: url, expectedURL: target,
+            isMainFrame: main, isDisposing: disposing
+        )
+    }
+
+    #expect(allows(expected))
+    #expect(!allows(otherGame))
+    #expect(!allows(otherQuality))
+    #expect(!allows(remote))
+    #expect(!allows(downgraded))
+    #expect(!allows(nil))
+    #expect(!allows(blank))
+    #expect(!allows(expected, expected: nil))
+    // A blank navigation is permitted only to tear down the pooled view.
+    #expect(allows(blank, expected: nil, disposing: true))
+    #expect(!allows(remote, expected: nil, disposing: true))
+    // Images/iframes are governed by WebKit origin/CSP, not this main-frame gate.
+    #expect(allows(remote, main: false))
+}
+
 @Test func firstAcceptedRuntimeInputStartsSessionExactlyOnce() {
     var gate = PlayerFirstInputGate()
     #expect(gate.accepted == false)

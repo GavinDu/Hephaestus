@@ -1,0 +1,25 @@
+name: Native UI screenshot evidence tests
+
+on:
+  pull_request:
+    paths:
+      - "tools/test-feedback/**"
+      - ".github/workflows/ui-evidence.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tools/test-feedback/**"
+      - ".github/workflows/ui-evidence.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-native-evidence:
+    name: Screenshot provenance and duplication regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run pure Python screenshot evidence tests
+        run: python3 -m unittest discover -s tools/test-feedback -p "test_verify_ui_screenshot_evidence.py" -v

@@ -1131,7 +1131,7 @@ private struct ForYouGamePage: View {
         }
     }
 
-    private func detailsOverlay(bottomInset: CGFloat) -> some View {
+    private func detailsOverlay(bottomInset: CGFloat, compactLandscapeTitleWidth: CGFloat? = nil) -> some View {
         let isCompact = verticalSizeClass == .compact || dynamicTypeSize.isAccessibilitySize
         return VStack(alignment: .leading, spacing: isCompact ? 6 : 14) {
             Spacer(minLength: isCompact ? 0 : 100)
@@ -1163,6 +1163,11 @@ private struct ForYouGamePage: View {
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.85 : 1)
+                // On short iPhone landscape screens a long bilingual game title
+                // previously crossed the centered "Preview unavailable" text.
+                // Give the real title a legible left-hand column without
+                // hiding it, shrinking the Play CTA, or shifting fake media.
+                .frame(maxWidth: compactLandscapeTitleWidth, alignment: .leading)
                 .accessibilityIdentifier("feed.page.title.\(game.id)")
                 .accessibilitySortPriority(90)
             if !isCompact, let caption = game.caption, !caption.isEmpty {
@@ -1344,7 +1349,12 @@ private struct ForYouGamePage: View {
                         mediaLayer
                         VStack {
                             HStack {
-                                if !dynamicTypeSize.isAccessibilitySize && !isLandscape {
+                                if !dynamicTypeSize.isAccessibilitySize {
+                                    // Keep guidance on the LEADING edge in both
+                                    // orientations. The floating landscape scope /
+                                    // search / More controls own the top trailing edge;
+                                    // putting the hint there obscured those controls
+                                    // in original full-screen simulator screenshots.
                                     Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
                                         .font(.caption2.weight(.bold))
                                         .tracking(0.8)
@@ -1352,22 +1362,20 @@ private struct ForYouGamePage: View {
                                         .padding(.horizontal, 11)
                                         .padding(.vertical, 8)
                                         .background(.black.opacity(0.28), in: Capsule())
+                                        .accessibilityIdentifier("feed.swipeHint")
+                                    if isLandscape, let orientation = game.orientationLabel {
+                                        Text(orientation)
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 8)
+                                            .background(.black.opacity(0.4), in: Capsule())
+                                            .accessibilityIdentifier("feed.orientation")
+                                    }
                                 }
                                 Spacer(minLength: 0)
-                                if !dynamicTypeSize.isAccessibilitySize && isLandscape {
-                                    // Keep the vertical-swipe hint visible on short iPhone
-                                    // landscape viewports, opposite the title.
-                                    // It is noninteractive and does not take
-                                    // touch space away from the media stage.
-                                    Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
-                                        .font(.caption2.weight(.bold))
-                                        .tracking(0.8)
-                                        .foregroundStyle(.white.opacity(0.9))
-                                        .padding(.horizontal, 11)
-                                        .padding(.vertical, 8)
-                                        .background(.black.opacity(0.28), in: Capsule())
-                                }
-                                if !dynamicTypeSize.isAccessibilitySize, let orientation = game.orientationLabel {
+                                if !isLandscape && !dynamicTypeSize.isAccessibilitySize,
+                                   let orientation = game.orientationLabel {
                                     Text(orientation)
                                         .font(.caption2.weight(.semibold))
                                         .foregroundStyle(.white)
@@ -1383,7 +1391,11 @@ private struct ForYouGamePage: View {
                         .padding(.top, 18)
                         .allowsHitTesting(false)
                         HStack(alignment: .bottom, spacing: 0) {
-                            detailsOverlay(bottomInset: proxy.safeAreaInsets.bottom)
+                            detailsOverlay(
+                                bottomInset: proxy.safeAreaInsets.bottom,
+                                compactLandscapeTitleWidth: UIDevice.current.userInterfaceIdiom == .phone &&
+                                    verticalSizeClass == .compact
+                                    ? pageWidth * 0.36 : nil)
                             if verticalSizeClass != .compact && !dynamicTypeSize.isAccessibilitySize {
                                 socialActions(vertical: true)
                                     .padding(.trailing, 12)
