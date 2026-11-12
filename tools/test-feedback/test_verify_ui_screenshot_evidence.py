@@ -19,7 +19,7 @@ def chunk(kind, payload):
             struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff))
 
 
-def png(width, height, orientation=1, rgb=b"\x20\x50\x80"):
+def png(width, height, orientation=1, rgb=b"\x20\x50\x80", level=6):
     # Small valid RGB PNG with TIFF/EXIF rotation metadata.
     rows = b"".join(b"\x00" + rgb * width for _ in range(height))
     tiff = (b"II\x2a\x00" + struct.pack("<I", 8) +
@@ -29,7 +29,7 @@ def png(width, height, orientation=1, rgb=b"\x20\x50\x80"):
     return (module.PNG_SIGNATURE +
             chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) +
             chunk(b"eXIf", tiff) +
-            chunk(b"IDAT", zlib.compress(rows)) +
+            chunk(b"IDAT", zlib.compress(rows, level)) +
             chunk(b"IEND", b""))
 
 
@@ -92,6 +92,22 @@ class ScreenshotEvidenceTests(unittest.TestCase):
                     module.verify_and_copy(source, Path(directory) / "out")
                 # Restore the independent after-swipe frame for the next case.
                 self.fixture(source)
+
+    def test_reencoded_identical_screen_pixels_are_not_valid_swipe_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            folder.mkdir()
+            for before, after in (module.LANDSCAPE_PRIMARY, module.PORTRAIT_PRIMARY):
+                self.fixture(folder)
+                # The after image has the same raster, but a different PNG
+                # compression level. Raw SHA-256 cannot catch this replay.
+                orientation = 8 if before in module.LANDSCAPE_PRIMARY else 1
+                reused = png(10, 20, orientation=orientation,
+                             rgb=b"\x20\x50\x80", level=9)
+                self.assertNotEqual(reused, (folder / (before + ".png")).read_bytes())
+                (folder / (after + ".png")).write_bytes(reused)
+                with self.assertRaisesRegex(ValueError, "duplicate decoded screenshot pixels"):
+                    module.verify_and_copy(folder, Path(directory) / "out")
 
     def test_png_crc_corruption_rejected_before_visual_approval(self):
         with tempfile.TemporaryDirectory() as directory:
