@@ -735,6 +735,15 @@ final class PlayerSmokeTests: XCTestCase {
             if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
                 XCTAssertEqual(visiblePages.count, 1,
                     "Exactly one game title must intersect the compact landscape pager before swipe; overlapping adjacent cards invalidate screenshot quality.")
+                // Original full-screen raw iPhone evidence showed a long bilingual
+                // title crossing the centered no-preview label even though all
+                // swipe/hit-target metrics passed. Keep title in a responsive
+                // left column clear of the central media placeholder.
+                if let beforePage {
+                    XCTAssertLessThanOrEqual(beforePage.frame.maxX,
+                        mediaFrame.minX + mediaFrame.width * 0.41,
+                        "Compact landscape title must not cross the centered preview fallback.")
+                }
                 let tabs = app.tabBars.firstMatch
                 if tabs.exists {
                     XCTAssertLessThanOrEqual(play.frame.maxY, tabs.frame.minY + 1,
