@@ -948,6 +948,32 @@ struct HephaestusTests {
     ))
 }
 
+@Test func prewarmCompletionCannotMarkOldOrSessionRevokedViewLoaded() {
+    let original = URL(string: "https://example.test/player?game=sky&quality=high")!
+    let same = URL(string: "https://example.test/player?game=sky&quality=high")!
+    let alternateQuality = URL(string: "https://example.test/player?game=sky&quality=low")!
+    let otherGame = URL(string: "https://example.test/player?game=other&quality=high")!
+    func accepts(_ current: Bool, _ expected: URL?, _ actual: URL?) -> Bool {
+        PlayerPrewarmCompletionPolicy.shouldRecordLoaded(
+            isCurrentPooledView: current, expectedURL: expected, actualURL: actual
+        )
+    }
+    // A canonical current WebView can finish prewarming or finish after its
+    // delegate has transferred to the interactive player.
+    #expect(accepts(true, original, same))
+    // Credential rotation drops ownership even if the new game URL is
+    // textually identical to the old view's URL.
+    #expect(!accepts(false, original, same))
+    #expect(!accepts(false, otherGame, otherGame))
+    // A different quality/replaced game must not poison loadedURL.
+    #expect(!accepts(true, original, alternateQuality))
+    #expect(!accepts(true, original, otherGame))
+    // Explicit recycle / invalidation sets currentURL=nil; not loaded.
+    #expect(!accepts(true, nil, same))
+    #expect(!accepts(true, original, nil))
+    #expect(!accepts(false, nil, nil))
+}
+
 @Test func playerSessionCacheIsBoundToOneCredentialFingerprint() {
     #expect(!PlayerSessionCachePolicy.shouldPurge(
         cachedFingerprint: nil, currentFingerprint: "anonymous"
