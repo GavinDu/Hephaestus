@@ -140,9 +140,9 @@ struct CreateView: View {
                             .padding(12)
                             .accessibilityLabel("Selected drawing preview")
                     } else {
-                        VStack(spacing: 14) {
+                        VStack(spacing: horizontalSizeClass == .regular ? 14 : 10) {
                             Image(systemName: "photo.artframe")
-                                .font(.system(size: 48, weight: .light))
+                                .font(.system(size: horizontalSizeClass == .regular ? 48 : 36, weight: .light))
                                 .foregroundStyle(ArcadePulseTheme.neonMagenta)
                             Text("No drawing selected")
                                 .font(.headline)
@@ -151,10 +151,13 @@ struct CreateView: View {
                                 .foregroundStyle(ArcadePulseTheme.textSecondary)
                         }
                         .foregroundStyle(.white)
-                        .padding(20)
+                        .padding(horizontalSizeClass == .regular ? 20 : 12)
                     }
                 }
-                .frame(height: horizontalSizeClass == .regular ? 320 : 205)
+                // The empty artwork placeholder is secondary to informed upload
+                // consent. Keep it compact on iPhone so the full disclosure stays
+                // above the tab bar at initial load; retain the large iPad stage.
+                .frame(height: horizontalSizeClass == .regular ? 320 : 160)
                 .overlay {
                     RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius, style: .continuous)
                         .strokeBorder(ArcadePulseTheme.subtleBorder, lineWidth: 1)
@@ -192,6 +195,7 @@ struct CreateView: View {
                         .font(.caption)
                         .foregroundStyle(ArcadePulseTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("create.sourceConsent.disclosure")
                     TextField("Optional keywords, separated by commas", text: $keywordsText)
                         .textFieldStyle(.roundedBorder)
                         .accessibilityIdentifier("create.pick.keywords")
