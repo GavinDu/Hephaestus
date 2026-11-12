@@ -460,7 +460,6 @@ struct PixiPlayerSheet: View {
     @State private var reportedMemoryWarning = false
     @State private var gameplayStartedAt: Date?
     @State private var didTrackGameplayStart = false
-    @State private var didReportInteractive = false
     @State private var verifiedResult: VerifiedRunResult?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
     @StateObject private var pathMonitor = PlayerPathMonitor()
@@ -541,18 +540,9 @@ struct PixiPlayerSheet: View {
         DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
         PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
                                message: "loaded in \(ms)ms quality=\(effectiveQuality)")
-        if !didReportInteractive {
-            didReportInteractive = true
-            let eventID = "ios-tti:\(gameID):\(loadStartedAt.timeIntervalSince1970)"
-            Task {
-                await BackendAPI.shared.trackSocialEvent(
-                    gameID: gameID,
-                    kind: "player_ready",
-                    timeToInteractiveMS: max(0, ms),
-                    eventID: eventID
-                )
-            }
-        }
+        // Navigation completion is NOT proof that the game has rendered or
+        // can accept input. Only the trusted runtime reports player_ready;
+        // this native callback records PlayerLoad/TapToNavReady separately.
         // The backend derives play_start/replay/completion from
         // runtime session_start/run_end events. Only track the
         // sheet lifecycle here to avoid double-counting starts.
