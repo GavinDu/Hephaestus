@@ -824,3 +824,31 @@ struct HephaestusTests {
     #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS("16") == nil)
     #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(nil) == nil)
 }
+
+@Test func firstAcceptedRuntimeInputStartsSessionExactlyOnce() {
+    var gate = PlayerFirstInputGate()
+    #expect(gate.accepted == false)
+    // Swift Testing expectation macros wrap operands in immutable closures:
+    // evaluate every mutating state-machine transition *before* #expect.
+    let missing = gate.accept(milliseconds: nil)
+    let negative = gate.accept(milliseconds: -1)
+    let excessive = gate.accept(milliseconds: 86_400_001)
+    #expect(missing == false)
+    #expect(negative == false)
+    #expect(excessive == false)
+    let first = gate.accept(milliseconds: 0)
+    #expect(first == true)
+    #expect(gate.accepted == true)
+    let duplicate = gate.accept(milliseconds: 16)
+    let later = gate.accept(milliseconds: 86_400_000)
+    #expect(duplicate == false)
+    #expect(later == false)
+}
+
+@Test func firstInputGateAcceptsMaximumValidDuration() {
+    var gate = PlayerFirstInputGate()
+    let first = gate.accept(milliseconds: 86_400_000)
+    let duplicate = gate.accept(milliseconds: 86_400_000)
+    #expect(first == true)
+    #expect(duplicate == false)
+}
