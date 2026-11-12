@@ -201,6 +201,7 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedUIEvaluationAndSwipe \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedSupportsAccessibilityDynamicType \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutState \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutAccessibilityTextSize \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateEntryConsentAndControls \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedUnavailableRecoveryToLibrary \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
