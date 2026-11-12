@@ -1,6 +1,6 @@
 # ADR: Hephaestus game runtime for AI-generated 2D games
 
-**Status:** Proposed for review — not yet adopted or implemented  
+**Status:** Architecture decision proposed; incremental implementation merged, full epic NOT resolved  
 **Date:** 2026-11-11  
 **Epic:** [Hephaestus #202](https://github.com/GavinDu/Hephaestus/issues/202)  
 **Shared ownership:** `GavinDu/Hephaestus` (iOS host, UX, lifecycle, telemetry) and `GavinDu/html5-game-generator` (IR, compiler, package, web interpreter).
@@ -14,18 +14,42 @@ The runtime must be (1) **extensible in capabilities**, (2) **deterministic in s
 ## 2. Observed baseline
 
 - Shipping iOS player: SwiftUI + pooled, backend-hosted `/player?presentation=play` in WKWebView, in `Hephaestus/Player/PixiPlayer.swift`. One process pool, one interactive web view, native load and failure recovery, optional quality parameter and a guarded **one-way** message handler for verified-run and performance summaries. This is *not literally bridgeless*; the handler checks main-frame, same-origin, schema/session/game identity, and offers no general command/native APIs.
-- Backend runtime: `internal/api/web/pixi-runtime.js` interprets Game IR with PixiJS, Rapier, WebAudio, rules, scene updates and telemetry in one ~2,860-line module. Rendering and physics use a fixed logical canvas; Rapier uses 60Hz steps.
-- Backend IR: `internal/gameir/ir.go` and `schemas/game-ir-v1.schema.json`, versions 1.0–1.2, data-only with allowlisted actions/components and bounded content. Inputs currently tap, drag, keyboard. A game-specific `holes_stitched` overlap shortcut is embedded in the general update loop.
-- Package: `internal/api/package.go` returns envelope v2.0 with a **short** `irHash` for verified run/leaderboard identity and a distinct **full** `irSha256` for content integrity. `ios/GamePlayerCore` incorrectly requires 64-character `irHash` and does not model `irSha256`. The production Xcode project does not currently link that standalone Swift package; a passing isolated core test does not imply a correct native integration.
+- Backend runtime: `internal/api/web/pixi-runtime.js` interprets Game IR with PixiJS, Rapier, WebAudio, rules, scene updates and telemetry in one ~2,900-line module. Rendering and physics use a fixed logical canvas; Rapier uses 60Hz steps.
+- Backend IR: `internal/gameir/ir.go` and `schemas/game-ir-v1.schema.json`, versions 1.0–1.2, data-only with allowlisted actions/components and bounded content. Inputs currently tap, drag, keyboard. The former `holes_stitched` shortcut was removed by generator PR #323; regression tests now cover generic authored collectible behavior.
+- Package: `internal/api/package.go` returns envelope v2.0 with a **short** `irHash` for verified run/leaderboard identity and a distinct **full** `irSha256` for content integrity. The historical `irHash`/`irSha256` incompatibility was fixed by generator PR #322 and validated using a real Go-exported Swift fixture. The production Xcode project STILL does not link that standalone Swift package; a passing isolated core test does not imply a correct native integration.
 - Feed-to-player readiness: navigation finish is measurable, but not evidence of the first rendered frame or interactive readiness. See `docs/PLAYER_HANDOFF.md`.
 
 ### Architectural debt, not evidence of production failure
-1. Duplicate iOS host lifecycle and standalone core contracts; incompatible package hash assumptions.
-2. No generic guarantee that visual frames, semantic state and Rapier steps share a deterministic clock; investigate how `dt`, seed, spawn order and transcendental functions affect replay.
+1. Duplicate iOS host lifecycle and standalone Swift Core contracts, even though the package hash incompatibility has been fixed.
+2. The interpreter already implements a 60 Hz fixed semantic accumulator (`STEP_MS`, `simAcc`, `tickFrame`). Cross-browser seeded replay is enforced by PR #326; remaining gaps are broader genres, event order, throttled render pacing and visual RNG isolation.
 3. One large interpreter limits test isolation and per-genre feature composition.
 4. Narrow IR genres and inputs force game-specific runtime branches or unimplemented actions.
 5. Asset loading and one pooled WKWebView are reasonable optimizations, but do not establish bounded memory, revocation or safe rapid-switch teardown.
-6. No measured device-specific threshold for first interactive frame, memory/thermal degradation or 15-minute stability.
+6. No measured device-specific compositor-presented first frame, memory/thermal baseline or 15-minute hardware stability acceptance.
+
+
+## 2A. Implementation state and ownership at the current checkpoint
+
+The architecture is adopted only as a **proposed target** while Epic #202 remains open. Merged and fully CI-verified increments include: package hash (#322), removal of objective-specific collision recovery (#323), cross-browser fixed-tick state comparison (#326), terminal-state finality (#328), first scene *submission* and false-ready protection (#329/#339), server asset bytes (#330), held-control cancellation (#332), Swift capability preflight (#334), browser capabilities (#337), native validated metrics (#208), native first-input session timing (#210), bounded image decode (#338), rendering quality invariant replay (#340), and unattached prewarm expiry (#211). Check the PR links in Epic #202 for current merge evidence. These cannot substitute for physical iPhone/iPad measurements.
+
+### Authoritative component responsibilities
+
+| Component | Authority | Never do |
+| --- | --- | --- |
+| Go compiler/publisher | Authoritative schema, allowlist, full canonical IR integrity digest, byte budgets, authorization and moderation | Generate executable JS or silently downgrade an unsupported mechanic |
+| Trusted browser interpreter | One 60 Hz semantic tick, deterministic seed/input replay, rules, score/objectives, stable terminal result, physics contacts when declared | Depend on screen refresh cadence or visual-only particle RNG for gameplay |
+| Pixi/WebAudio adapter | Pixels, animation, sound playback and disposable asset ownership | Set canonical game score, win state, run ID or leaderboard identity |
+| Standalone Swift GamePlayerCore | Independently tested package-envelope/IR compatibility validator and proposed launch-contract library | Claim to own shipping gameplay state until explicitly integrated into Hephaestus |
+| Production Hephaestus SwiftUI/WKWebView | Navigation/failure recovery, prewarm, origin/main-frame/session-bound one-way metrics/run notification, physical lifecycle, native feed UX | Start gameplay on didFinish, duplicate game simulation, trust in-page result numbers or add arbitrary native command bridge |
+| Backend verified-run service | Server-verified outcomes and leaderboard identity | Accept untrusted native UI outcome data |
+
+### Lifecycle transition contract (proposal for issue #203)
+
+`idle -> speculative_preload -> attached_navigation -> package_preflight -> essential_assets -> renderer_submit -> awaiting_start -> playing -> ended -> verified_handoff -> disposed`.
+
+A failure at package/auth/render/physics can enter `recoverable_error` or `terminal_error`, never `ready`. A prewarm that is not attached expires; attachment invalidates the expiry generation. `WKNavigationDelegate.didFinish` is *navigation completion only*. The first scene-render-submission milestone indicates a submitted draw but **not** a GPU-presented frame; `first_input` is a separate bounded session-bound milestone. App backgrounding pauses user input and should not generate additional simulation ticks or keep held controls. Every transition must bind to one current game ID, immutable version and runtime session; verified results are fetched from the backend, not accepted from a page payload.
+
+**Challenger-required negative paths:** rapid A→B→A switching, revocation while prewarmed, offline/private/removed assets, repeated WebContent termination, stale metric/run callbacks, abandoned prewarm, duplicate input, canceled gesture, untrusted capability, oversized/damaged compressed image, texture decode pressure, audio request abortion, unexpected renderer failure, and repeated 50+ close/enter cycles. CI browser tests are not actual-device thermal or memory proofs.
 
 ## 3. Decision
 
