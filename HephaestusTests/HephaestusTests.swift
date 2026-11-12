@@ -852,24 +852,25 @@ struct HephaestusTests {
 }
 
 @Test func playerPrewarmHandoffCannotLoseCompletionOrReviveDetachedGame() {
+    // The handoff observer must be armed. Even then, only an active
+    // sheet with completed loading and no terminal callback can reload.
     for isActive in [false, true] {
         for stillLoading in [false, true] {
             for hasObservedTerminalNavigation in [false, true] {
-                let shouldRecover = PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
-                    isActive: isActive,
-                    stillLoading: stillLoading,
-                    hasObservedTerminalNavigation: hasObservedTerminalNavigation
-                )
-                #expect(shouldRecover == (isActive && !stillLoading && !hasObservedTerminalNavigation))
+                for recoveryArmed in [false, true] {
+                    let shouldRecover = PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
+                        isActive: isActive,
+                        stillLoading: stillLoading,
+                        hasObservedTerminalNavigation: hasObservedTerminalNavigation,
+                        recoveryArmed: recoveryArmed
+                    )
+                    #expect(shouldRecover == (
+                        recoveryArmed && isActive && !stillLoading && !hasObservedTerminalNavigation
+                    ))
+                }
             }
         }
     }
-    #expect(!PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
-        isActive: false, stillLoading: false, hasObservedTerminalNavigation: false, recoveryArmed: true
-    ))
-    #expect(!PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
-        isActive: true, stillLoading: false, hasObservedTerminalNavigation: true, recoveryArmed: true
-    ))
 }
 
 @Test func firstAcceptedRuntimeInputStartsSessionExactlyOnce() {
