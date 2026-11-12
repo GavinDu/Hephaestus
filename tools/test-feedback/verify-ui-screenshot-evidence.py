@@ -134,7 +134,10 @@ def png_filtered_raster_sha256(path):
     raw = decoder.decompress(b"".join(compressed), expected + 1)
     if len(raw) != expected or not decoder.eof or decoder.unconsumed_tail:
         raise ValueError(f"{path.name}: invalid or oversized PNG raster")
-    # Include interpretation metadata so different image dimensions/modes\n    # cannot collide solely because filtered scanline bytes happen to match.\n    header = struct.pack(">IIBB", width, height, bit_depth, color_type)\n    return hashlib.sha256(header + raw).hexdigest()
+    # Include interpretation metadata so different image dimensions/modes
+    # cannot collide solely because filtered scanline bytes happen to match.
+    header = struct.pack(">IIBB", width, height, bit_depth, color_type)
+    return hashlib.sha256(header + raw).hexdigest()
 
 def exported_attachment(attachments, logical_name):
     matches = [
