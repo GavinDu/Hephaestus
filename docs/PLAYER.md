@@ -35,6 +35,23 @@ Contract fixtures: [Game IR schema](https://github.com/GavinDu/html5-game-genera
 - **Measurement contract:** `TapToNavReady` is WK navigation completion, **not** a rendered first frame or time to interactive. The browser's `first_scene_render_submit` milestone (runtime PR #324) is recorded only after an explicit Pixi render completes and is at most a renderer submission signal; it is **not proof** of GPU/compositor presentation or accepted input. When the native one-way handler is attached it records the same bounded elapsed time. Prewarmed pages may emit before native attachment; rely on backend milestone and device evidence for completeness. Keep this distinct from `first_input` and full player readiness.
 - Keep controls reachable, safe-area aware, accessible, and usable with Dynamic Type and reduced-motion preferences.
 
+## Runtime-owned gameplay session timing (Epic #202 / #203)
+
+Navigation completion is a **page-loading** event, not a gameplay input. The
+native sheet now starts its quick-exit duration clock only after a validated,
+session-bound `first_input` event arrives through the existing narrow,
+origin-checked WKWebView metrics channel. It ignores malformed and repeated
+milestones and does not invent an accepted input from a prewarmed navigation.
+A user leaving while the game still displays a start card does **not** generate
+a misleading gameplay quick-exit event. `TapToNavReady` remains separately
+measured on navigation finish.
+
+The backend owns gameplay start, run-completion and replay verification; the
+native callback affects only the native short-session telemetry timestamp. This
+does **not** mean full first-frame readiness, prewarm event completeness or
+production host / `GamePlayerCore` state-machine unification is solved.
+Those remain iPhone/iPad and architecture review gates under #203 and #204.
+
 ## Acceptance gates
 
 1. **Contract:** valid, malformed, unsupported-version, unsupported-action, missing-asset, bad-hash, private-access-denied, and resource-budget fixtures.
