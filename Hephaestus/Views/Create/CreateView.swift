@@ -65,24 +65,6 @@ struct CreateView: View {
             }
             .navigationTitle("Create")
             .navigationBarTitleDisplayMode(.inline)
-            // Preserve the Create consent controls in the first viewport.
-            // iPhone Studio is a labeled, 44pt toolbar destination; iPad uses
-            // the existing sidebar instead of inserting another top-level tab.
-            .toolbar {
-                if horizontalSizeClass != .regular {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showsProjects = true
-                        } label: {
-                            Label("My projects", systemImage: "square.stack.3d.up")
-                                .labelStyle(.iconOnly)
-                                .frame(width: 44, height: 44)
-                        }
-                        .accessibilityLabel("My projects")
-                        .accessibilityIdentifier("create.myProjects")
-                    }
-                }
-            }
             .fullScreenCover(item: $playerRequest) { req in
                 PixiPlayerSheet(gameID: req.gameID, title: req.title)
             }
@@ -103,10 +85,32 @@ struct CreateView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("ARCADE PULSE • CREATE", systemImage: "sparkles")
-                        .font(.caption.weight(.bold))
-                        .tracking(1.2)
-                        .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                    HStack(alignment: .center, spacing: 8) {
+                        Label("ARCADE PULSE • CREATE", systemImage: "sparkles")
+                            .font(.caption.weight(.bold))
+                            .tracking(1.2)
+                            .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                            .lineLimit(2)
+                        Spacer(minLength: 0)
+                        if horizontalSizeClass != .regular {
+                            // Navigation-bar toolbar buttons were only 36pt on
+                            // the real iPhone simulator. This in-content CTA
+                            // retains a measured 48pt tap area without adding
+                            // an extra row ahead of consent.
+                            Button {
+                                showsProjects = true
+                            } label: {
+                                Label("Projects", systemImage: "square.stack.3d.up")
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 8)
+                                    .frame(minHeight: 48)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(ArcadePulseTheme.electricViolet)
+                            .accessibilityLabel("My projects")
+                            .accessibilityIdentifier("create.myProjects")
+                        }
+                    }
                     Text("Your drawing. Your game.")
                         .font(.system(.largeTitle, design: .rounded).weight(.bold))
                         .foregroundStyle(.white)
