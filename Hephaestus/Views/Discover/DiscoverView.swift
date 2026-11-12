@@ -1292,7 +1292,12 @@ private struct ForYouGamePage: View {
                         mediaLayer
                         VStack {
                             HStack {
-                                if !dynamicTypeSize.isAccessibilitySize && !isLandscape {
+                                if !dynamicTypeSize.isAccessibilitySize {
+                                    // Keep guidance on the LEADING edge in both
+                                    // orientations. The floating landscape scope /
+                                    // search / More controls own the top trailing edge;
+                                    // putting the hint there obscured those controls
+                                    // in original full-screen simulator screenshots.
                                     Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
                                         .font(.caption2.weight(.bold))
                                         .tracking(0.8)
@@ -1300,22 +1305,20 @@ private struct ForYouGamePage: View {
                                         .padding(.horizontal, 11)
                                         .padding(.vertical, 8)
                                         .background(.black.opacity(0.28), in: Capsule())
+                                        .accessibilityIdentifier("feed.swipeHint")
+                                    if isLandscape, let orientation = game.orientationLabel {
+                                        Text(orientation)
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 8)
+                                            .background(.black.opacity(0.4), in: Capsule())
+                                            .accessibilityIdentifier("feed.orientation")
+                                    }
                                 }
                                 Spacer(minLength: 0)
-                                if !dynamicTypeSize.isAccessibilitySize && isLandscape {
-                                    // Keep the vertical-swipe hint visible on short iPhone
-                                    // landscape viewports, opposite the title.
-                                    // It is noninteractive and does not take
-                                    // touch space away from the media stage.
-                                    Label("SWIPE TO EXPLORE", systemImage: "arrow.up.arrow.down")
-                                        .font(.caption2.weight(.bold))
-                                        .tracking(0.8)
-                                        .foregroundStyle(.white.opacity(0.9))
-                                        .padding(.horizontal, 11)
-                                        .padding(.vertical, 8)
-                                        .background(.black.opacity(0.28), in: Capsule())
-                                }
-                                if !dynamicTypeSize.isAccessibilitySize, let orientation = game.orientationLabel {
+                                if !isLandscape && !dynamicTypeSize.isAccessibilitySize,
+                                   let orientation = game.orientationLabel {
                                     Text(orientation)
                                         .font(.caption2.weight(.semibold))
                                         .foregroundStyle(.white)
