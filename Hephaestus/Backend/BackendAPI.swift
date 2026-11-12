@@ -331,9 +331,6 @@ struct CreatorProjectsResponse: Decodable {
     }
 }
 
-    var is_friend: Bool
-}
-
 struct RemixEligibility: Decodable {
     let eligible: Bool
     let reason: String
