@@ -41,3 +41,23 @@ flowchart TD
 The delegate-race recovery is a narrow P0 reliability slice; it does not unify production source code with the backend's independent `GamePlayerCore` package or prove device-level cleanup. Gate the change on Xcode tests, iPhone player smoke, iPad evaluator and presentation pipeline. Unit tests cover the full truth table for inactive/loading/observed/recoverable transitions. Physical iPhone and iPad acceptance still requires cold/prewarmed/rapid-swipe/retry/offline/foreground/termination/50-cycle memory/thermal evidence, and package authorization/invalid hash fixture coverage on the actual player.
 
 **Do not close #203 or Epic #202** just because this handoff race has been addressed.
+
+
+## Main-document navigation boundary (P0 security follow-up)
+
+The native pooled WKWebView must not follow a game-controlled top-level URL to
+another game ID, quality/presentation variant, scheme, origin, or arbitrary
+website. `PlayerMainFrameNavigationPolicy` checks the exact canonical
+`/player?game=...&quality=...&presentation=play` URL; the pool additionally
+checks that the WKWebView still belongs to the active URL, and the attached
+Coordinator binds the URL to its own game session. The unattached warmup
+delegate enforces the same restriction. The only deliberate exception is
+`about:blank` during pool recycling, when no game URL is current.
+
+This is **main-frame isolation** only: subframe/resource fetching remains
+subject to WebKit/CSP and the backend package/asset permission gates. It is
+not a substitute for moderation, content revocation, cache invalidation,
+CSP review, or Apple App Review Guideline 4.7 verification. Negative URL
+policy unit tests cover same-origin game swapping, renderer quality, scheme,
+foreign origin and teardown. Verify real initial redirects and attempted
+external navigation on iPhone/iPad before calling the issue complete.
