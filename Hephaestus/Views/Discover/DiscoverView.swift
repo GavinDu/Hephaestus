@@ -265,8 +265,12 @@ struct DiscoverView: View {
                 } else {
                     ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("PLAYABLE STORIES", systemImage: "sparkles")
+                    // Keep real loading/error actions reachable at Accessibility XXXL.
+                    // A decorative hero above a failed request previously pushed Retry
+                    // below the iPhone viewport, leaving the feed unusable.
+                    if !games.isEmpty || (!isLoading && errorMessage == nil) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("PLAYABLE STORIES", systemImage: "sparkles")
                             .font(.caption.weight(.bold))
                             .tracking(1.2)
                             .foregroundStyle(.purple)
@@ -279,7 +283,8 @@ struct DiscoverView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.vertical, 6)
-                    .accessibilityElement(children: .combine)
+                        .accessibilityElement(children: .combine)
+                    }
 
                     if isLoading && games.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
@@ -926,21 +931,42 @@ private struct ForYouGamePage: View {
 
     // A missing or stale version-bound poster is not a recorded preview.
     // Keep the card playable and say so, without inventing visual evidence.
+    // When no approved media exists, make the blank stage feel intentionally
+    // designed, but NEVER present a made-up screenshot as gameplay. All copy
+    // comes from the live game; the fallback is visually distinct from media.
     private var unavailablePreview: some View {
-        VStack(spacing: dynamicTypeSize.isAccessibilitySize ? 6 : 12) {
-            Image(systemName: "gamecontroller.fill")
-                .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 38 : 60, weight: .medium))
-            Text("Preview unavailable")
-                // The decorative media hint must not become a giant label
-                // covering the real game title and accessible Play action.
-                .font(dynamicTypeSize.isAccessibilitySize ? .system(size: 15, weight: .semibold) : .subheadline.weight(.semibold))
-            Text("Tap Play now to explore")
-                .font(dynamicTypeSize.isAccessibilitySize ? .system(size: 12) : .caption)
-                .foregroundStyle(.white.opacity(0.85))
+        // The feed footer already displays the game title and Play action.
+        // Keep fallback content short and above that footer, especially for
+        // long localized titles and compact landscape.
+        GeometryReader { geometry in
+            let condensed = verticalSizeClass == .compact || dynamicTypeSize.isAccessibilitySize
+            VStack(spacing: condensed ? 6 : 10) {
+                ZStack {
+                    Circle()
+                        .strokeBorder(.white.opacity(0.20), lineWidth: 1)
+                        .frame(width: condensed ? 74 : 110, height: condensed ? 74 : 110)
+                    Circle()
+                        .fill(.white.opacity(0.07))
+                        .frame(width: condensed ? 62 : 88, height: condensed ? 62 : 88)
+                    Image(systemName: "gamecontroller.fill")
+                        .font(.system(size: condensed ? 28 : 40, weight: .medium))
+                }
+                Text("Preview unavailable")
+                    .font(condensed ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
+                    .lineLimit(2)
+                if !condensed {
+                    Text("Tap Play now to try the real game")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.82))
+                        .lineLimit(2)
+                }
+            }
+            .multilineTextAlignment(.center)
+            .foregroundStyle(.white)
+            .frame(maxWidth: min(320, max(120, geometry.size.width - 32)))
+            .position(x: geometry.size.width / 2,
+                      y: geometry.size.height * (condensed ? 0.34 : 0.32))
         }
-        .foregroundStyle(.white.opacity(0.94))
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityHidden(true)
     }
 

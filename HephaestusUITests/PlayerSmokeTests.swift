@@ -65,17 +65,24 @@ final class PlayerSmokeTests: XCTestCase {
             app.buttons["Try again"].firstMatch,
             app.buttons["Refresh games"].firstMatch
         ]
-        // Preserve the full transport budget: early taps cancel live requests.
-        // The strict player smoke still fails when no real playable post arrives.
+        // URLSession may need up to two 30-second transport windows during a
+        // cold worker start. Retrying every 15 seconds cancelled each in-flight
+        // request before it could complete and manufactured a stuck spinner.
+        // Keep the smoke strict: always require a real playable card and fail
+        // after a bounded deadline rather than substituting a mock game.
         let feedDeadline = Date().addingTimeInterval(150)
         var lastRetry = Date()
         while !play.exists && Date() < feedDeadline {
-            // XCTest can throw while evaluating isHittable for a loading-state
-            // accessibility button whose frame is temporarily invalid. Inspect
-            // geometry first, and only activate a control with a real hit point.
-            let failedRequest = app.descendants(matching: .any)["feed.error.retry"].firstMatch
+            // A completed failed request can be retried immediately. While a
+            // request is in flight, allow the fetch + network retry to finish
+            // before cancelling it with the "Retry loading" action.
+            let failedRequest = app.buttons["Try again"].firstMatch
             let hasError = failedRequest.exists && failedRequest.isEnabled
             if hasError || Date().timeIntervalSince(lastRetry) >= 65 {
+                // XCTest can throw while evaluating isHittable for a loading
+                // accessibility button whose frame is temporarily invalid.
+                // Inspect geometry before tapping and preserve screenshot
+                // failure evidence when no playable post arrives.
                 for retry in retries where retry.exists && retry.isEnabled {
                     let frame = retry.frame
                     guard !frame.isNull, !frame.isEmpty,
@@ -212,12 +219,44 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(hero.waitForExistence(timeout: 10))
         XCTAssertTrue(choose.exists && choose.isHittable)
         XCTAssertTrue(consent.exists && consent.isHittable)
+        // The initial iPhone viewport must show the *entire* source-upload
+        // disclosure before an upload decision; a visible switch alone is
+        // insufficient when the tab bar obscures the explanatory copy.
+        let disclosure = app.staticTexts["create.sourceConsent.disclosure"].firstMatch
+        XCTAssertTrue(disclosure.exists && disclosure.isHittable,
+                      "Source upload disclosure must be readable without scrolling.")
+        if !isPad {
+            let tabBar = app.tabBars.firstMatch
+            XCTAssertTrue(tabBar.exists)
+            XCTAssertLessThanOrEqual(disclosure.frame.maxY, tabBar.frame.minY - 4,
+                                     "Source consent disclosure must not overlap the iPhone tab bar.")
+        }
         XCTAssertTrue(analyze.exists && !analyze.isEnabled,
                       "Analyze must stay disabled until artwork and source consent exist.")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = isPad ? "arcade-pulse-create-entry-ipad" : "arcade-pulse-create-entry-iphone"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+
+        if !isPad {
+            let projects = app.buttons["create.myProjects"].firstMatch
+            XCTAssertTrue(projects.waitForExistence(timeout: 10) && projects.isHittable,
+                          "Compact Create must expose an accessible My projects entry.")
+            XCTAssertGreaterThanOrEqual(projects.frame.height, 44)
+            projects.tap()
+            let studio = app.descendants(matching: .any)["studio.arcadePulse.root"].firstMatch
+            XCTAssertTrue(studio.waitForExistence(timeout: 10),
+                          "My projects must open the real owner-only Studio, not a dead CTA.")
+            let evidence = XCTAttachment(screenshot: app.screenshot())
+            evidence.name = "arcade-pulse-iphone-studio-signed-out"
+            evidence.lifetime = .keepAlways
+            add(evidence)
+            let signIn = app.buttons["studio.openProfile"].firstMatch
+            XCTAssertTrue(signIn.waitForExistence(timeout: 5) && signIn.isHittable)
+            signIn.tap()
+            XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
+                          "Studio must return to the real Profile authentication entry.")
+        }
     }
 
     /// This isolated error-state screenshot exercises real navigation without
@@ -390,6 +429,56 @@ final class PlayerSmokeTests: XCTestCase {
         done.tap()
         XCTAssertTrue(app.buttons["game.play"].firstMatch.waitForExistence(timeout: 10),
                       "Closing comments must return to the same browsable game feed.")
+    }
+
+    /// The Studio must not pretend to show private drafts or generated
+    /// analytics when no authenticated session or backend evidence exists.
+    @MainActor
+    func testArcadePulseStudioSignedOutState() throws {
+        XCUIDevice.shared.orientation = .portrait
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Creator Studio is a native iPad sidebar destination.")
+        }
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-studio")
+        app.launch()
+        let root = app.descendants(matching: .any)["studio.arcadePulse.root"].firstMatch
+        XCTAssertTrue(root.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Sign in to see your projects"].firstMatch.exists,
+                      "Signed-out Studio must explain that private drafts require sign-in.")
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
+                       "Without an authenticated owner there can be no playable project card.")
+        let openProfile = app.buttons["studio.openProfile"].firstMatch
+        XCTAssertTrue(openProfile.waitForExistence(timeout: 5) && openProfile.isHittable,
+                      "The signed-out Studio must offer a reachable route to real Apple sign-in.")
+        XCTAssertGreaterThanOrEqual(openProfile.frame.height, 44,
+                                    "The Studio sign-in CTA must meet the minimum touch target.")
+        XCTAssertTrue(app.frame.intersects(openProfile.frame),
+                      "Studio sign-in must be visible in the actual iPad viewport.")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "arcade-pulse-ipad-creator-studio-signed-out-portrait"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        // A regular-width iPad also needs a usable Studio in landscape.
+        // Capture the actual simulator screen rather than rotating a portrait
+        // attachment after the fact; the image exporter retains orientation.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(openProfile.waitForExistence(timeout: 10) && openProfile.isHittable,
+                      "Studio sign-in must remain visible after iPad rotation.")
+        XCTAssertGreaterThanOrEqual(openProfile.frame.height, 44,
+                                    "Landscape Studio sign-in must remain a 44pt target.")
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-ipad-creator-studio-signed-out-landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(openProfile.waitForExistence(timeout: 10) && openProfile.isHittable)
+        openProfile.tap()
+        XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
+                      "The Studio CTA must navigate to the actual Profile sign-in flow.")
     }
 
     /// Downsample two captured screenshots and report the fraction of

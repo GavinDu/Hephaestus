@@ -83,3 +83,28 @@ does **not** make old private game content safe to keep after revocation.
 The platform must still verify 50+ cycles of feed transitions, cancellation,
 WebContent termination, and thermal/memory traces on physical iPhone/iPad
 before #205 or Epic #202 can close.
+
+## Immediate account-session cache revocation (Epic #202 / #205)
+
+A 15-second speculative-prewarm expiry is **not** permission revocation.
+Keychain token installation, replacement, sign-out and account deletion
+now publish a credential-change event containing **no token or identity**.
+The single `PlayerWebViewPool` observes the event, invalidates speculative
+and attached WebViews, aborts any pending navigation and clears its cache.
+The player sheet shows an actionable `session changed` error instead of
+reusing the prior page or accepting a previous server-verified run result.
+
+Each `prewarm()` and `take()` also checks a SHA-256 bearer-scope
+fingerprint before reusing an existing WebView. This closes the race in
+which a Keychain update finishes before its notification is delivered.
+Only the hash is cached; the bearer secret itself is not retained in the
+pool or logged. Explicit return-to-feed/reopen under the new identity is
+required. In-place reauthorization of an old running game is forbidden.
+
+**Limits:** this covers on-device account transitions, not a server-side
+moderation/takedown while credentials remain unchanged, expiration without
+a local token update, or a private content revocation push. A future
+authorization-aware cache observer must bind each package to game ID,
+immutable IR digest, account scope and moderation status; physical
+iPhone/iPad revocation and repeated WebContent recovery tests are still
+needed before closing #205.
