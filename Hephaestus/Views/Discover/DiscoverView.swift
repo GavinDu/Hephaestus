@@ -64,8 +64,11 @@ struct DiscoverView: View {
     // The host owns navigation, so this is an actual route to Library,
     // never a substitute game list or a fabricated preview.
     let onOpenLibrary: (() -> Void)?
-    init(onOpenLibrary: (() -> Void)? = nil) {
+    let onOpenProfile: (() -> Void)?
+
+    init(onOpenLibrary: (() -> Void)? = nil, onOpenProfile: (() -> Void)? = nil) {
         self.onOpenLibrary = onOpenLibrary
+        self.onOpenProfile = onOpenProfile
     }
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -90,6 +93,7 @@ struct DiscoverView: View {
     @State private var loadMoreError: String?
     @State private var commentsGame: FeedGame?
     @State private var remixGame: FeedGame?
+    @State private var openProfileAfterRemixDismiss = false
     @State private var detailGame: FeedGame?
     @State private var reportingGame: FeedGame?
     @State private var profileRequest: CreatorProfileRequest?
@@ -613,8 +617,23 @@ struct DiscoverView: View {
             .sheet(item: $detailGame) { game in
                 ArcadePulseGameDetailsSheet(game: game)
             }
-            .sheet(item: $remixGame) { game in
-                RemixCreationSheet(source: game)
+            .sheet(item: $remixGame, onDismiss: {
+                // Wait until the modal closes before switching the native
+                // iPhone tab or iPad split-view detail. Never mint an auth
+                // session or skip the rights preflight.
+                if openProfileAfterRemixDismiss {
+                    openProfileAfterRemixDismiss = false
+                    onOpenProfile?()
+                }
+            }) { game in
+                if onOpenProfile != nil {
+                    RemixCreationSheet(source: game, onOpenProfile: {
+                        openProfileAfterRemixDismiss = true
+                        remixGame = nil
+                    })
+                } else {
+                    RemixCreationSheet(source: game)
+                }
             }
             .sheet(item: $reportingGame) { game in
                 ReportGameSheet(game: game)
