@@ -97,6 +97,27 @@ final class PlayerSmokeTests: XCTestCase {
             }
             _ = play.waitForExistence(timeout: 5)
         }
+        if !play.exists {
+            // A failed live backend must still FAIL the player smoke. Check
+            // that its honest recovery screen lets the user reach Library,
+            // attach the original failure view and leave the gate red.
+            let libraryRecovery = app.buttons["feed.error.library"].firstMatch
+            if libraryRecovery.exists {
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.name = "arcade-pulse-live-feed-unavailable-with-library-recovery"
+                screenshot.lifetime = .keepAlways
+                add(screenshot)
+                XCTAssertTrue(libraryRecovery.isHittable,
+                              "The offline Library escape must be accessible on-screen.")
+                XCTAssertGreaterThanOrEqual(libraryRecovery.frame.height, 44)
+                libraryRecovery.tap()
+                let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+                XCTAssertTrue(library.waitForExistence(timeout: 10),
+                              "The feed recovery action must navigate to the real Library.")
+                XCTFail("Live backend did not supply a playable feed; Library fallback verified, but player smoke still fails.")
+                return
+            }
+        }
         XCTAssertTrue(play.exists,
                       "Discover feed should offer at least one playable game card after bounded retries. UI: \(app.debugDescription)")
         print("SMOKE: Play button visible")
@@ -236,6 +257,50 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
                           "Studio must return to the real Profile authentication entry.")
         }
+    }
+
+    /// This isolated error-state screenshot exercises real navigation without
+    /// pretending the production feed returned a playable game. The separate
+    /// testDiscoverLaunchesPlayer still requires the live backend to work.
+    @MainActor
+    func testArcadePulseFeedUnavailableRecoveryToLibrary() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-feed-error-state")
+        app.launch()
+
+        let recovery = app.descendants(matching: .any)["feed.error.recovery"].firstMatch
+        let retry = app.buttons["feed.error.retry"].firstMatch
+        let library = app.buttons["feed.error.library"].firstMatch
+        XCTAssertTrue(recovery.waitForExistence(timeout: 10),
+                      "Network error must show a real and accessible recovery surface.")
+        XCTAssertTrue(retry.exists && retry.isHittable)
+        XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+        XCTAssertTrue(library.exists && library.isHittable)
+        XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+        let snapshot = XCTAttachment(screenshot: app.screenshot())
+        snapshot.name = "arcade-pulse-feed-unavailable-recovery-portrait"
+        snapshot.lifetime = .keepAlways
+        add(snapshot)
+
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            XCTAssertTrue(library.waitForExistence(timeout: 10) && library.isHittable,
+                          "Recovery Library action must remain visible in iPad landscape.")
+            XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+            let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            landscape.name = "arcade-pulse-feed-unavailable-recovery-ipad-landscape"
+            landscape.lifetime = .keepAlways
+            add(landscape)
+            XCUIDevice.shared.orientation = .portrait
+            XCTAssertTrue(library.waitForExistence(timeout: 10) && library.isHittable)
+        }
+
+        library.tap()
+        let destination = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(destination.waitForExistence(timeout: 10),
+                      "Open Library must navigate to native Library; no fake offline game.")
     }
 
     /// Verify the real saved/recent game library remains reachable through
