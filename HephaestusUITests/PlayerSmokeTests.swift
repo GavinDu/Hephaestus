@@ -216,6 +216,37 @@ final class PlayerSmokeTests: XCTestCase {
         add(screenshot)
     }
 
+    /// This isolated error-state screenshot exercises real navigation without
+    /// pretending the production feed returned a playable game. The separate
+    /// testDiscoverLaunchesPlayer still requires the live backend to work.
+    @MainActor
+    func testArcadePulseFeedUnavailableRecoveryToLibrary() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-feed-error-state")
+        app.launch()
+
+        let recovery = app.descendants(matching: .any)["feed.error.recovery"].firstMatch
+        let retry = app.buttons["feed.error.retry"].firstMatch
+        let library = app.buttons["feed.error.library"].firstMatch
+        XCTAssertTrue(recovery.waitForExistence(timeout: 10),
+                      "Network error must show a real and accessible recovery surface.")
+        XCTAssertTrue(retry.exists && retry.isHittable)
+        XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+        XCTAssertTrue(library.exists && library.isHittable)
+        XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+        let snapshot = XCTAttachment(screenshot: app.screenshot())
+        snapshot.name = "arcade-pulse-feed-unavailable-recovery"
+        snapshot.lifetime = .keepAlways
+        add(snapshot)
+
+        library.tap()
+        let destination = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(destination.waitForExistence(timeout: 10),
+                      "Open Library must navigate to native Library; no fake offline game.")
+    }
+
     /// Verify the real saved/recent game library remains reachable through
     /// native tabs and preserves truthful empty/network states.
     @MainActor
