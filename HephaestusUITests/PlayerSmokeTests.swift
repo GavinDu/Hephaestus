@@ -313,6 +313,16 @@ final class PlayerSmokeTests: XCTestCase {
                           "Compact iPhone landscape must keep Library above the fold.")
             XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
             XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+            let tabs = app.tabBars.firstMatch
+            XCTAssertTrue(tabs.exists, "iPhone landscape has persistent native tab navigation.")
+            if tabs.exists {
+                XCTAssertLessThan(retry.frame.maxY, tabs.frame.minY - 4,
+                                  "Retry must appear ABOVE the persistent tab bar, not underneath it.")
+                XCTAssertLessThan(library.frame.maxY, tabs.frame.minY - 4,
+                                  "Open Library must be wholly visible ABOVE the tab bar.")
+            }
+            XCTAssertFalse(retry.frame.intersects(library.frame),
+                           "Compact landscape recovery buttons must not overlap each other.")
             let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             landscape.name = "arcade-pulse-feed-unavailable-recovery-iphone-landscape"
             landscape.lifetime = .keepAlways
