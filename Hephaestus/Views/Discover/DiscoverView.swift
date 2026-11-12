@@ -1079,7 +1079,7 @@ private struct ForYouGamePage: View {
         }
     }
 
-    private func detailsOverlay(bottomInset: CGFloat) -> some View {
+    private func detailsOverlay(bottomInset: CGFloat, compactLandscapeTitleWidth: CGFloat? = nil) -> some View {
         let isCompact = verticalSizeClass == .compact || dynamicTypeSize.isAccessibilitySize
         return VStack(alignment: .leading, spacing: isCompact ? 6 : 14) {
             Spacer(minLength: isCompact ? 0 : 100)
@@ -1111,6 +1111,11 @@ private struct ForYouGamePage: View {
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.85 : 1)
+                // On short iPhone landscape screens a long bilingual game title
+                // previously crossed the centered "Preview unavailable" text.
+                // Give the real title a legible left-hand column without
+                // hiding it, shrinking the Play CTA, or shifting fake media.
+                .frame(maxWidth: compactLandscapeTitleWidth, alignment: .leading)
                 .accessibilityIdentifier("feed.page.title.\(game.id)")
                 .accessibilitySortPriority(90)
             if !isCompact, let caption = game.caption, !caption.isEmpty {
@@ -1334,7 +1339,11 @@ private struct ForYouGamePage: View {
                         .padding(.top, 18)
                         .allowsHitTesting(false)
                         HStack(alignment: .bottom, spacing: 0) {
-                            detailsOverlay(bottomInset: proxy.safeAreaInsets.bottom)
+                            detailsOverlay(
+                                bottomInset: proxy.safeAreaInsets.bottom,
+                                compactLandscapeTitleWidth: UIDevice.current.userInterfaceIdiom == .phone &&
+                                    verticalSizeClass == .compact
+                                    ? pageWidth * 0.36 : nil)
                             if verticalSizeClass != .compact && !dynamicTypeSize.isAccessibilitySize {
                                 socialActions(vertical: true)
                                     .padding(.trailing, 12)
