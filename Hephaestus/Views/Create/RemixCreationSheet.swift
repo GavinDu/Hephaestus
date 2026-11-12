@@ -15,6 +15,7 @@ struct RemixCreationSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var phase: Phase = .checking
+    @State private var sessionRevision = 0
     @State private var intent = ""
     @State private var sourceAcknowledged = false
     @State private var hasPublicPublishConsent = false
@@ -150,6 +151,29 @@ struct RemixCreationSheet: View {
             .accessibilityIdentifier("remix.arcadePulse.root")
         }
         .presentationDetents([.large])
+        .onReceive(NotificationCenter.default.publisher(
+            for: .hephaestusBackendSessionDidChange
+        )) { _ in
+            // Revoke all previously verified rights and private job state
+            // before authorizing any new account. Server remains authoritative.
+            sessionRevision += 1
+            intent = ""
+            sourceAcknowledged = false
+            hasPublicPublishConsent = false
+            allowOtherRemixes = false
+            publishCaption = ""
+            publishTopics = ""
+            publishMessage = nil
+            isCreating = false
+            isConfirming = false
+            isPublishing = false
+            didSubmitPublication = false
+            playerRequest = nil
+            phase = .denied("Sign in with Apple on the Profile tab to check remix permissions.")
+            if !BackendConfig.currentUserID.isEmpty {
+                Task { await checkEligibility() }
+            }
+        }
     }
 
     private var header: some View {
@@ -279,20 +303,33 @@ struct RemixCreationSheet: View {
                     in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
     }
 
+    private func isCurrentSession(owner: String, token: String?, revision: Int) -> Bool {
+        RemixSessionPolicy.canApply(
+            expectedOwner: owner, currentOwner: BackendConfig.currentUserID,
+            expectedToken: token, currentToken: BackendConfig.loadSessionToken(),
+            expectedRevision: revision, currentRevision: sessionRevision)
+    }
+
     private func checkEligibility() async {
-        guard !BackendConfig.currentUserID.isEmpty else {
+        let owner = BackendConfig.currentUserID
+        let token = BackendConfig.loadSessionToken()
+        let revision = sessionRevision
+        guard !owner.isEmpty else {
             phase = .denied("Sign in with Apple on the Profile tab to check remix permissions.")
             return
         }
         phase = .checking
         do {
             let result = try await BackendAPI.shared.fetchRemixEligibility(gameID: source.id)
+            guard !Task.isCancelled,
+                  isCurrentSession(owner: owner, token: token, revision: revision) else { return }
             phase = result.eligible ? .ready :
                 .denied(result.reason.isEmpty ? "The creator has not enabled remixing." : result.reason)
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  isCurrentSession(owner: owner, token: token, revision: revision) else { return }
             phase = .unavailable("The service couldn't verify source permissions right now. No remix was created.")
         }
     }
@@ -366,5 +403,19 @@ struct RemixCreationSheet: View {
         } catch {
             publishMessage = "Couldn't publish: \(error.localizedDescription)"
         }
+    }
+}
+
+
+/// Pure fail-closed UI response policy. POST /v1/games performs the actual
+/// server-side source-eligibility and owner authorization checks.
+enum RemixSessionPolicy {
+    static func canApply(
+        expectedOwner: String, currentOwner: String,
+        expectedToken: String?, currentToken: String?,
+        expectedRevision: Int, currentRevision: Int
+    ) -> Bool {
+        !expectedOwner.isEmpty && expectedOwner == currentOwner &&
+        expectedToken == currentToken && expectedRevision == currentRevision
     }
 }
