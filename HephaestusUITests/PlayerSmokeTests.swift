@@ -469,6 +469,17 @@ final class PlayerSmokeTests: XCTestCase {
                       "Studio sign-in must remain visible after iPad rotation.")
         XCTAssertGreaterThanOrEqual(openProfile.frame.height, 44,
                                     "Landscape Studio sign-in must remain a 44pt target.")
+        // The regular-width workspace should make honest use of iPad space,
+        // without inventing project cards, analytics or fake thumbnails.
+        let guide = app.descendants(matching: .any)["studio.signedOutGuide"].firstMatch
+        XCTAssertTrue(guide.waitForExistence(timeout: 10),
+                      "Regular-width signed-out Studio should explain real capabilities.")
+        XCTAssertTrue(app.frame.intersects(guide.frame),
+                      "The Studio guide should be visible within the landscape viewport.")
+        XCTAssertFalse(openProfile.frame.intersects(guide.frame),
+                       "The Studio guidance must not obscure the real sign-in CTA.")
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
+                       "No private or publicly playable project may be synthesized.")
         let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         landscape.name = "arcade-pulse-ipad-creator-studio-signed-out-landscape"
         landscape.lifetime = .keepAlways
