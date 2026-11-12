@@ -131,21 +131,20 @@ struct CreatorStudioView: View {
             .onReceive(NotificationCenter.default.publisher(
                 for: .hephaestusBackendSessionDidChange
             )) { _ in
-                Task { @MainActor in
-                    // Invalidate every in-flight owner request before clearing
-                    // so an old response can never repopulate this screen.
-                    requestRevision += 1
-                    projects = []
-                    nextCursor = nil
-                    loadError = nil
-                    isLoading = false
-                    isLoadingMore = false
-                    playerRequest = nil
-                    // The auth guard in load still requires the server-issued
-                    // bearer token. No sample project data is synthesized.
-                    if !BackendConfig.currentUserID.isEmpty {
-                        await load(reset: true)
-                    }
+                // Clear owner-only data synchronously when the session changes.
+                // Scheduling the purge in a Task leaves a privacy-visible gap
+                // during which the previous owner's cards may still render.
+                requestRevision += 1
+                projects = []
+                nextCursor = nil
+                loadError = nil
+                isLoading = false
+                isLoadingMore = false
+                playerRequest = nil
+                // Only the new account's fetch is asynchronous. The exact
+                // credential snapshot in load rejects stale responses.
+                if !BackendConfig.currentUserID.isEmpty {
+                    Task { await load(reset: true) }
                 }
             }
             .fullScreenCover(item: $playerRequest) { req in
