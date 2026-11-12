@@ -319,27 +319,37 @@ struct DiscoverView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                     } else if let errorMessage, games.isEmpty {
-                        VStack(spacing: 16) {
-                            Image(systemName: "wifi.exclamationmark")
-                                .font(.system(size: 38, weight: .medium))
-                                .foregroundStyle(ArcadePulseTheme.neonMagenta)
-                                .frame(width: 76, height: 76)
-                                .background(ArcadePulseTheme.electricViolet.opacity(0.16),
-                                            in: RoundedRectangle(cornerRadius: 20))
-                                .accessibilityHidden(true)
+                        // iPhone compact landscape has a short safe-area stage.
+                        // Keep both real recovery actions above the fold instead
+                        // of letting an ornamental icon and extra prose push
+                        // Library below the immediately reachable viewport.
+                        VStack(spacing: verticalSizeClass == .compact ? 10 : 16) {
+                            if verticalSizeClass != .compact {
+                                Image(systemName: "wifi.exclamationmark")
+                                    .font(.system(size: 38, weight: .medium))
+                                    .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                                    .frame(width: 76, height: 76)
+                                    .background(ArcadePulseTheme.electricViolet.opacity(0.16),
+                                                in: RoundedRectangle(cornerRadius: 20))
+                                    .accessibilityHidden(true)
+                            }
                             Text("Couldn't load the feed")
-                                .font(.system(.title2, design: .rounded).weight(.bold))
+                                .font(.system(verticalSizeClass == .compact ? .headline : .title2,
+                                              design: .rounded).weight(.bold))
                                 .foregroundStyle(.white)
                                 .accessibilityAddTraits(.isHeader)
                             Text(errorMessage)
                                 .font(.subheadline)
                                 .foregroundStyle(ArcadePulseTheme.textSecondary)
                                 .multilineTextAlignment(.center)
-                            Text("You can still check Library for games you've saved.")
-                                .font(.subheadline)
-                                .foregroundStyle(ArcadePulseTheme.textSecondary)
-                                .multilineTextAlignment(.center)
                                 .fixedSize(horizontal: false, vertical: true)
+                            if verticalSizeClass != .compact {
+                                Text("You can still check Library for games you've saved.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                             Button {
                                 Task { await load() }
                             } label: {
@@ -352,6 +362,7 @@ struct DiscoverView: View {
                             if let onOpenLibrary {
                                 Button(action: onOpenLibrary) {
                                     Label("Open Library", systemImage: "bookmark")
+                                        .foregroundStyle(.white)
                                         .frame(maxWidth: .infinity, minHeight: 48)
                                 }
                                 .buttonStyle(.bordered)
@@ -359,12 +370,12 @@ struct DiscoverView: View {
                                 .accessibilityIdentifier("feed.error.library")
                             }
                         }
-                        .padding(24)
+                        .padding(verticalSizeClass == .compact ? 14 : 24)
                         .frame(maxWidth: 520)
                         .background(ArcadePulseTheme.surface,
                                     in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 32)
+                        .padding(.vertical, verticalSizeClass == .compact ? 8 : 32)
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("feed.error.recovery")
                     } else if visibleGames.isEmpty {
