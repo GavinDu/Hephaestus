@@ -4,11 +4,11 @@
 
 The iOS app hosts the backend-served player page at `/player?game={id}&quality={auto|high|low}` in a `WKWebView`. PixiJS renders the scene and Rapier provides physics. The backend serves the canonical Game Package and assets; the runtime interprets Game IR as declarative data.
 
-The iOS shell intentionally exposes no JavaScript-to-native bridge:
-- No `WKScriptMessageHandler`, user scripts, or `evaluateJavaScript` control channel.
-- Quality selection is passed only through a URL parameter.
-- Native telemetry is sent through normal HTTPS requests and contains no bearer token, account identifier, or user-generated content.
-- The app owns native permissions and services; the game package does not get arbitrary native APIs.
+The iOS shell intentionally exposes **no general-purpose JavaScript-to-native control bridge**:
+- The production host **does** register a constrained `WKScriptMessageHandler` (`hephaestusRunResult`) for main-frame, same-origin, schema-checked, session-bound run-result notices and bounded performance metrics. This is one-way notification only; no arbitrary device/native operations can be invoked through Game IR.
+- No user scripts or `evaluateJavaScript` control channel. Quality selection is passed only through a URL parameter.
+- Native telemetry is sent through normal HTTPS requests and contains no bearer token, account identifier, or user-generated content. The web runtime also reports bounded diagnostics independently.
+- The app owns native permissions and services; the game package cannot access arbitrary native APIs.
 
 Do not restore the retired native Swift Game IR interpreter or introduce Defold as a second runtime without an explicit architecture decision and a cross-runtime conformance plan. The current shipped runtime and backend contract are authoritative; old Defold/native-interpreter text in historical commits is not the current implementation.
 
@@ -32,6 +32,7 @@ Contract fixtures: [Game IR schema](https://github.com/GavinDu/html5-game-genera
 - Recover from a terminated WebContent process with bounded automatic reload attempts, then show a retry/exit path.
 - Respect Low Power Mode and serious/critical thermal pressure through the existing quality preference.
 - Track player load latency, load failures, WebContent termination, memory warnings, and thermal pressure without sending account IDs, tokens, or content.
+- **Measurement contract:** `TapToNavReady` is WK navigation completion, **not** a rendered first frame or time to interactive. The browser's `first_scene_render_submit` milestone (runtime PR #324) is recorded only after an explicit Pixi render completes and is at most a renderer submission signal; it is **not proof** of GPU/compositor presentation or accepted input. When the native one-way handler is attached it records the same bounded elapsed time. Prewarmed pages may emit before native attachment; rely on backend milestone and device evidence for completeness. Keep this distinct from `first_input` and full player readiness.
 - Keep controls reachable, safe-area aware, accessible, and usable with Dynamic Type and reduced-motion preferences.
 
 ## Acceptance gates
