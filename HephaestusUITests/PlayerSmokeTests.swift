@@ -237,9 +237,22 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(library.exists && library.isHittable)
         XCTAssertGreaterThanOrEqual(library.frame.height, 44)
         let snapshot = XCTAttachment(screenshot: app.screenshot())
-        snapshot.name = "arcade-pulse-feed-unavailable-recovery"
+        snapshot.name = "arcade-pulse-feed-unavailable-recovery-portrait"
         snapshot.lifetime = .keepAlways
         add(snapshot)
+
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            XCTAssertTrue(library.waitForExistence(timeout: 10) && library.isHittable,
+                          "Recovery Library action must remain visible in iPad landscape.")
+            XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+            let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            landscape.name = "arcade-pulse-feed-unavailable-recovery-ipad-landscape"
+            landscape.lifetime = .keepAlways
+            add(landscape)
+            XCUIDevice.shared.orientation = .portrait
+            XCTAssertTrue(library.waitForExistence(timeout: 10) && library.isHittable)
+        }
 
         library.tap()
         let destination = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
