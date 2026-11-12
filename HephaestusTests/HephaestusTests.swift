@@ -828,17 +828,27 @@ struct HephaestusTests {
 @Test func firstAcceptedRuntimeInputStartsSessionExactlyOnce() {
     var gate = PlayerFirstInputGate()
     #expect(gate.accepted == false)
-    #expect(gate.accept(milliseconds: nil) == false)
-    #expect(gate.accept(milliseconds: -1) == false)
-    #expect(gate.accept(milliseconds: 86_400_001) == false)
-    #expect(gate.accept(milliseconds: 0) == true)
+    // Swift Testing expectation macros wrap operands in immutable closures:
+    // evaluate every mutating state-machine transition *before* #expect.
+    let missing = gate.accept(milliseconds: nil)
+    let negative = gate.accept(milliseconds: -1)
+    let excessive = gate.accept(milliseconds: 86_400_001)
+    #expect(missing == false)
+    #expect(negative == false)
+    #expect(excessive == false)
+    let first = gate.accept(milliseconds: 0)
+    #expect(first == true)
     #expect(gate.accepted == true)
-    #expect(gate.accept(milliseconds: 16) == false)
-    #expect(gate.accept(milliseconds: 86_400_000) == false)
+    let duplicate = gate.accept(milliseconds: 16)
+    let later = gate.accept(milliseconds: 86_400_000)
+    #expect(duplicate == false)
+    #expect(later == false)
 }
 
 @Test func firstInputGateAcceptsMaximumValidDuration() {
     var gate = PlayerFirstInputGate()
-    #expect(gate.accept(milliseconds: 86_400_000))
-    #expect(!gate.accept(milliseconds: 86_400_000))
+    let first = gate.accept(milliseconds: 86_400_000)
+    let duplicate = gate.accept(milliseconds: 86_400_000)
+    #expect(first == true)
+    #expect(duplicate == false)
 }
