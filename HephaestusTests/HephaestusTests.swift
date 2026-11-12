@@ -97,6 +97,7 @@ struct HephaestusTests {
              "updated_at":"2026-11-10T12:30:00Z"},
             {"game_id":"public-ready-2","title":"Public title","status":"ready",
              "visibility":"public","moderation_status":"approved","published_version":1,
+             "preview_poster_url":"/v1/games/public-ready-2/previews/1/poster.png",
              "created_at":"2026-11-09T12:00:00Z","updated_at":"2026-11-10T12:00:00Z"}
         ],"next_cursor":null}
         """
@@ -108,6 +109,9 @@ struct HephaestusTests {
         #expect(!response.projects[0].isPubliclyPlayable)
         #expect(response.projects[1].displayStatus == "Published")
         #expect(response.projects[1].isPubliclyPlayable)
+        #expect(response.projects[0].resolvedPosterURL == nil)
+        #expect(response.projects[1].resolvedPosterURL?.absoluteString ==
+            BackendConfig.baseURL.absoluteString + "/v1/games/public-ready-2/previews/1/poster.png")
         #expect(response.nextCursor == nil)
     }
 
