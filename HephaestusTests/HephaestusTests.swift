@@ -868,3 +868,21 @@ struct HephaestusTests {
         isAttached: true, scheduledEpoch: 8, currentEpoch: 9
     ))
 }
+
+@Test func playerSessionCacheIsBoundToOneCredentialFingerprint() {
+    #expect(!PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: nil, currentFingerprint: "anonymous"
+    ))
+    #expect(!PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: "session-A", currentFingerprint: "session-A"
+    ))
+    #expect(PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: "session-A", currentFingerprint: "session-B"
+    ))
+    #expect(PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: "session-A", currentFingerprint: "anonymous"
+    ))
+    #expect(PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: "anonymous", currentFingerprint: "session-B"
+    ))
+}
