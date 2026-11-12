@@ -275,6 +275,14 @@ final class PlayerSmokeTests: XCTestCase {
         let library = app.buttons["feed.error.library"].firstMatch
         XCTAssertTrue(recovery.waitForExistence(timeout: 10),
                       "Network error must show a real and accessible recovery surface.")
+        XCTAssertTrue(app.staticTexts[
+            "The game service couldn't establish a secure connection. Check your network and try again."
+        ].firstMatch.exists,
+                      "The native recovery card must use plain language, not raw TLS jargon.")
+        XCTAssertFalse(app.staticTexts[
+            "A TLS error caused the secure connection to fail"
+        ].firstMatch.exists,
+                       "Do not expose raw TLS implementation text to users.")
         XCTAssertTrue(retry.exists && retry.isHittable)
         XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
         XCTAssertTrue(library.exists && library.isHittable)
