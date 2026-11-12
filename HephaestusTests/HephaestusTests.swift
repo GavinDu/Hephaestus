@@ -865,10 +865,10 @@ struct HephaestusTests {
         }
     }
     #expect(!PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
-        isActive: false, stillLoading: false, hasObservedTerminalNavigation: false
+        isActive: false, stillLoading: false, hasObservedTerminalNavigation: false, recoveryArmed: true
     ))
     #expect(!PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
-        isActive: true, stillLoading: false, hasObservedTerminalNavigation: true
+        isActive: true, stillLoading: false, hasObservedTerminalNavigation: true, recoveryArmed: true
     ))
 }
 
