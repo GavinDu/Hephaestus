@@ -19,9 +19,9 @@ def chunk(kind, payload):
             struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff))
 
 
-def png(width, height, orientation=1):
+def png(width, height, orientation=1, rgb=b"\\x20\\x50\\x80"):
     # Small valid RGB PNG with TIFF/EXIF rotation metadata.
-    rows = b"".join(b"\x00" + b"\x20\x50\x80" * width for _ in range(height))
+    rows = b"".join(b"\x00" + rgb * width for _ in range(height))
     tiff = (b"II\x2a\x00" + struct.pack("<I", 8) +
             struct.pack("<H", 1) + struct.pack("<HHI", 0x0112, 3, 1) +
             struct.pack("<H", orientation) + b"\x00\x00" +
@@ -52,12 +52,13 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             file = name + ".png"
             # Full screen raw portrait + EXIF 8 -> landscape displayed.
             # App-window raw landscape + EXIF 8 -> incorrect portrait displayed.
+            rgb = b"\\x50\\x40\\x20" if "after-swipe" in name else b"\\x20\\x50\\x80"
             if name in module.LANDSCAPE_PRIMARY:
-                payload = png(10, 20, 1 if corrupt_fullscreen else 8)
+                payload = png(10, 20, 1 if corrupt_fullscreen else 8, rgb=rgb)
             elif name in module.LANDSCAPE_DIAGNOSTIC:
-                payload = png(20, 10, 8)
+                payload = png(20, 10, 8, rgb=rgb)
             else:
-                payload = png(10, 20, 1)
+                payload = png(10, 20, 1, rgb=rgb)
             (folder / file).write_bytes(payload)
             attachments.append({"exportedFileName": file,
                                 "suggestedHumanReadableName": name + "_0_TEST.png"})
@@ -78,6 +79,19 @@ class ScreenshotEvidenceTests(unittest.TestCase):
                                  (source / (name + ".png")).read_bytes())
             for name in module.LANDSCAPE_DIAGNOSTIC:
                 self.assertFalse(report["verified"][name]["preferred_for_visual_review"])
+
+    def test_exact_duplicate_swipe_capture_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            self.fixture(source)
+            for before, after in (module.LANDSCAPE_PRIMARY, module.PORTRAIT_PRIMARY):
+                (source / (after + ".png")).write_bytes(
+                    (source / (before + ".png")).read_bytes())
+                with self.assertRaisesRegex(ValueError, "duplicate raw screenshot bytes"):
+                    module.verify_and_copy(source, Path(directory) / "out")
+                # Restore the independent after-swipe frame for the next case.
+                self.fixture(source)
 
     def test_png_crc_corruption_rejected_before_visual_approval(self):
         with tempfile.TemporaryDirectory() as directory:
