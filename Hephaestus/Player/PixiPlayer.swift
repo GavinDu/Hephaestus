@@ -111,6 +111,20 @@ enum PlayerPrewarmHandoffPolicy {
     }
 }
 
+/// A game may not navigate the main frame to another document.
+enum PlayerMainFrameNavigationPolicy {
+    static func shouldAllow(
+        requestURL: URL?, expectedURL: URL?,
+        isMainFrame: Bool, isDisposing: Bool
+    ) -> Bool {
+        if !isMainFrame { return true }
+        guard let requestURL else { return false }
+        if isDisposing { return requestURL.absoluteString == "about:blank" }
+        guard let expectedURL else { return false }
+        return requestURL == expectedURL
+    }
+}
+
 enum PlayerPrewarmResponsePolicy {
     /// A prewarmed page is reusable only when the main document did not
     /// return an HTTP error. Otherwise the attached player must retry and
@@ -405,6 +419,16 @@ enum PlayerWebViewPool {
         pooledView === webView && isAttached && currentURL == url
     }
 
+    /// A detached/stale WebView cannot navigate on the pooled game's behalf.
+    static func allowsMainFrameNavigation(_ webView: WKWebView, requestURL: URL?, isMainFrame: Bool) -> Bool {
+        if !isMainFrame { return true }
+        guard pooledView === webView else { return false }
+        return PlayerMainFrameNavigationPolicy.shouldAllow(
+            requestURL: requestURL, expectedURL: currentURL,
+            isMainFrame: isMainFrame, isDisposing: !isAttached && currentURL == nil
+        )
+    }
+
     static func markLoaded(_ webView: WKWebView) {
         guard let currentURL, webView.url == currentURL else { return }
         loadedURL = currentURL
@@ -503,6 +527,15 @@ enum PlayerWebViewPool {
     }
 
     private final class WarmupDelegate: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+            let allow = PlayerWebViewPool.allowsMainFrameNavigation(
+                webView, requestURL: navigationAction.request.url, isMainFrame: isMainFrame
+            )
+            decisionHandler(allow ? .allow : .cancel)
+        }
+
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
             guard navigationResponse.isForMainFrame,
                   let response = navigationResponse.response as? HTTPURLResponse,
@@ -1191,7 +1224,7 @@ private struct PlayerWebView: UIViewRepresentable {
     private static let messageName = "hephaestusRunResult"
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(gameID: gameID, onProgress: onProgress,
+        Coordinator(gameID: gameID, expectedURL: url, onProgress: onProgress,
                     onLoadFinish: onLoadFinish, onLoadFail: onLoadFail,
                     onTerminate: onTerminate, onFirstInput: onFirstInput,
                     onVerifiedRun: onVerifiedRun)
@@ -1234,6 +1267,7 @@ private struct PlayerWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         let expectedGameID: String
+        let expectedURL: URL
         let onProgress: (Double) -> Void
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
@@ -1252,7 +1286,7 @@ private struct PlayerWebView: UIViewRepresentable {
         private var hasObservedTerminalNavigation = false
         lazy var messageProxy = WeakScriptMessageHandler(delegate: self)
 
-        init(gameID: String,
+        init(gameID: String, expectedURL: URL,
              onProgress: @escaping (Double) -> Void,
              onLoadFinish: @escaping () -> Void,
              onLoadFail: @escaping (Error) -> Void,
@@ -1260,6 +1294,7 @@ private struct PlayerWebView: UIViewRepresentable {
              onFirstInput: @escaping () -> Void,
              onVerifiedRun: @escaping (VerifiedRunResult) -> Void) {
             self.expectedGameID = gameID
+            self.expectedURL = expectedURL
             self.onProgress = onProgress
             self.onLoadFinish = onLoadFinish
             self.onLoadFail = onLoadFail
@@ -1434,6 +1469,23 @@ private struct PlayerWebView: UIViewRepresentable {
             hasObservedTerminalNavigation = true
             disarmPrewarmRecovery()
             onLoadFail(error)
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+            let allow = isActive && PlayerWebViewPool.allowsMainFrameNavigation(
+                webView, requestURL: navigationAction.request.url, isMainFrame: isMainFrame
+            ) && PlayerMainFrameNavigationPolicy.shouldAllow(
+                requestURL: navigationAction.request.url, expectedURL: expectedURL,
+                isMainFrame: isMainFrame, isDisposing: false
+            )
+            if !allow && isMainFrame && !hasObservedTerminalNavigation {
+                // A redirect during launch is an actionable security failure.
+                // A blocked link after didFinish leaves existing play intact.
+                reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: 403))
+            }
+            decisionHandler(allow ? .allow : .cancel)
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
