@@ -469,6 +469,17 @@ final class PlayerSmokeTests: XCTestCase {
                       "Studio sign-in must remain visible after iPad rotation.")
         XCTAssertGreaterThanOrEqual(openProfile.frame.height, 44,
                                     "Landscape Studio sign-in must remain a 44pt target.")
+        // The regular-width workspace should make honest use of iPad space,
+        // without inventing project cards, analytics or fake thumbnails.
+        let guide = app.descendants(matching: .any)["studio.signedOutGuide"].firstMatch
+        XCTAssertTrue(guide.waitForExistence(timeout: 10),
+                      "Regular-width signed-out Studio should explain real capabilities.")
+        XCTAssertTrue(app.frame.intersects(guide.frame),
+                      "The Studio guide should be visible within the landscape viewport.")
+        XCTAssertFalse(openProfile.frame.intersects(guide.frame),
+                       "The Studio guidance must not obscure the real sign-in CTA.")
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
+                       "No private or publicly playable project may be synthesized.")
         let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         landscape.name = "arcade-pulse-ipad-creator-studio-signed-out-landscape"
         landscape.lifetime = .keepAlways
@@ -479,6 +490,39 @@ final class PlayerSmokeTests: XCTestCase {
         openProfile.tap()
         XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
                       "The Studio CTA must navigate to the actual Profile sign-in flow.")
+    }
+
+    /// In accessibility text sizes the multi-column explainer is intentionally
+    /// hidden, keeping the single owner sign-in route legible and reachable.
+    @MainActor
+    func testArcadePulseStudioSignedOutAccessibilityTextSize() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Creator Studio is an iPad-only sidebar destination.")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "--ui-test-studio",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityM"
+        ]
+        app.launch()
+        let studio = app.descendants(matching: .any)["studio.arcadePulse.root"].firstMatch
+        XCTAssertTrue(studio.waitForExistence(timeout: 15))
+        let signIn = app.buttons["studio.openProfile"].firstMatch
+        XCTAssertTrue(signIn.waitForExistence(timeout: 10) && signIn.isHittable,
+                      "Large text must keep the real Profile sign-in reachable.")
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        XCTAssertFalse(app.descendants(matching: .any)["studio.signedOutGuide"].firstMatch.exists,
+                       "Accessibility text sizes must prioritize the compact single-column sign-in.")
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
+                       "Accessible signed-out UI must not imply private games exist.")
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "arcade-pulse-ipad-studio-accessibility-large-text-landscape"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+        XCUIDevice.shared.orientation = .portrait
     }
 
     /// Downsample two captured screenshots and report the fraction of
