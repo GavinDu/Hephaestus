@@ -912,3 +912,24 @@ struct HephaestusTests {
         cachedFingerprint: "anonymous", currentFingerprint: "session-B"
     ))
 }
+
+@Test func playerNativeSheetRejectsStaleAndRevokedEpochCallbacks() {
+    #expect(PlayerLaunchCallbackGate.accepts(
+        expectedEpoch: 0, currentEpoch: 0, sessionRevoked: false
+    ))
+    #expect(PlayerLaunchCallbackGate.accepts(
+        expectedEpoch: 3, currentEpoch: 3, sessionRevoked: false
+    ))
+    #expect(!PlayerLaunchCallbackGate.accepts(
+        expectedEpoch: 2, currentEpoch: 3, sessionRevoked: false
+    ))
+    #expect(!PlayerLaunchCallbackGate.accepts(
+        expectedEpoch: 4, currentEpoch: 3, sessionRevoked: false
+    ))
+    #expect(!PlayerLaunchCallbackGate.accepts(
+        expectedEpoch: 3, currentEpoch: 3, sessionRevoked: true
+    ))
+    #expect(!PlayerLaunchCallbackGate.accepts(
+        expectedEpoch: -1, currentEpoch: -1, sessionRevoked: false
+    ))
+}
