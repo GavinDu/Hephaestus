@@ -95,7 +95,7 @@ def read_png_metadata(path):
 
 
 def png_filtered_raster_sha256(path):
-    """Hash bounded decoded PNG scanlines, ignoring compression and metadata.
+    """Hash bounded unfiltered PNG pixels, ignoring compression and metadata.
 
     This is deliberately NOT perceptual image similarity: it detects a reused
     capture that was re-encoded or given different EXIF/text metadata. Unsupported
@@ -134,10 +134,44 @@ def png_filtered_raster_sha256(path):
     raw = decoder.decompress(b"".join(compressed), expected + 1)
     if len(raw) != expected or not decoder.eof or decoder.unconsumed_tail:
         raise ValueError(f"{path.name}: invalid or oversized PNG raster")
-    # Include interpretation metadata so different image dimensions/modes
-    # cannot collide solely because filtered scanline bytes happen to match.
-    header = struct.pack(">IIBB", width, height, bit_depth, color_type)
-    return hashlib.sha256(header + raw).hexdigest()
+    # PNG scanline filters (None, Sub, Up, Average, Paeth) can encode
+    # exactly the same displayed pixels differently. Undo every filter so
+    # alternate valid encodings cannot defeat the duplicate-capture gate.
+    row_width = width * channels
+    prior = bytes(row_width)
+    digest = hashlib.sha256(struct.pack(">IIBB", width, height, bit_depth, color_type))
+    for row in range(height):
+        offset = row * (1 + row_width)
+        filt = raw[offset]
+        if filt > 4:
+            raise ValueError(f"{path.name}: invalid PNG scanline filter")
+        current = bytearray(raw[offset + 1:offset + 1 + row_width])
+        if filt != 0:
+            for i in range(row_width):
+                left = current[i - channels] if i >= channels else 0
+                up = prior[i]
+                upper_left = prior[i - channels] if i >= channels else 0
+                if filt == 1:
+                    prediction = left
+                elif filt == 2:
+                    prediction = up
+                elif filt == 3:
+                    prediction = (left + up) // 2
+                else:
+                    pivot = left + up - upper_left
+                    distances = (
+                        abs(pivot - left), abs(pivot - up),
+                        abs(pivot - upper_left)
+                    )
+                    prediction = (
+                        left if distances[0] <= distances[1] and distances[0] <= distances[2]
+                        else up if distances[1] <= distances[2]
+                        else upper_left
+                    )
+                current[i] = (current[i] + prediction) & 0xff
+        digest.update(current)
+        prior = current
+    return digest.hexdigest()
 
 def exported_attachment(attachments, logical_name):
     matches = [
