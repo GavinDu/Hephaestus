@@ -1091,6 +1091,7 @@ private struct PlayerWebView: UIViewRepresentable {
         private var acceptedMetricIDs = Set<String>()
         private var runtimeSessionID: String?
         private var isActive = true
+        private var hasObservedTerminalNavigation = false
         lazy var messageProxy = WeakScriptMessageHandler(delegate: self)
 
         init(gameID: String,
@@ -1109,7 +1110,7 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
-            guard message.name == PlayerWebView.messageName,
+            guard isActive, message.name == PlayerWebView.messageName,
                   message.frameInfo.isMainFrame,
                   sameOrigin(message.frameInfo.securityOrigin),
                   let body = message.body as? [String: Any],
@@ -1193,7 +1194,8 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func observeProgress(of webView: WKWebView) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
-                self?.onProgress(view.estimatedProgress)
+                guard let self, self.isActive else { return }
+                self.onProgress(view.estimatedProgress)
             }
         }
 
@@ -1201,15 +1203,41 @@ private struct PlayerWebView: UIViewRepresentable {
             isActive = false
             progressObservation?.invalidate()
             progressObservation = nil
+            acceptedRunIDs.removeAll()
+            acceptedMetricIDs.removeAll()
+            runtimeSessionID = nil
+        }
+
+        func reportPrewarmedFinishIfActive() {
+            guard isActive, !hasObservedTerminalNavigation else { return }
+            hasObservedTerminalNavigation = true
+            onProgress(1)
+            onLoadFinish()
+        }
+
+        @MainActor
+        func recoverUnobservedWarmupIfNeeded(_ webView: WKWebView, expectedURL: URL) {
+            guard PlayerWebViewPool.ownsAttachedNavigation(webView, url: expectedURL),
+                  PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
+                    isActive: isActive, stillLoading: webView.isLoading,
+                    hasObservedTerminalNavigation: hasObservedTerminalNavigation
+                  ) else { return }
+            // Do not fabricate a ready callback for a navigation whose final
+            // event was lost. Reload under the attached delegate, which can
+            // report HTTP denial, actual navigation finish or an error.
+            webView.load(URLRequest(url: expectedURL))
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            guard isActive else { return }
+            hasObservedTerminalNavigation = false
             navigationFailureGate.beginNavigation()
             onProgress(0)
         }
 
         private func reportNavigationFailure(_ error: Error) {
-            guard navigationFailureGate.shouldReportFailure() else { return }
+            guard isActive, navigationFailureGate.shouldReportFailure() else { return }
+            hasObservedTerminalNavigation = true
             onLoadFail(error)
         }
 
@@ -1225,8 +1253,7 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            onProgress(1)
-            onLoadFinish()
+            reportPrewarmedFinishIfActive()
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -1238,6 +1265,8 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            guard isActive else { return }
+            hasObservedTerminalNavigation = true
             onTerminate()
         }
     }
