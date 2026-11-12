@@ -84,6 +84,16 @@ enum GameplayTelemetryPolicy {
 /// Network failures get a retry-first message; anything else gets the
 /// generic message. Both states offer Retry and Return to feed, so a
 /// failed load never leaves a blank player with no next action.
+/// Recover only a live, unfinished in-flight warmup whose delegate
+/// handoff lost the terminal navigation callback.
+enum PlayerPrewarmHandoffPolicy {
+    static func shouldRecoverUnobservedFinish(
+        isActive: Bool, stillLoading: Bool, hasObservedTerminalNavigation: Bool
+    ) -> Bool {
+        isActive && !stillLoading && !hasObservedTerminalNavigation
+    }
+}
+
 enum PlayerPrewarmResponsePolicy {
     /// A prewarmed page is reusable only when the main document did not
     /// return an HTTP error. Otherwise the attached player must retry and
@@ -315,6 +325,12 @@ enum PlayerWebViewPool {
         if shouldLoad { loadedURL = nil }
         view.navigationDelegate = nil
         return (view, shouldLoad, didFinish)
+    }
+
+    /// Only the currently attached navigation may be recovered. A previously
+    /// dismissed sheet must never reload a WebView now owned by another game.
+    static func ownsAttachedNavigation(_ webView: WKWebView, url: URL) -> Bool {
+        pooledView === webView && isAttached && currentURL == url
     }
 
     static func markLoaded(_ webView: WKWebView) {
@@ -1038,8 +1054,14 @@ private struct PlayerWebView: UIViewRepresentable {
             // attached its delegate. Deliver readiness after the view mounts.
             onPrewarmHit()
             DispatchQueue.main.async {
-                context.coordinator.onProgress(1)
-                context.coordinator.onLoadFinish()
+                context.coordinator.reportPrewarmedFinishIfActive()
+            }
+        } else {
+            // Completion can race the warmup delegate swap. Recover only if
+            // the navigation is no longer in flight and neither delegate
+            // has observed a terminal callback; never infer readiness.
+            DispatchQueue.main.async {
+                context.coordinator.recoverUnobservedWarmupIfNeeded(webView, expectedURL: url)
             }
         }
         return webView
