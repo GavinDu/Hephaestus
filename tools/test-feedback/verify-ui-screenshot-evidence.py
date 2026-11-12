@@ -93,6 +93,86 @@ def read_png_metadata(path):
     }
 
 
+
+def png_filtered_raster_sha256(path):
+    """Hash bounded unfiltered PNG pixels, ignoring compression and metadata.
+
+    This is deliberately NOT perceptual image similarity: it detects a reused
+    capture that was re-encoded or given different EXIF/text metadata. Unsupported
+    PNG layouts return None and still receive the original byte-level check.
+    """
+    data = path.read_bytes()
+    if not data.startswith(PNG_SIGNATURE):
+        raise ValueError(f"{path.name}: not a PNG")
+    width = height = bit_depth = color_type = interlace = None
+    compressed = []
+    pos = len(PNG_SIGNATURE)
+    while pos + 12 <= len(data):
+        size = struct.unpack_from(">I", data, pos)[0]
+        kind = data[pos + 4:pos + 8]
+        end = pos + 12 + size
+        if end > len(data):
+            raise ValueError(f"{path.name}: truncated PNG chunk")
+        payload = data[pos + 8:pos + 8 + size]
+        if kind == b"IHDR":
+            width, height, bit_depth, color_type, _, _, interlace = struct.unpack(
+                ">IIBBBBB", payload
+            )
+        elif kind == b"IDAT":
+            compressed.append(payload)
+        elif kind == b"IEND":
+            break
+        pos = end
+    channels = {0: 1, 2: 3, 4: 2, 6: 4}.get(color_type)
+    if not channels or bit_depth != 8 or interlace != 0 or not compressed:
+        return None
+    # Constrain memory on untrusted artifacts before even decompressing.
+    expected = height * (1 + width * channels)
+    if expected > 96 * 1024 * 1024:
+        return None
+    decoder = zlib.decompressobj()
+    raw = decoder.decompress(b"".join(compressed), expected + 1)
+    if len(raw) != expected or not decoder.eof or decoder.unconsumed_tail:
+        raise ValueError(f"{path.name}: invalid or oversized PNG raster")
+    # PNG scanline filters (None, Sub, Up, Average, Paeth) can encode
+    # exactly the same displayed pixels differently. Undo every filter so
+    # alternate valid encodings cannot defeat the duplicate-capture gate.
+    row_width = width * channels
+    prior = bytes(row_width)
+    digest = hashlib.sha256(struct.pack(">IIBB", width, height, bit_depth, color_type))
+    for row in range(height):
+        offset = row * (1 + row_width)
+        filt = raw[offset]
+        if filt > 4:
+            raise ValueError(f"{path.name}: invalid PNG scanline filter")
+        current = bytearray(raw[offset + 1:offset + 1 + row_width])
+        if filt != 0:
+            for i in range(row_width):
+                left = current[i - channels] if i >= channels else 0
+                up = prior[i]
+                upper_left = prior[i - channels] if i >= channels else 0
+                if filt == 1:
+                    prediction = left
+                elif filt == 2:
+                    prediction = up
+                elif filt == 3:
+                    prediction = (left + up) // 2
+                else:
+                    pivot = left + up - upper_left
+                    distances = (
+                        abs(pivot - left), abs(pivot - up),
+                        abs(pivot - upper_left)
+                    )
+                    prediction = (
+                        left if distances[0] <= distances[1] and distances[0] <= distances[2]
+                        else up if distances[1] <= distances[2]
+                        else upper_left
+                    )
+                current[i] = (current[i] + prediction) & 0xff
+        digest.update(current)
+        prior = current
+    return digest.hexdigest()
+
 def exported_attachment(attachments, logical_name):
     matches = [
         item for item in attachments
@@ -126,15 +206,20 @@ def verify_and_copy(attachments_dir, output_dir):
         shutil.copyfile(src, target)
         validated[logical] = {**info, "file": target.name,
                               "sha256": hashlib.sha256(src.read_bytes()).hexdigest(),
+                              "raster_scanlines_sha256": png_filtered_raster_sha256(src),
                               "preferred_for_visual_review": preferred}
     # A swipe test can report success while an export/capture pipeline silently
     # reuses the same PNG for both states. Reject exact duplicates independently
     # of geometry, orientation and the XCTest interaction score. Different byte
-    # hashes still require human visual inspection; this is not pixel-level QA.
+    # hashes still require human visual inspection; this is not perceptual visual QA.
     for before, after in ((LANDSCAPE_PRIMARY[0], LANDSCAPE_PRIMARY[1]),
                           (PORTRAIT_PRIMARY[0], PORTRAIT_PRIMARY[1])):
         if validated[before]["sha256"] == validated[after]["sha256"]:
             raise ValueError(f"{before} and {after}: duplicate raw screenshot bytes")
+        first = validated[before]["raster_scanlines_sha256"]
+        last = validated[after]["raster_scanlines_sha256"]
+        if first is not None and first == last:
+            raise ValueError(f"{before} and {after}: duplicate decoded screenshot pixels")
     report = {
         "status": "screen-orientation-verified",
         "capture_source": "native XCTest xcresulttool export attachments",
