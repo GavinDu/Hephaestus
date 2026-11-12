@@ -825,6 +825,27 @@ struct HephaestusTests {
     #expect(PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(nil) == nil)
 }
 
+@Test func playerPrewarmHandoffCannotLoseCompletionOrReviveDetachedGame() {
+    for isActive in [false, true] {
+        for stillLoading in [false, true] {
+            for hasObservedTerminalNavigation in [false, true] {
+                let shouldRecover = PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
+                    isActive: isActive,
+                    stillLoading: stillLoading,
+                    hasObservedTerminalNavigation: hasObservedTerminalNavigation
+                )
+                #expect(shouldRecover == (isActive && !stillLoading && !hasObservedTerminalNavigation))
+            }
+        }
+    }
+    #expect(!PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
+        isActive: false, stillLoading: false, hasObservedTerminalNavigation: false
+    ))
+    #expect(!PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
+        isActive: true, stillLoading: false, hasObservedTerminalNavigation: true
+    ))
+}
+
 @Test func firstAcceptedRuntimeInputStartsSessionExactlyOnce() {
     var gate = PlayerFirstInputGate()
     #expect(gate.accepted == false)
