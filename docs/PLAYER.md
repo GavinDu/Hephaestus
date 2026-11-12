@@ -64,3 +64,22 @@ Those remain iPhone/iPad and architecture review gates under #203 and #204.
 ## Validation
 
 GitHub Actions builds the Xcode project, runs unit tests, and runs a Discover → Play smoke test against the configured backend. Simulator tests do not replace physical-device validation for touch handling, orientation, memory pressure, and frame pacing.
+
+## Bounded speculative prewarm lifecycle (runtime Epic #202 / #205)
+
+The app keeps one pooled player WebView. Pressing Play may speculatively
+start its page navigation before the player sheet attaches. An unattached
+prewarm now expires after **15 seconds**, canceling the speculative network
+load, clearing its pool entry and releasing the stale WebView. Attaching an
+interactive player cancels expiry and transfers ownership to the sheet; the
+timer **never** stops active gameplay. A new prewarm invalidates the prior
+generation, so a stale task cannot purge a newer game session. Normal
+sheet dismissal continues to navigate to a blank document.
+
+This is a **resource-safety backstop**, not an authorization cache,
+content takedown system, or measured thermal threshold. Permission/account
+changes must still invalidate any prewarm immediately; a 15-second TTL
+does **not** make old private game content safe to keep after revocation.
+The platform must still verify 50+ cycles of feed transitions, cancellation,
+WebContent termination, and thermal/memory traces on physical iPhone/iPad
+before #205 or Epic #202 can close.

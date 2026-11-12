@@ -268,6 +268,21 @@ final class PlayerPathMonitor: ObservableObject {
     deinit { monitor.cancel() }
 }
 
+// A warm page is a speculative resource, not a durable entitlement or a
+// verified package cache. If the Play sheet never attaches, expire it before
+// an abandoned request can retain a whole WebKit scene indefinitely.
+enum PlayerPrewarmBudgetPolicy {
+    static let expiryNanoseconds: UInt64 = 15_000_000_000
+
+    static func shouldExpire(
+        isAttached: Bool,
+        scheduledEpoch: UInt64,
+        currentEpoch: UInt64
+    ) -> Bool {
+        !isAttached && scheduledEpoch == currentEpoch
+    }
+}
+
 // MARK: - Single pooled player web view
 //
 // Prewarming starts only after an explicit Play press begins. The same
@@ -281,6 +296,8 @@ enum PlayerWebViewPool {
     private static var currentURL: URL?
     private static var loadedURL: URL?
     private static var isAttached = false
+    private static var prewarmEpoch: UInt64 = 0
+    private static var prewarmExpiryTask: Task<Void, Never>?
     private static let warmupDelegate = WarmupDelegate()
 
     static func playerURL(gameID: String, quality: String? = nil) -> URL? {
@@ -316,10 +333,31 @@ enum PlayerWebViewPool {
         loadedURL = nil
         view.navigationDelegate = warmupDelegate
         view.load(URLRequest(url: url))
+        // A prewarm that is never attached must not hold a loaded game,
+        // authenticated resources, or an entire WebContent process forever.
+        prewarmExpiryTask?.cancel()
+        prewarmEpoch &+= 1
+        let epoch = prewarmEpoch
+        prewarmExpiryTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: PlayerPrewarmBudgetPolicy.expiryNanoseconds)
+            guard !Task.isCancelled,
+                  PlayerPrewarmBudgetPolicy.shouldExpire(
+                    isAttached: isAttached,
+                    scheduledEpoch: epoch,
+                    currentEpoch: prewarmEpoch
+                  ), pooledView === view else { return }
+            discardUnattachedPrewarm()
+            DevLog.info(.player, "abandoned speculative player prewarm expired")
+        }
         DevLog.info(.player, "prewarming player page for \(gameID)")
     }
 
     static func take(url: URL) -> (webView: WKWebView, shouldLoad: Bool, didFinish: Bool) {
+        // Ownership moves to a real interactive sheet. An expiry task must
+        // never stop or blank the WebView after that handoff.
+        prewarmExpiryTask?.cancel()
+        prewarmExpiryTask = nil
+        prewarmEpoch &+= 1
         let view = pooledView ?? makeWebView()
         pooledView = view
         let didFinish = currentURL == url && loadedURL == url && view.url == url
@@ -351,12 +389,31 @@ enum PlayerWebViewPool {
 
     static func recycle(_ webView: WKWebView) {
         guard pooledView === webView else { return }
+        prewarmExpiryTask?.cancel()
+        prewarmExpiryTask = nil
+        prewarmEpoch &+= 1
         isAttached = false
         currentURL = nil
         loadedURL = nil
         webView.navigationDelegate = warmupDelegate
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
+    }
+
+    /// Only speculative, *unattached* prewarms are discarded. Never
+    /// invalidate an interactive player or its verified-run session.
+    private static func discardUnattachedPrewarm() {
+        guard !isAttached else { return }
+        prewarmExpiryTask?.cancel()
+        prewarmExpiryTask = nil
+        prewarmEpoch &+= 1
+        let stale = pooledView
+        pooledView = nil
+        currentURL = nil
+        loadedURL = nil
+        stale?.stopLoading()
+        stale?.navigationDelegate = nil
+        stale?.loadHTMLString("", baseURL: nil)
     }
 
     private static func makeWebView() -> WKWebView {
