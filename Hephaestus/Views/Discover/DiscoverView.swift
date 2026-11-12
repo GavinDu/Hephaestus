@@ -68,6 +68,34 @@ struct DiscoverView: View {
         self.onOpenLibrary = onOpenLibrary
     }
 
+    // One functional set of recovery actions across all orientations.
+    // Compact iPhone landscape lays these out side by side so neither button
+    // disappears underneath the persistent bottom tab navigation.
+    private var feedRecoveryRetry: some View {
+        Button {
+            Task { await load() }
+        } label: {
+            Label("Try again", systemImage: "arrow.clockwise")
+                .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(ArcadePulseTheme.electricViolet)
+        .accessibilityIdentifier("feed.error.retry")
+    }
+
+    @ViewBuilder private var feedRecoveryLibrary: some View {
+        if let onOpenLibrary {
+            Button(action: onOpenLibrary) {
+                Label("Open Library", systemImage: "bookmark")
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(.bordered)
+            .tint(ArcadePulseTheme.neonMagenta)
+            .accessibilityIdentifier("feed.error.library")
+        }
+    }
+
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
@@ -350,24 +378,14 @@ struct DiscoverView: View {
                                     .multilineTextAlignment(.center)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                            Button {
-                                Task { await load() }
-                            } label: {
-                                Label("Try again", systemImage: "arrow.clockwise")
-                                    .frame(maxWidth: .infinity, minHeight: 48)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(ArcadePulseTheme.electricViolet)
-                            .accessibilityIdentifier("feed.error.retry")
-                            if let onOpenLibrary {
-                                Button(action: onOpenLibrary) {
-                                    Label("Open Library", systemImage: "bookmark")
-                                        .foregroundStyle(.white)
-                                        .frame(maxWidth: .infinity, minHeight: 48)
+                            if verticalSizeClass == .compact {
+                                HStack(spacing: 12) {
+                                    feedRecoveryRetry
+                                    feedRecoveryLibrary
                                 }
-                                .buttonStyle(.bordered)
-                                .tint(ArcadePulseTheme.neonMagenta)
-                                .accessibilityIdentifier("feed.error.library")
+                            } else {
+                                feedRecoveryRetry
+                                feedRecoveryLibrary
                             }
                         }
                         .padding(verticalSizeClass == .compact ? 14 : 24)
