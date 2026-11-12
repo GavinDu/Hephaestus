@@ -305,6 +305,22 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertTrue(library.waitForExistence(timeout: 10) && library.isHittable)
         }
 
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            XCTAssertTrue(retry.waitForExistence(timeout: 10) && retry.isHittable,
+                          "Compact iPhone landscape must retain the real Retry control.")
+            XCTAssertTrue(library.waitForExistence(timeout: 10) && library.isHittable,
+                          "Compact iPhone landscape must keep Library above the fold.")
+            XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+            XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+            let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            landscape.name = "arcade-pulse-feed-unavailable-recovery-iphone-landscape"
+            landscape.lifetime = .keepAlways
+            add(landscape)
+            XCUIDevice.shared.orientation = .portrait
+            XCTAssertTrue(library.waitForExistence(timeout: 10) && library.isHittable)
+        }
+
         library.tap()
         let destination = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
         XCTAssertTrue(destination.waitForExistence(timeout: 10),
