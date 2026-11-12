@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Network
 import SwiftUI
 import UIKit
@@ -283,6 +284,15 @@ enum PlayerPrewarmBudgetPolicy {
     }
 }
 
+/// Credential changes are security boundaries. An old speculative
+/// WebKit page cannot be reused after the Keychain bearer session rotates.
+enum PlayerSessionCachePolicy {
+    static func shouldPurge(cachedFingerprint: String?, currentFingerprint: String) -> Bool {
+        guard let cachedFingerprint else { return false }
+        return cachedFingerprint != currentFingerprint
+    }
+}
+
 // MARK: - Single pooled player web view
 //
 // Prewarming starts only after an explicit Play press begins. The same
@@ -296,6 +306,12 @@ enum PlayerWebViewPool {
     private static var currentURL: URL?
     private static var loadedURL: URL?
     private static var isAttached = false
+    private static var sessionFingerprint: String?
+    private static let sessionObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
+        forName: .hephaestusBackendSessionDidChange, object: nil, queue: .main
+    ) { _ in
+        Task { @MainActor in PlayerWebViewPool.invalidateForSessionChange() }
+    }
     private static var prewarmEpoch: UInt64 = 0
     private static var prewarmExpiryTask: Task<Void, Never>?
     private static let warmupDelegate = WarmupDelegate()
@@ -323,6 +339,7 @@ enum PlayerWebViewPool {
     }
 
     static func prewarm(gameID: String) {
+        ensureCurrentCredentialScope()
         guard !isAttached, let url = playerURL(gameID: gameID) else { return }
         let view = pooledView ?? makeWebView()
         pooledView = view
@@ -353,6 +370,7 @@ enum PlayerWebViewPool {
     }
 
     static func take(url: URL) -> (webView: WKWebView, shouldLoad: Bool, didFinish: Bool) {
+        ensureCurrentCredentialScope()
         // Ownership moves to a real interactive sheet. An expiry task must
         // never stop or blank the WebView after that handoff.
         prewarmExpiryTask?.cancel()
@@ -398,6 +416,43 @@ enum PlayerWebViewPool {
         webView.navigationDelegate = warmupDelegate
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
+    }
+
+    /// Only a SHA-256 fingerprint is kept in memory, never raw bearer
+    /// tokens. Checking at take/prewarm also closes the race between a
+    /// synchronous Keychain update and asynchronous notification delivery.
+    private static func credentialFingerprint() -> String {
+        let scope = BackendConfig.loadSessionToken().map { "bearer:" + $0 } ?? "anonymous"
+        return Data(SHA256.hash(data: Data(scope.utf8))).base64EncodedString()
+    }
+
+    private static func ensureCurrentCredentialScope() {
+        _ = sessionObserver
+        let current = credentialFingerprint()
+        if PlayerSessionCachePolicy.shouldPurge(
+            cachedFingerprint: sessionFingerprint, currentFingerprint: current
+        ) {
+            invalidateForSessionChange()
+        }
+        sessionFingerprint = current
+    }
+
+    /// Fail closed after login, logout, replacement or account deletion.
+    /// This also tears down an attached runtime. The player sheet observes
+    /// the same event and displays an actionable session-changed message.
+    static func invalidateForSessionChange() {
+        prewarmExpiryTask?.cancel()
+        prewarmExpiryTask = nil
+        prewarmEpoch &+= 1
+        let stale = pooledView
+        pooledView = nil
+        currentURL = nil
+        loadedURL = nil
+        isAttached = false
+        sessionFingerprint = credentialFingerprint()
+        stale?.navigationDelegate = nil
+        stale?.stopLoading()
+        stale?.loadHTMLString("", baseURL: nil)
     }
 
     /// Only speculative, *unattached* prewarms are discarded. Never
@@ -935,6 +990,18 @@ struct PixiPlayerSheet: View {
                 @unknown default:
                     break
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .hephaestusBackendSessionDidChange)) { _ in
+                // Changing the Keychain identity invalidates all prewarmed
+                // or attached pages, pending callbacks and prior results.
+                PlayerWebViewPool.invalidateForSessionChange()
+                verifiedResult = nil
+                gameplayStartedAt = nil
+                didTrackGameplayStart = false
+                isLoading = false
+                showSlowHint = false
+                holdVisible = false
+                loadError = "Your account session changed. Return to the feed and reopen this game."
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
                 if !reportedMemoryWarning {
