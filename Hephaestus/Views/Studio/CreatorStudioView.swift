@@ -225,7 +225,7 @@ struct CreatorStudioView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 155)
             .clipShape(RoundedRectangle(cornerRadius: 14))
-            .accessibilityLabel(project.previewPosterURL == nil
+            .accessibilityLabel(project.resolvedPosterURL == nil
                                 ? "No approved game preview" : "Game preview or fallback")
 
             HStack(alignment: .top, spacing: 8) {
