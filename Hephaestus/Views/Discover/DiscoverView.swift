@@ -567,7 +567,16 @@ struct DiscoverView: View {
             }
             .task {
                 savedGameIDs = Set(UserDefaults.standard.stringArray(forKey: "hephaestus.savedGames") ?? [])
-                await load()
+                if ProcessInfo.processInfo.arguments.contains("--ui-test-feed-error-state") {
+                    // Deterministic visual QA of the network-error recovery,
+                    // explicitly isolated from the normal LIVE-feed smoke.
+                    // Never synthesize a feed game, player, or login session.
+                    games = []
+                    isLoading = false
+                    errorMessage = "Test-only: public feed request unavailable."
+                } else {
+                    await load()
+                }
             }
             .fullScreenCover(item: $playerRequest) { request in
                 PixiPlayerSheet(gameID: request.gameID, title: request.title,
