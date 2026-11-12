@@ -86,6 +86,27 @@ final class PlayerSmokeTests: XCTestCase {
             }
             _ = play.waitForExistence(timeout: 5)
         }
+        if !play.exists {
+            // A failed live backend must still FAIL the player smoke. Check
+            // that its honest recovery screen lets the user reach Library,
+            // attach the original failure view and leave the gate red.
+            let libraryRecovery = app.buttons["feed.error.library"].firstMatch
+            if libraryRecovery.exists {
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.name = "arcade-pulse-live-feed-unavailable-with-library-recovery"
+                screenshot.lifetime = .keepAlways
+                add(screenshot)
+                XCTAssertTrue(libraryRecovery.isHittable,
+                              "The offline Library escape must be accessible on-screen.")
+                XCTAssertGreaterThanOrEqual(libraryRecovery.frame.height, 44)
+                libraryRecovery.tap()
+                let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+                XCTAssertTrue(library.waitForExistence(timeout: 10),
+                              "The feed recovery action must navigate to the real Library.")
+                XCTFail("Live backend did not supply a playable feed; Library fallback verified, but player smoke still fails.")
+                return
+            }
+        }
         XCTAssertTrue(play.exists,
                       "Discover feed should offer at least one playable game card after bounded retries. UI: \(app.debugDescription)")
         print("SMOKE: Play button visible")
