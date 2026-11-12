@@ -578,7 +578,7 @@ struct DiscoverView: View {
                     // Never synthesize a feed game, player, or login session.
                     games = []
                     isLoading = false
-                    errorMessage = "Test-only: public feed request unavailable."
+                    errorMessage = FeedErrorPresentation.message(for: URLError(.secureConnectionFailed))
                 } else {
                     await load()
                 }
