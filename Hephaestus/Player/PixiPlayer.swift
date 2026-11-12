@@ -750,8 +750,18 @@ struct PixiPlayerSheet: View {
                     holdVisible = false
                 } else {
                     withAnimation(.easeOut(duration: 0.25)) { holdOpacity = 0 }
-                    Task {
+                    // A retry/account swap can occur during the 300 ms fade.
+                    // The old sheet must never mutate its successor's poster.
+                    let fadeEpoch = attempt
+                    Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(300))
+                        guard !Task.isCancelled,
+                              PlayerLaunchCallbackGate.accepts(
+                                expectedEpoch: fadeEpoch,
+                                currentEpoch: attempt,
+                                sessionRevoked: sessionRevoked
+                              ),
+                              !isLoading, loadError == nil else { return }
                         holdVisible = false
                     }
                 }
@@ -1111,11 +1121,19 @@ struct PixiPlayerSheet: View {
                                            name: "ThermalState", message: "thermal state serious/critical during play")
                 }
             }
-            .task {
-                // Slow-load hint: still loading after 8s deserves an
-                // explanation, not just a longer stare at the spinner.
+            .task(id: attempt) {
+                // Start an independent 8s timer per actual WebView attempt.
+                // Retired timers are canceled by SwiftUI when attempt changes
+                // and may not surface premature hints in the new session.
+                let hintEpoch = attempt
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
-                if isLoading { showSlowHint = true }
+                guard !Task.isCancelled,
+                      PlayerLaunchCallbackGate.accepts(
+                        expectedEpoch: hintEpoch,
+                        currentEpoch: attempt,
+                        sessionRevoked: sessionRevoked
+                      ), isLoading, loadError == nil else { return }
+                showSlowHint = true
             }
             .onAppear {
                 loadStartedAt = Date()
