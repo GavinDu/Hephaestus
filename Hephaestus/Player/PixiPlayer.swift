@@ -74,6 +74,21 @@ enum GameplayTelemetryPolicy {
     }
 }
 
+/// Navigation completion means HTML loaded, not gameplay started. Accept one
+/// bounded, validated first-input milestone from the trusted runtime, even
+/// if a later event uses a new telemetry sequence number.
+struct PlayerFirstInputGate {
+    private(set) var accepted = false
+
+    mutating func accept(milliseconds: Int?) -> Bool {
+        guard !accepted, let milliseconds, (0...86_400_000).contains(milliseconds) else {
+            return false
+        }
+        accepted = true
+        return true
+    }
+}
+
 /// Maps a WKWebView load failure to the player-facing error state
 /// (Hephaestus #53). Two rules, both fail-closed:
 ///   - the UI shows only a fixed message per category, never the raw
@@ -543,13 +558,9 @@ struct PixiPlayerSheet: View {
         // Navigation completion is NOT proof that the game has rendered or
         // can accept input. Only the trusted runtime reports player_ready;
         // this native callback records PlayerLoad/TapToNavReady separately.
-        // The backend derives play_start/replay/completion from
-        // runtime session_start/run_end events. Only track the
-        // sheet lifecycle here to avoid double-counting starts.
-        if !didTrackGameplayStart {
-            gameplayStartedAt = Date()
-            didTrackGameplayStart = true
-        }
+        // The runtime's first accepted input owns the gameplay-start
+        // clock. Navigation finish may still precede the start card or
+        // rendering; starting a quick-exit timer here mislabels latency.
         // #58 handoff, once: tap-to-nav-ready is tap time
         // to navigation finish (the shell definition
         // Gavin confirmed), and the hold poster fades
@@ -627,6 +638,12 @@ struct PixiPlayerSheet: View {
                             }
                         },
                         onPrewarmHit: { prewarmHit = true },
+                        onFirstInput: {
+                            if !didTrackGameplayStart {
+                                gameplayStartedAt = Date()
+                                didTrackGameplayStart = true
+                            }
+                        },
                         onVerifiedRun: { result in
                             verifiedResult = result
                         }
@@ -1015,6 +1032,7 @@ private struct PlayerWebView: UIViewRepresentable {
     /// Declared between onTerminate and onVerifiedRun to match the
     /// call-site argument order (Swift requires the same order).
     var onPrewarmHit: () -> Void = {}
+    let onFirstInput: () -> Void
     let onVerifiedRun: (VerifiedRunResult) -> Void
 
     private static let messageName = "hephaestusRunResult"
@@ -1022,7 +1040,8 @@ private struct PlayerWebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator {
         Coordinator(gameID: gameID, onProgress: onProgress,
                     onLoadFinish: onLoadFinish, onLoadFail: onLoadFail,
-                    onTerminate: onTerminate, onVerifiedRun: onVerifiedRun)
+                    onTerminate: onTerminate, onFirstInput: onFirstInput,
+                    onVerifiedRun: onVerifiedRun)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -1062,11 +1081,13 @@ private struct PlayerWebView: UIViewRepresentable {
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
-    let onVerifiedRun: (VerifiedRunResult) -> Void
+        let onFirstInput: () -> Void
+        let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
         private var acceptedRunIDs = Set<String>()
         private var navigationFailureGate = PlayerNavigationFailureGate()
         private var acceptedMetricIDs = Set<String>()
+        private var firstInputGate = PlayerFirstInputGate()
         private var runtimeSessionID: String?
         private var isActive = true
         lazy var messageProxy = WeakScriptMessageHandler(delegate: self)
@@ -1076,12 +1097,14 @@ private struct PlayerWebView: UIViewRepresentable {
              onLoadFinish: @escaping () -> Void,
              onLoadFail: @escaping (Error) -> Void,
              onTerminate: @escaping () -> Void,
+             onFirstInput: @escaping () -> Void,
              onVerifiedRun: @escaping (VerifiedRunResult) -> Void) {
             self.expectedGameID = gameID
             self.onProgress = onProgress
             self.onLoadFinish = onLoadFinish
             self.onLoadFail = onLoadFail
             self.onTerminate = onTerminate
+            self.onFirstInput = onFirstInput
             self.onVerifiedRun = onVerifiedRun
         }
 
@@ -1141,7 +1164,13 @@ private struct PlayerWebView: UIViewRepresentable {
                     message: "renderer-submitted-ms=\(ms); not display-presented or interactive"
                 )
             case "first_input":
-                guard let ms = body["ms"] as? Int, (0...86_400_000).contains(ms) else { return }
+                guard let ms = body["ms"] as? Int,
+                      firstInputGate.accept(milliseconds: ms) else { return }
+                Task { @MainActor [weak self] in
+                    guard let self, self.isActive,
+                          self.runtimeSessionID == runtimeSessionID else { return }
+                    self.onFirstInput()
+                }
                 Task { await BackendAPI.shared.trackSocialEvent(
                     gameID: expectedGameID, kind: "player_first_input",
                     timeToFirstInputMS: ms, eventID: "ios-metric:\(metricID)"
