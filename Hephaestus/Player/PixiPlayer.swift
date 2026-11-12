@@ -435,8 +435,11 @@ enum PlayerWebViewPool {
 
     /// Only the currently attached navigation may be recovered. A previously
     /// dismissed sheet must never reload a WebView now owned by another game.
-    static func ownsAttachedNavigation(_ webView: WKWebView, url: URL) -> Bool {
-        pooledView === webView && isAttached && currentURL == url
+    static func ownsAttachedNavigation(_ webView: WKWebView, url: URL, lease: UInt64) -> Bool {
+        // A prewarm-recovery KVO callback from an old Coordinator may run
+        // after a new retry takes the same pooled WebView and game URL.
+        // URL/instance equality alone cannot authorize an old lease to reload.
+        ownsActiveAttachment(webView, lease: lease) && currentURL == url
     }
 
     /// A detached/stale WebView cannot navigate on the pooled game's behalf.
@@ -1544,7 +1547,9 @@ private struct PlayerWebView: UIViewRepresentable {
 
         @MainActor
         func recoverUnobservedWarmupIfNeeded(_ webView: WKWebView, expectedURL: URL) {
-            guard PlayerWebViewPool.ownsAttachedNavigation(webView, url: expectedURL),
+            guard PlayerWebViewPool.ownsAttachedNavigation(
+                    webView, url: expectedURL, lease: attachmentLease
+                  ),
                   PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
                     isActive: isActive, stillLoading: webView.isLoading,
                     hasObservedTerminalNavigation: hasObservedTerminalNavigation,
