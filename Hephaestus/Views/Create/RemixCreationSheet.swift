@@ -335,25 +335,41 @@ struct RemixCreationSheet: View {
     }
 
     private func create() async {
-        guard !isCreating, sourceAcknowledged,
+        guard case .ready = phase else { return }
+        let owner = BackendConfig.currentUserID
+        let token = BackendConfig.loadSessionToken()
+        let revision = sessionRevision
+        guard isCurrentSession(owner: owner, token: token, revision: revision),
+              !isCreating, sourceAcknowledged,
               !intent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         isCreating = true
-        defer { isCreating = false }
+        defer { if sessionRevision == revision { isCreating = false } }
         do {
             let created = try await BackendAPI.shared.createRemix(
                 parentGameID: source.id, intent: intent.trimmingCharacters(in: .whitespacesAndNewlines))
+            guard !Task.isCancelled,
+                  isCurrentSession(owner: owner, token: token, revision: revision) else { return }
             phase = .building(created.job)
         } catch {
+            guard !Task.isCancelled,
+                  isCurrentSession(owner: owner, token: token, revision: revision) else { return }
             phase = .failed(error.localizedDescription)
         }
     }
 
     private func pollJob(_ id: String) async {
-        while !Task.isCancelled {
+        let owner = BackendConfig.currentUserID
+        let token = BackendConfig.loadSessionToken()
+        let revision = sessionRevision
+        while !Task.isCancelled &&
+              isCurrentSession(owner: owner, token: token, revision: revision) {
             try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  isCurrentSession(owner: owner, token: token, revision: revision) else { return }
             do {
                 let job = try await BackendAPI.shared.fetchJob(id: id)
+                guard !Task.isCancelled,
+                      isCurrentSession(owner: owner, token: token, revision: revision) else { return }
                 switch job.status {
                 case "awaiting_confirm":
                     phase = .confirming(job)
@@ -368,6 +384,8 @@ struct RemixCreationSheet: View {
                     phase = .building(job)
                 }
             } catch {
+                guard !Task.isCancelled,
+                      isCurrentSession(owner: owner, token: token, revision: revision) else { return }
                 phase = .failed(error.localizedDescription)
                 return
             }
@@ -375,21 +393,33 @@ struct RemixCreationSheet: View {
     }
 
     private func confirm(_ job: JobStatus) async {
-        guard !isConfirming else { return }
+        let owner = BackendConfig.currentUserID
+        let token = BackendConfig.loadSessionToken()
+        let revision = sessionRevision
+        guard isCurrentSession(owner: owner, token: token, revision: revision),
+              !isConfirming else { return }
         isConfirming = true
-        defer { isConfirming = false }
+        defer { if sessionRevision == revision { isConfirming = false } }
         do {
             try await BackendAPI.shared.confirmGame(id: job.game_id)
+            guard !Task.isCancelled,
+                  isCurrentSession(owner: owner, token: token, revision: revision) else { return }
             phase = .building(job)
         } catch {
+            guard !Task.isCancelled,
+                  isCurrentSession(owner: owner, token: token, revision: revision) else { return }
             phase = .failed(error.localizedDescription)
         }
     }
 
     private func publish(gameID: String) async {
-        guard hasPublicPublishConsent, !isPublishing else { return }
+        let owner = BackendConfig.currentUserID
+        let token = BackendConfig.loadSessionToken()
+        let revision = sessionRevision
+        guard isCurrentSession(owner: owner, token: token, revision: revision),
+              hasPublicPublishConsent, !isPublishing else { return }
         isPublishing = true
-        defer { isPublishing = false }
+        defer { if sessionRevision == revision { isPublishing = false } }
         let topics = publishTopics.split(separator: ",").map {
             $0.trimmingCharacters(in: .whitespacesAndNewlines)
         }.filter { !$0.isEmpty }
@@ -398,9 +428,13 @@ struct RemixCreationSheet: View {
                 gameID: gameID, caption: publishCaption,
                 topics: topics, remixParentID: source.id,
                 allowRemixes: allowOtherRemixes)
+            guard !Task.isCancelled,
+                  isCurrentSession(owner: owner, token: token, revision: revision) else { return }
             didSubmitPublication = true
             publishMessage = "Submitted for moderation. This remix is not in public feeds until approved."
         } catch {
+            guard !Task.isCancelled,
+                  isCurrentSession(owner: owner, token: token, revision: revision) else { return }
             publishMessage = "Couldn't publish: \(error.localizedDescription)"
         }
     }
