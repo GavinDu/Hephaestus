@@ -19,9 +19,17 @@ def chunk(kind, payload):
             struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff))
 
 
-def png(width, height, orientation=1, rgb=b"\x20\x50\x80", level=6):
+def png(width, height, orientation=1, rgb=b"\x20\x50\x80", level=6, filter_type=0):
     # Small valid RGB PNG with TIFF/EXIF rotation metadata.
-    rows = b"".join(b"\x00" + rgb * width for _ in range(height))
+    original = rgb * width
+    if filter_type == 0:
+        encoded = original
+    elif filter_type == 1:  # PNG Sub filter on a three-byte RGB pixel
+        encoded = bytes((value - (original[i - 3] if i >= 3 else 0)) & 0xff
+                        for i, value in enumerate(original))
+    else:
+        raise ValueError("Unsupported PNG fixture filter")
+    rows = b"".join(bytes([filter_type]) + encoded for _ in range(height))
     tiff = (b"II\x2a\x00" + struct.pack("<I", 8) +
             struct.pack("<H", 1) + struct.pack("<HHI", 0x0112, 3, 1) +
             struct.pack("<H", orientation) + b"\x00\x00" +
@@ -100,10 +108,11 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             for before, after in (module.LANDSCAPE_PRIMARY, module.PORTRAIT_PRIMARY):
                 self.fixture(folder)
                 # The after image has the same raster, but a different PNG
-                # compression level. Raw SHA-256 cannot catch this replay.
+                # compression level AND scanline filter. Raw SHA-256 and
+                # decoded filtered-scanline digests cannot catch this replay.
                 orientation = 8 if before in module.LANDSCAPE_PRIMARY else 1
                 reused = png(10, 20, orientation=orientation,
-                             rgb=b"\x20\x50\x80", level=9)
+                             rgb=b"\x20\x50\x80", level=9, filter_type=1)
                 self.assertNotEqual(reused, (folder / (before + ".png")).read_bytes())
                 (folder / (after + ".png")).write_bytes(reused)
                 with self.assertRaisesRegex(ValueError, "duplicate decoded screenshot pixels"):
