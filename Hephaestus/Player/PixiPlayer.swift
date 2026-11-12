@@ -774,7 +774,10 @@ struct PixiPlayerSheet: View {
     }
 
     private func finishToFeed() {
-        if didTrackGameplayStart, let verifiedResult, verifiedResult.isVerified {
+        // A server-verified outcome is authoritative even when an auto-play
+        // game finishes without a first touch. Do not couple score handoff
+        // to the native quick-exit timer (which starts on first input).
+        if let verifiedResult, verifiedResult.isVerified {
             onFinish(verifiedResult)
         }
         dismiss()
@@ -822,6 +825,15 @@ struct PixiPlayerSheet: View {
                 // Apply the saved quality on the next game launch, not during
                 // an active session: reloading would discard progress.
                 DevLog.info(.player, "quality preference saved for next game -> \(qualityRaw) (effective \(effectiveQuality))")
+            }
+            .onChange(of: attempt) { _, _ in
+                // Each recreated player WebView has its own runtime session.
+                // A prior quick-exit start and completed prewarm must not
+                // leak into retry, connectivity recovery or crash reload.
+                prewarmHit = false
+                gameplayStartedAt = nil
+                didTrackGameplayStart = false
+                verifiedResult = nil
             }
             .onChange(of: pathMonitor.isOffline) { _, offline in
                 if !offline, loadError != nil {
