@@ -912,3 +912,23 @@ struct HephaestusTests {
         cachedFingerprint: "anonymous", currentFingerprint: "session-B"
     ))
 }
+
+// Owner-project data is private; a changed credential invalidates in-flight
+// results even when the server subject and UI owner ID have not changed.
+@Test func creatorStudioRejectsStaleOwnerAndRotatedSessionResponses() {
+    func allowed(_ originalOwner: String, _ currentOwner: String,
+                 _ originalToken: String?, _ currentToken: String?,
+                 _ originalRevision: Int = 5, _ currentRevision: Int = 5) -> Bool {
+        CreatorStudioRequestPolicy.canApply(
+            startedRevision: originalRevision, currentRevision: currentRevision,
+            startedOwner: originalOwner, currentOwner: currentOwner,
+            startedToken: originalToken, currentToken: currentToken)
+    }
+    #expect(allowed("owner-A", "owner-A", "token-A", "token-A"))
+    #expect(!allowed("owner-A", "owner-A", "token-A", "token-B"))
+    #expect(!allowed("owner-A", "owner-B", "token-A", "token-B"))
+    #expect(!allowed("owner-A", "", "token-A", nil))
+    #expect(!allowed("owner-A", "owner-A", "token-A", "token-A", 5, 6))
+    #expect(!allowed("owner-A", "owner-A", nil, "token-A"))
+    #expect(!allowed("", "", nil, nil))
+}
