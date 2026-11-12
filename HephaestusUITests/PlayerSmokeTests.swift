@@ -332,6 +332,44 @@ final class PlayerSmokeTests: XCTestCase {
                       "Returning from Library must restore the Discover navigation stack.")
     }
 
+    /// Only inspect social controls after a REAL playable post has loaded.
+    /// A cold deployment may take multiple transport windows. Retrying a
+    /// still-active request every 4 seconds starves the feed and falsely
+    /// reports missing Comments/More; never invent a fixture to make CI green.
+    @MainActor
+    private func waitForLiveFeedAction(
+        _ action: XCUIElement, in app: XCUIApplication
+    ) -> Bool {
+        let play = app.buttons["game.play"].firstMatch
+        let retryOptions = [
+            app.descendants(matching: .any)["feed.retryLoading"].firstMatch,
+            app.descendants(matching: .any)["Retry loading"].firstMatch,
+            app.buttons["Try again"].firstMatch,
+            app.buttons["Refresh games"].firstMatch
+        ]
+        let deadline = Date().addingTimeInterval(150)
+        var lastRetry = Date()
+        while Date() < deadline {
+            if play.exists && action.exists { return true }
+            let retryError = app.buttons["Try again"].firstMatch
+            if (retryError.exists && retryError.isEnabled) ||
+                Date().timeIntervalSince(lastRetry) >= 65 {
+                for retry in retryOptions where retry.exists && retry.isEnabled {
+                    let frame = retry.frame
+                    guard !frame.isNull, !frame.isEmpty,
+                          frame.width.isFinite, frame.height.isFinite,
+                          app.frame.intersects(frame) else { continue }
+                    retry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                    lastRetry = Date()
+                    break
+                }
+            }
+            _ = action.waitForExistence(timeout: 5)
+        }
+        // An outage must still fail strict native UI smoke. No mock action.
+        return play.exists && action.exists
+    }
+
     /// Open actual game details through the settled post's native More menu.
     /// The details use the live feed model; no fabricated ratings or updates.
     @MainActor
@@ -341,13 +379,7 @@ final class PlayerSmokeTests: XCTestCase {
         self.app = app
         app.launch()
         let more = app.descendants(matching: .any)["More game actions"].firstMatch
-        let retry = app.buttons["Try again"].firstMatch
-        let until = Date().addingTimeInterval(120)
-        while !more.exists && Date() < until {
-            if retry.waitForExistence(timeout: 4) { retry.tap() }
-            _ = more.waitForExistence(timeout: 4)
-        }
-        XCTAssertTrue(more.exists && more.isHittable,
+        XCTAssertTrue(waitForLiveFeedAction(more, in: app) && more.isHittable,
                       "A real settled feed post must expose its More menu.")
         more.tap()
         let details = app.buttons["Game details"].firstMatch
@@ -377,13 +409,7 @@ final class PlayerSmokeTests: XCTestCase {
         self.app = app
         app.launch()
         let commentAction = app.buttons["View comments"].firstMatch
-        let retry = app.buttons["Try again"].firstMatch
-        let until = Date().addingTimeInterval(120)
-        while !commentAction.exists && Date() < until {
-            if retry.waitForExistence(timeout: 4) { retry.tap() }
-            _ = commentAction.waitForExistence(timeout: 4)
-        }
-        XCTAssertTrue(commentAction.exists,
+        XCTAssertTrue(waitForLiveFeedAction(commentAction, in: app),
                       "Real For You posts must offer an accessible comment action.")
         commentAction.tap()
         // An axis:.vertical SwiftUI TextField can surface as a UITextView
@@ -441,13 +467,8 @@ final class PlayerSmokeTests: XCTestCase {
         self.app = app
         app.launch()
         let more = app.descendants(matching: .any)["More game actions"].firstMatch
-        let retry = app.buttons["Try again"].firstMatch
-        let deadline = Date().addingTimeInterval(120)
-        while !more.exists && Date() < deadline {
-            if retry.waitForExistence(timeout: 4) { retry.tap() }
-            _ = more.waitForExistence(timeout: 4)
-        }
-        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForLiveFeedAction(more, in: app) && more.isHittable,
+                      "A live published game must have a More menu before testing source rights.")
         more.tap()
         let open = app.buttons["Check remix options"].firstMatch
         XCTAssertTrue(open.waitForExistence(timeout: 5))
