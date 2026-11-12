@@ -210,8 +210,7 @@ struct CreatorStudioView: View {
                 LinearGradient(
                     colors: ArcadePulseTheme.fallbackPalette(gameID: project.gameID),
                     startPoint: .topLeading, endPoint: .bottomTrailing)
-                if let poster = project.previewPosterURL,
-                   let url = URL(string: poster) {
+                if let url = project.resolvedPosterURL {
                     AsyncImage(url: url) { phase in
                         if let image = phase.image {
                             image.resizable().scaledToFit()
