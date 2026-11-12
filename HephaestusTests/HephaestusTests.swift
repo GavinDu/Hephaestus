@@ -926,3 +926,22 @@ struct HephaestusTests {
         cachedFingerprint: "anonymous", currentFingerprint: "session-B"
     ))
 }
+
+
+@Test func remixEligibilitySnapshotNeverSurvivesCredentialRotationOrLogout() {
+    func apply(_ startOwner: String, _ currentOwner: String,
+               _ startToken: String?, _ currentToken: String?,
+               _ startEpoch: Int = 2, _ currentEpoch: Int = 2) -> Bool {
+        RemixSessionPolicy.canApply(
+            expectedOwner: startOwner, currentOwner: currentOwner,
+            expectedToken: startToken, currentToken: currentToken,
+            expectedRevision: startEpoch, currentRevision: currentEpoch)
+    }
+    #expect(apply("accountA", "accountA", "token-A", "token-A"))
+    #expect(!apply("accountA", "accountA", "token-A", "token-rotated"))
+    #expect(!apply("accountA", "accountB", "token-A", "token-B"))
+    #expect(!apply("accountA", "", "token-A", nil))
+    #expect(!apply("", "", nil, nil))
+    #expect(!apply("accountA", "accountA", "token-A", "token-A", 2, 3))
+    #expect(!apply("accountA", "accountA", nil, "token-A"))
+}
