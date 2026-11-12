@@ -1033,3 +1033,25 @@ struct HephaestusTests {
         #expect(!hint(expected, current, revoked, loading, hasError))
     }
 }
+
+// A live HTTPS outage is a real error; it must produce a legible recovery
+// explanation rather than raw TLS/certificate jargon or fabricated feed cards.
+@Test func arcadePulseFeedFailureCopyIsActionableAndTruthful() {
+    let secure = FeedErrorPresentation.message(for: URLError(.secureConnectionFailed))
+    #expect(secure.contains("secure connection"))
+    #expect(!secure.localizedCaseInsensitiveContains("TLS"))
+    #expect(!secure.localizedCaseInsensitiveContains("certificate"))
+    #expect(FeedErrorPresentation.message(for: URLError(.serverCertificateUntrusted)) == secure)
+
+    let offline = FeedErrorPresentation.message(for: URLError(.notConnectedToInternet))
+    #expect(offline.localizedCaseInsensitiveContains("offline"))
+    #expect(FeedErrorPresentation.message(for: URLError(.networkConnectionLost)) == offline)
+
+    let timeout = FeedErrorPresentation.message(for: URLError(.timedOut))
+    #expect(timeout.localizedCaseInsensitiveContains("try again"))
+
+    let unexpected = FeedErrorPresentation.message(for: NSError(domain: "other", code: 500))
+    #expect(unexpected.contains("isn't available"))
+    #expect(!unexpected.localizedCaseInsensitiveContains("NSError"))
+}
+
