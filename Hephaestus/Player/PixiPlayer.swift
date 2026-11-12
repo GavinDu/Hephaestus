@@ -309,6 +309,20 @@ enum PlayerPrewarmBudgetPolicy {
     }
 }
 
+/// Only an authoritative pooled WebView may mark a game URL as loaded.
+/// A detached warmup or an old view from before a credential change may
+/// complete navigation after a replacement; it must never poison the new
+/// pool's loadedURL fast path. Prewarm and attached completions share this
+/// pure predicate because either can legitimately finish an owned load.
+enum PlayerPrewarmCompletionPolicy {
+    static func shouldRecordLoaded(
+        isCurrentPooledView: Bool, expectedURL: URL?, actualURL: URL?
+    ) -> Bool {
+        guard isCurrentPooledView, let expectedURL, let actualURL else { return false }
+        return expectedURL == actualURL
+    }
+}
+
 /// Credential changes are security boundaries. An old speculative
 /// WebKit page cannot be reused after the Keychain bearer session rotates.
 enum PlayerSessionCachePolicy {
@@ -430,7 +444,13 @@ enum PlayerWebViewPool {
     }
 
     static func markLoaded(_ webView: WKWebView) {
-        guard let currentURL, webView.url == currentURL else { return }
+        // Credential changes can arrive before the notification observer
+        // runs. Recheck the keychain scope before accepting an async finish.
+        ensureCurrentCredentialScope()
+        guard PlayerPrewarmCompletionPolicy.shouldRecordLoaded(
+            isCurrentPooledView: pooledView === webView,
+            expectedURL: currentURL, actualURL: webView.url
+        ), let currentURL else { return }
         loadedURL = currentURL
     }
 

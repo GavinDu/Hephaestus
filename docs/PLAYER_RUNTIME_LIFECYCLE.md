@@ -61,3 +61,30 @@ CSP review, or Apple App Review Guideline 4.7 verification. Negative URL
 policy unit tests cover same-origin game swapping, renderer quality, scheme,
 foreign origin and teardown. Verify real initial redirects and attempted
 external navigation on iPhone/iPad before calling the issue complete.
+
+
+## Late prewarm completion ownership guard (#202, #203, #205)
+
+WKWebView's `didFinish` may arrive after the user starts a different game,
+retries, dismisses, or changes the Keychain credential. A successful network
+finish is **not** a transferable entitlement to cache a prewarmed game. The
+only legitimate `loadedURL` transition requires all three facts:
+
+1. The callback's **exact WKWebView instance** is the current pooled view.
+2. The expected pooled game/quality URL is present and exactly matches the
+   finished WebView URL.
+3. The Keychain credential scope has been rechecked synchronously, so a
+   queued login/logout notification cannot authorize an old page.
+
+These checks apply to **both** speculative warmup finishes and attached
+player finishes; the view does not need to be attached to become warm.
+A recycled, detached or credential-invalidated view cannot mark the pool
+as loaded even if the new account later opens the **same** game URL.
+Native Swift Testing covers matching, mismatched game/quality, nil
+expected/actual URL and old-view/same-URL cases.
+
+A successful `loadedURL` means only that WK navigation finished. It
+must **never** be interpreted as semantic game readiness, first WebGL
+composition, verified asset integrity, or first interactive input. The
+outstanding authoritative host-state-model issue #203 and real-device
+readiness/performance #204 are not resolved by this ownership guard.
