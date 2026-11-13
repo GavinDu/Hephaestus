@@ -492,7 +492,9 @@ final class PlayerSmokeTests: XCTestCase {
             failure.name = "arcade-pulse-feed-timeout-library-tap-failure"
             failure.lifetime = .keepAlways
             add(failure)
-            print("FEED_TIMEOUT_LIBRARY_TAP selected_library=\(app.tabBars.buttons[\"Library\"].firstMatch.isSelected) still_discover=\(app.tabBars.buttons[\"Discover\"].firstMatch.isSelected)")
+            let selectedLibrary = app.tabBars.buttons["Library"].firstMatch.isSelected
+            let selectedDiscover = app.tabBars.buttons["Discover"].firstMatch.isSelected
+            print("FEED_TIMEOUT_LIBRARY_TAP selected_library=\(selectedLibrary) still_discover=\(selectedDiscover)")
         }
         XCTAssertTrue(destination.exists,
                       "Library navigation must still work after timeout.")
