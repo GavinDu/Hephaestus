@@ -1088,6 +1088,22 @@ struct HephaestusTests {
     }
 }
 
+
+
+@Test func playerMemoryPressureEvictsOnlyUnattachedSpeculativePrewarm() {
+    // Delayed notification callbacks must observe current pool ownership.
+    // An active game is never interrupted even if it reuses a warmed view.
+    func mayEvict(_ attached: Bool, _ hasView: Bool) -> Bool {
+        PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+            isAttached: attached, hasPooledView: hasView
+        )
+    }
+    #expect(mayEvict(false, true))
+    #expect(!mayEvict(true, true))
+    #expect(!mayEvict(false, false))
+    #expect(!mayEvict(true, false))
+}
+
 // A live HTTPS outage is a real error; it must produce a legible recovery
 // explanation rather than raw TLS/certificate jargon or fabricated feed cards.
 @Test func arcadePulseFeedFailureCopyIsActionableAndTruthful() {
