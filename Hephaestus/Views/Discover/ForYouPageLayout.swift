@@ -34,6 +34,15 @@ enum ForYouPageLayout {
         isRegular && width > height && width >= 960 && height >= 620 && !isLargeText
     }
 
+    /// The old iPad landscape detail card used a hard 520pt ceiling and
+    /// left a large black region beneath the media and the primary Play CTA.
+    /// Use the real current window height, retaining a bounded scrollable
+    /// details screen; original artwork remains aspect-fit, never stretched
+    /// into synthetic gameplay or cropped into unsupported previews.
+    static func gameDetailsPreviewHeight(containerHeight: CGFloat) -> CGFloat {
+        min(max(0, containerHeight) * 0.74, 640)
+    }
+
     static func gameDetailsPreviewWidth(containerWidth: CGFloat) -> CGFloat {
         let usable = max(0, min(containerWidth - 36, 1_200))
         return usable * 0.55
