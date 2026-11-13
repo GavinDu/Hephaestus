@@ -151,6 +151,26 @@ struct HephaestusTests {
             width: 1_366, height: 1_024, isRegular: true, isAccessibilityText: true))
         #expect(!ForYouPageLayout.showsIPadContextPanel(
             width: 1_366, height: 1_024, isRegular: false, isAccessibilityText: false))
+        // Stage Manager / Split View may keep a regular size class even
+        // when the actual game viewport is too short for the non-scrollable
+        // contextual metadata panel. Preserve one media-dominant page.
+        #expect(!ForYouPageLayout.showsIPadContextPanel(
+            width: 1_366, height: 620, isRegular: true, isAccessibilityText: false))
+        #expect(!ForYouPageLayout.showsIPadContextPanel(
+            width: 1_024, height: 699, isRegular: true, isAccessibilityText: false))
+        #expect(ForYouPageLayout.showsIPadContextPanel(
+            width: 1_024, height: 700, isRegular: true, isAccessibilityText: false))
+        #expect(ForYouPageLayout.showsIPadContextPanel(
+            width: 1_194, height: 834, isRegular: true, isAccessibilityText: false))
+        #expect(!ForYouPageLayout.showsIPadContextPanel(
+            width: 1_194, height: 834, isRegular: true,
+            isAccessibilityText: false, isLargeText: true))
+        #expect(ForYouPageLayout.minimumContextPanelHeight >= 700)
+        #expect(ForYouPageLayout.usesShortIPadViewport(height: 620, isIPad: true))
+        #expect(ForYouPageLayout.usesShortIPadViewport(height: 699, isIPad: true))
+        #expect(!ForYouPageLayout.usesShortIPadViewport(height: 700, isIPad: true))
+        #expect(!ForYouPageLayout.usesShortIPadViewport(height: 620, isIPad: false))
+        #expect(!ForYouPageLayout.usesShortIPadViewport(height: 699, isIPad: false))
         for width: CGFloat in [1_024, 1_194, 1_366] {
             let stage = ForYouPageLayout.adaptiveLandscapeStageWidth(containerWidth: width)
             let panel = ForYouPageLayout.contextPanelWidth(containerWidth: width)

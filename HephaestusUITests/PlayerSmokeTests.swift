@@ -1195,6 +1195,88 @@ final class PlayerSmokeTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    /// Real iPad UI evidence for the xxLarge Spotlight collapse. Source
+    /// sizing tests alone cannot verify Play stays visible or duplicate
+    /// social rails disappear after native view layout. No game is injected.
+    @MainActor
+    func testArcadePulseIPadSpotlightCollapsesAtXXLarge() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("This adaptive Spotlight evaluator requires an iPad.")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryXXL"
+        ]
+        app.launch()
+        let window = app.windows.firstMatch
+        let deadline = Date().addingTimeInterval(12)
+        while window.frame.width <= window.frame.height && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "Native screenshot must follow actual iPad landscape rotation.")
+
+        let play = app.buttons["game.play"].firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let pending = app.buttons["feed.retryLoading"].firstMatch
+        let feedDeadline = Date().addingTimeInterval(120)
+        var lastRetry = Date.distantPast
+        while !play.exists && Date() < feedDeadline {
+            if Date().timeIntervalSince(lastRetry) >= 20 {
+                if retry.exists && retry.isHittable {
+                    retry.tap()
+                    lastRetry = Date()
+                } else if pending.exists && pending.isHittable {
+                    pending.tap()
+                    lastRetry = Date()
+                }
+            }
+            _ = play.waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(play.exists && play.isHittable,
+                      "Only the live backend feed may supply a playable iPad game.")
+        XCTAssertGreaterThanOrEqual(play.frame.height, 44)
+
+        let context = app.descendants(matching: .any)["feed.ipad.context"].firstMatch
+        XCTAssertFalse(context.exists,
+                       "At xxLarge, the iPad Spotlight panel must collapse instead of clipping.")
+        let rail = app.descendants(matching: .any)["feed.actionRail"].firstMatch
+        XCTAssertFalse(rail.exists,
+                       "At xxLarge do not show both the side rail and compact inline actions.")
+        // #230 replaces the visible row with a labeled Actions menu at
+        // XXLarge. Keep the full Comments reachability assertion for both
+        // variants, rather than rejecting the accessible integrated design.
+        // #230 is now merged in main. At XXL the old unlabeled icon
+        // fallback is no longer acceptable: the stage must expose exactly
+        // the visible and accessible Actions disclosure, not a tiny rail.
+        let actions = app.descendants(matching: .any)["feed.actions.accessible"].firstMatch
+        XCTAssertTrue(actions.exists && actions.isHittable,
+                      "XXLarge iPad stage must show the labeled Actions menu from #230.")
+        XCTAssertGreaterThanOrEqual(actions.frame.height, 44)
+        XCTAssertLessThanOrEqual(actions.frame.maxY, play.frame.minY + 4,
+                                 "Labeled Actions must not obscure the actual Play target.")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "arcade-pulse-ipad-xxlarge-spotlight-collapsed"
+        shot.lifetime = .keepAlways
+        add(shot)
+        // A visible disclosure alone is insufficient: prove that Comments
+        // remains reachable without mutating a real user's Like/Save state.
+        actions.tap()
+        let menuComments = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label == %@", "View comments")
+        ).firstMatch
+        XCTAssertTrue(menuComments.waitForExistence(timeout: 5) &&
+                      menuComments.isHittable,
+                      "XXLarge Actions must retain a reachable Comments menu item.")
+        let menuShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        menuShot.name = "arcade-pulse-ipad-xxlarge-actions-menu"
+        menuShot.lifetime = .keepAlways
+        add(menuShot)
+    }
+
     /// Large accessibility text must not push the primary feed actions off-screen
     /// or make the Play/Save/Like/Comments targets unreachable.
     @MainActor

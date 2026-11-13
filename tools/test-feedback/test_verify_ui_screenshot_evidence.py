@@ -52,19 +52,24 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             self.assertEqual(module.read_png_metadata(p)["display_width"], 20)
 
     def fixture(self, folder, corrupt_fullscreen=False, omit=None,
-                include_ipad_library=False):
+                include_ipad_library=False, include_ipad_xxl=False):
         attachments = []
         library = ((module.IPAD_LIBRARY_PORTRAIT, module.IPAD_LIBRARY_LANDSCAPE)
                    if include_ipad_library else ())
+        xxl = module.IPAD_XXL_LANDSCAPE if include_ipad_xxl else ()
         for name in (module.LANDSCAPE_PRIMARY +
-                     module.LANDSCAPE_DIAGNOSTIC + module.PORTRAIT_PRIMARY + library):
+                     module.LANDSCAPE_DIAGNOSTIC + module.PORTRAIT_PRIMARY + library + xxl):
             if name == omit:
                 continue
             file = name + ".png"
             # Full screen raw portrait + EXIF 8 -> landscape displayed.
             # App-window raw landscape + EXIF 8 -> incorrect portrait displayed.
             rgb = b"\x50\x40\x20" if "after-swipe" in name else b"\x20\x50\x80"
-            if name == module.IPAD_LIBRARY_PORTRAIT:
+            if name in module.IPAD_XXL_LANDSCAPE:
+                color = (b"\x22\x44\x66" if name == module.IPAD_XXL_LANDSCAPE[0]
+                         else b"\x66\x33\x22")
+                payload = png(10, 20, 8, rgb=color)
+            elif name == module.IPAD_LIBRARY_PORTRAIT:
                 payload = png(10, 20, 1, rgb=b"\x20\x50\x80")
             elif name == module.IPAD_LIBRARY_LANDSCAPE:
                 payload = png(10, 20, 8, rgb=b"\x50\x40\x20")
@@ -94,6 +99,47 @@ class ScreenshotEvidenceTests(unittest.TestCase):
                                  (source / (name + ".png")).read_bytes())
             for name in module.LANDSCAPE_DIAGNOSTIC:
                 self.assertFalse(report["verified"][name]["preferred_for_visual_review"])
+
+    def test_ipad_xxlarge_stage_and_open_menu_originals_are_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            output = Path(directory) / "review"
+            source.mkdir()
+            self.fixture(source, include_ipad_xxl=True)
+            report = module.verify_and_copy(source, output, require_ipad_xxl=True)
+            self.assertTrue(report["ipad_xxl_evidence_required"])
+            for name in module.IPAD_XXL_LANDSCAPE:
+                self.assertIn(name, report["verified"])
+                self.assertTrue(report["verified"][name]["preferred_for_visual_review"])
+                self.assertEqual((output / (name + ".raw.png")).read_bytes(),
+                                 (source / (name + ".png")).read_bytes())
+
+    def test_ipad_xxlarge_missing_wrong_orientation_and_reused_menu_fail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            folder.mkdir()
+            self.fixture(folder)
+            with self.assertRaisesRegex(ValueError, "expected exactly one"):
+                module.verify_and_copy(folder, Path(directory) / "missing",
+                                       require_ipad_xxl=True)
+            self.fixture(folder, include_ipad_xxl=True,
+                         omit=module.IPAD_XXL_LANDSCAPE[1])
+            with self.assertRaisesRegex(ValueError, "expected exactly one"):
+                module.verify_and_copy(folder, Path(directory) / "no-menu",
+                                       require_ipad_xxl=True)
+            self.fixture(folder, include_ipad_xxl=True)
+            stage = folder / (module.IPAD_XXL_LANDSCAPE[0] + ".png")
+            stage.write_bytes(png(10, 20, 1))
+            with self.assertRaisesRegex(ValueError, "does not display in landscape"):
+                module.verify_and_copy(folder, Path(directory) / "bad-orientation",
+                                       require_ipad_xxl=True)
+            self.fixture(folder, include_ipad_xxl=True)
+            stage, menu = module.IPAD_XXL_LANDSCAPE
+            (folder / (menu + ".png")).write_bytes(
+                (folder / (stage + ".png")).read_bytes())
+            with self.assertRaisesRegex(ValueError, "duplicate raw screenshot bytes"):
+                module.verify_and_copy(folder, Path(directory) / "same-frame",
+                                       require_ipad_xxl=True)
 
     def test_exact_duplicate_swipe_capture_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
