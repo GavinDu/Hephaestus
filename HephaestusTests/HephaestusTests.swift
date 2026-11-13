@@ -30,6 +30,68 @@ struct HephaestusTests {
         #expect(ArcadePulseActionGlyph.usesAccessibleMenu(for: .accessibility5))
     }
 
+    @Test func arcadePulseSocialActionErrorCopyDoesNotExposeRawBackendFailures() {
+        let anonymous = FeedSocialErrorPresentation.message(
+            action: "Saving this game", error: APIError.badStatus(401), signedIn: false)
+        #expect(anonymous.contains("Sign in from Profile"))
+        #expect(!anonymous.localizedCaseInsensitiveContains("HTTP"))
+
+        let expired = FeedSocialErrorPresentation.message(
+            action: "Liking this game", error: APIError.badStatus(401), signedIn: true)
+        #expect(expired.contains("session has expired"))
+
+        let forbidden = FeedSocialErrorPresentation.message(
+            action: "Following this creator", error: APIError.badStatus(403), signedIn: true)
+        #expect(forbidden.contains("isn't allowed"))
+        #expect(!forbidden.contains("403"))
+
+        let uncertain = FeedSocialErrorPresentation.message(
+            action: "Saving this game",
+            error: URLError(.networkConnectionLost), signedIn: true)
+        #expect(uncertain.contains("couldn't be confirmed"))
+        #expect(uncertain.contains("displayed status has not changed"))
+        #expect(!uncertain.localizedCaseInsensitiveContains("URL"))
+    }
+
+    @Test func arcadePulseSocialMutationLeasesRejectDoubleTapAndStaleAccountCompletion() throws {
+        var gate = FeedSocialMutationGate()
+        // Swift Testing macros internally capture the expression's receiver
+        // as an immutable value. Evaluate mutating actions beforehand, then
+        // assert against their immutable results (Xcode 26 compiler fix).
+        let invalid = gate.begin(.like, id: "")
+        #expect(invalid == nil)
+        let maybeFirst = gate.begin(.save, id: "public-game")
+        let first = try #require(maybeFirst)
+        let repeatedSave = gate.begin(.save, id: "public-game")
+        #expect(repeatedSave == nil)
+        let maybeLike = gate.begin(.like, id: "public-game")
+        let like = try #require(maybeLike)
+        let maybeFollow = gate.begin(.follow, id: "creator-a")
+        let follow = try #require(maybeFollow)
+        #expect(gate.pending.count == 3)
+        gate.finish(.like, id: "public-game", lease: like)
+        #expect(gate.pending.count == 2)
+        gate.finish(.save, id: "public-game", lease: UUID())
+        let staleSave = gate.begin(.save, id: "public-game")
+        #expect(staleSave == nil)
+        gate.finish(.save, id: "public-game", lease: first)
+        let resumedSave = gate.begin(.save, id: "public-game")
+        #expect(resumedSave != nil)
+
+        // Logout invalidates earlier account leases; stale completions must
+        // not release the next viewer's pending request for the same creator.
+        gate.revokeAll()
+        #expect(gate.pending.isEmpty)
+        let maybeSecond = gate.begin(.follow, id: "creator-a")
+        let second = try #require(maybeSecond)
+        gate.finish(.follow, id: "creator-a", lease: follow)
+        let staleFollow = gate.begin(.follow, id: "creator-a")
+        #expect(staleFollow == nil)
+        gate.finish(.follow, id: "creator-a", lease: second)
+        let resumedFollow = gate.begin(.follow, id: "creator-a")
+        #expect(resumedFollow != nil)
+    }
+
     @Test func arcadePulseFoundationUsesSinglePaletteAndAccessibleTargetSizes() {
         #expect(ArcadePulseTheme.fallbackPalettes.count == 5)
         #expect(ArcadePulseTheme.minimumTarget >= 44)

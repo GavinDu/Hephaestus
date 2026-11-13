@@ -209,6 +209,8 @@ jobs:
             -destination "platform=iOS Simulator,id=${{ steps.ipad.outputs.udid }}" \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedUIEvaluationAndSwipe \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedSupportsAccessibilityDynamicType \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSocialWriteFailureDoesNotHideLiveGame \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedPreferencesFailureStaysEditable \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutState \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutAccessibilityTextSize \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateEntryConsentAndControls \
