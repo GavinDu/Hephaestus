@@ -275,6 +275,14 @@ final class PlayerSmokeTests: XCTestCase {
         let library = app.buttons["feed.error.library"].firstMatch
         XCTAssertTrue(recovery.waitForExistence(timeout: 10),
                       "Network error must show a real and accessible recovery surface.")
+        XCTAssertTrue(app.staticTexts[
+            "The game service couldn't establish a secure connection. Check your network and try again."
+        ].firstMatch.exists,
+                      "The native recovery card must use plain language, not raw TLS jargon.")
+        XCTAssertFalse(app.staticTexts[
+            "A TLS error caused the secure connection to fail"
+        ].firstMatch.exists,
+                       "Do not expose raw TLS implementation text to users.")
         XCTAssertTrue(retry.exists && retry.isHittable)
         XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
         XCTAssertTrue(library.exists && library.isHittable)
@@ -291,6 +299,32 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(library.frame.height, 44)
             let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             landscape.name = "arcade-pulse-feed-unavailable-recovery-ipad-landscape"
+            landscape.lifetime = .keepAlways
+            add(landscape)
+            XCUIDevice.shared.orientation = .portrait
+            XCTAssertTrue(library.waitForExistence(timeout: 10) && library.isHittable)
+        }
+
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            XCTAssertTrue(retry.waitForExistence(timeout: 10) && retry.isHittable,
+                          "Compact iPhone landscape must retain the real Retry control.")
+            XCTAssertTrue(library.waitForExistence(timeout: 10) && library.isHittable,
+                          "Compact iPhone landscape must keep Library above the fold.")
+            XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+            XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+            let tabs = app.tabBars.firstMatch
+            XCTAssertTrue(tabs.exists, "iPhone landscape has persistent native tab navigation.")
+            if tabs.exists {
+                XCTAssertLessThan(retry.frame.maxY, tabs.frame.minY - 4,
+                                  "Retry must appear ABOVE the persistent tab bar, not underneath it.")
+                XCTAssertLessThan(library.frame.maxY, tabs.frame.minY - 4,
+                                  "Open Library must be wholly visible ABOVE the tab bar.")
+            }
+            XCTAssertFalse(retry.frame.intersects(library.frame),
+                           "Compact landscape recovery buttons must not overlap each other.")
+            let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            landscape.name = "arcade-pulse-feed-unavailable-recovery-iphone-landscape"
             landscape.lifetime = .keepAlways
             add(landscape)
             XCUIDevice.shared.orientation = .portrait

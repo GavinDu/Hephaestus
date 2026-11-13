@@ -68,6 +68,34 @@ struct DiscoverView: View {
         self.onOpenLibrary = onOpenLibrary
     }
 
+    // One functional set of recovery actions across all orientations.
+    // Compact iPhone landscape lays these out side by side so neither button
+    // disappears underneath the persistent bottom tab navigation.
+    private var feedRecoveryRetry: some View {
+        Button {
+            Task { await load() }
+        } label: {
+            Label("Try again", systemImage: "arrow.clockwise")
+                .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(ArcadePulseTheme.electricViolet)
+        .accessibilityIdentifier("feed.error.retry")
+    }
+
+    @ViewBuilder private var feedRecoveryLibrary: some View {
+        if let onOpenLibrary {
+            Button(action: onOpenLibrary) {
+                Label("Open Library", systemImage: "bookmark")
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(.bordered)
+            .tint(ArcadePulseTheme.neonMagenta)
+            .accessibilityIdentifier("feed.error.library")
+        }
+    }
+
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
@@ -319,52 +347,53 @@ struct DiscoverView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                     } else if let errorMessage, games.isEmpty {
-                        VStack(spacing: 16) {
-                            Image(systemName: "wifi.exclamationmark")
-                                .font(.system(size: 38, weight: .medium))
-                                .foregroundStyle(ArcadePulseTheme.neonMagenta)
-                                .frame(width: 76, height: 76)
-                                .background(ArcadePulseTheme.electricViolet.opacity(0.16),
-                                            in: RoundedRectangle(cornerRadius: 20))
-                                .accessibilityHidden(true)
+                        // iPhone compact landscape has a short safe-area stage.
+                        // Keep both real recovery actions above the fold instead
+                        // of letting an ornamental icon and extra prose push
+                        // Library below the immediately reachable viewport.
+                        VStack(spacing: verticalSizeClass == .compact ? 10 : 16) {
+                            if verticalSizeClass != .compact {
+                                Image(systemName: "wifi.exclamationmark")
+                                    .font(.system(size: 38, weight: .medium))
+                                    .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                                    .frame(width: 76, height: 76)
+                                    .background(ArcadePulseTheme.electricViolet.opacity(0.16),
+                                                in: RoundedRectangle(cornerRadius: 20))
+                                    .accessibilityHidden(true)
+                            }
                             Text("Couldn't load the feed")
-                                .font(.system(.title2, design: .rounded).weight(.bold))
+                                .font(.system(verticalSizeClass == .compact ? .headline : .title2,
+                                              design: .rounded).weight(.bold))
                                 .foregroundStyle(.white)
                                 .accessibilityAddTraits(.isHeader)
                             Text(errorMessage)
                                 .font(.subheadline)
                                 .foregroundStyle(ArcadePulseTheme.textSecondary)
                                 .multilineTextAlignment(.center)
-                            Text("You can still check Library for games you've saved.")
-                                .font(.subheadline)
-                                .foregroundStyle(ArcadePulseTheme.textSecondary)
-                                .multilineTextAlignment(.center)
                                 .fixedSize(horizontal: false, vertical: true)
-                            Button {
-                                Task { await load() }
-                            } label: {
-                                Label("Try again", systemImage: "arrow.clockwise")
-                                    .frame(maxWidth: .infinity, minHeight: 48)
+                            if verticalSizeClass != .compact {
+                                Text("You can still check Library for games you've saved.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(ArcadePulseTheme.electricViolet)
-                            .accessibilityIdentifier("feed.error.retry")
-                            if let onOpenLibrary {
-                                Button(action: onOpenLibrary) {
-                                    Label("Open Library", systemImage: "bookmark")
-                                        .frame(maxWidth: .infinity, minHeight: 48)
+                            if verticalSizeClass == .compact {
+                                HStack(spacing: 12) {
+                                    feedRecoveryRetry
+                                    feedRecoveryLibrary
                                 }
-                                .buttonStyle(.bordered)
-                                .tint(ArcadePulseTheme.neonMagenta)
-                                .accessibilityIdentifier("feed.error.library")
+                            } else {
+                                feedRecoveryRetry
+                                feedRecoveryLibrary
                             }
                         }
-                        .padding(24)
+                        .padding(verticalSizeClass == .compact ? 14 : 24)
                         .frame(maxWidth: 520)
                         .background(ArcadePulseTheme.surface,
                                     in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 32)
+                        .padding(.vertical, verticalSizeClass == .compact ? 8 : 32)
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("feed.error.recovery")
                     } else if visibleGames.isEmpty {
@@ -578,7 +607,7 @@ struct DiscoverView: View {
                     // Never synthesize a feed game, player, or login session.
                     games = []
                     isLoading = false
-                    errorMessage = "Test-only: public feed request unavailable."
+                    errorMessage = FeedErrorPresentation.message(for: URLError(.secureConnectionFailed))
                 } else {
                     await load()
                 }
@@ -828,8 +857,28 @@ struct DiscoverView: View {
             }
         } catch {
             if requestedScope == selectedFeed && feedRequestCoordinator.isCurrent(generation) {
-                errorMessage = error.localizedDescription
+                errorMessage = FeedErrorPresentation.message(for: error)
             }
+        }
+    }
+}
+
+/// User-facing Discover error copy. Never claim the feed loaded, and avoid
+/// surfacing raw TLS/transport jargon as the primary recovery explanation.
+/// The UI still exposes Retry and the actual saved-game Library route.
+enum FeedErrorPresentation {
+    static func message(for error: Error) -> String {
+        switch (error as? URLError)?.code {
+        case .secureConnectionFailed, .serverCertificateHasBadDate,
+             .serverCertificateNotYetValid, .serverCertificateUntrusted,
+             .serverCertificateHasUnknownRoot:
+            return "The game service couldn't establish a secure connection. Check your network and try again."
+        case .notConnectedToInternet, .networkConnectionLost:
+            return "You seem to be offline. Check your internet connection and try again."
+        case .timedOut:
+            return "The game service is taking too long to respond. Try again."
+        default:
+            return "The game feed isn't available right now. Try again in a moment."
         }
     }
 }
