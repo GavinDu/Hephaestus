@@ -309,6 +309,16 @@ enum PlayerPrewarmBudgetPolicy {
     }
 }
 
+/// iOS can request memory reclamation while a speculative player is warming.
+/// Only an unattached page may be evicted; a live game owns its WebView until
+/// its matching presentation lease ends. Evaluation happens on MainActor at
+/// notification delivery, not when an async callback was scheduled.
+enum PlayerPrewarmMemoryPressurePolicy {
+    static func shouldDiscard(isAttached: Bool, hasPooledView: Bool) -> Bool {
+        !isAttached && hasPooledView
+    }
+}
+
 /// Only an authoritative pooled WebView may mark a game URL as loaded.
 /// A detached warmup or an old view from before a credential change may
 /// complete navigation after a replacement; it must never poison the new
@@ -367,6 +377,18 @@ enum PlayerWebViewPool {
         forName: .hephaestusBackendSessionDidChange, object: nil, queue: .main
     ) { _ in
         Task { @MainActor in PlayerWebViewPool.invalidateForSessionChange() }
+    }
+    private static let memoryWarningObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
+        forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+    ) { _ in
+        Task { @MainActor in
+            guard PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+                isAttached: PlayerWebViewPool.isAttached,
+                hasPooledView: PlayerWebViewPool.pooledView != nil
+            ) else { return }
+            PlayerWebViewPool.discardUnattachedPrewarm()
+            DevLog.info(.player, "unattached speculative WebView prewarm evicted after memory warning")
+        }
     }
     private static var prewarmEpoch: UInt64 = 0
     private static var prewarmExpiryTask: Task<Void, Never>?
@@ -521,6 +543,7 @@ enum PlayerWebViewPool {
 
     private static func ensureCurrentCredentialScope() {
         _ = sessionObserver
+        _ = memoryWarningObserver
         let current = credentialFingerprint()
         if PlayerSessionCachePolicy.shouldPurge(
             cachedFingerprint: sessionFingerprint, currentFingerprint: current
