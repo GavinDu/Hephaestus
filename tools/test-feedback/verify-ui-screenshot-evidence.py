@@ -30,6 +30,8 @@ PORTRAIT_PRIMARY = (
     "feed-ui-evaluator-before-swipe-portrait",
     "feed-ui-evaluator-after-swipe-portrait",
 )
+IPAD_DETAIL_LANDSCAPE = ("arcade-pulse-ipad-game-details-landscape-two-column",)
+IPAD_DETAIL_PORTRAIT = ("arcade-pulse-ipad-game-details-portrait-single-column",)
 
 
 def tiff_orientation(data):
@@ -186,22 +188,24 @@ def exported_attachment(attachments, logical_name):
     return name
 
 
-def verify_and_copy(attachments_dir, output_dir):
+def verify_and_copy(attachments_dir, output_dir, require_ipad_details=False):
     manifest = json.loads((attachments_dir / "manifest.json").read_text())
     attachments = [x for entry in manifest for x in entry.get("attachments", [])]
     validated = {}
     output_dir.mkdir(parents=True, exist_ok=True)
-    for logical in LANDSCAPE_PRIMARY + LANDSCAPE_DIAGNOSTIC + PORTRAIT_PRIMARY:
+    detail_names = (IPAD_DETAIL_LANDSCAPE + IPAD_DETAIL_PORTRAIT
+                    if require_ipad_details else ())
+    for logical in LANDSCAPE_PRIMARY + LANDSCAPE_DIAGNOSTIC + PORTRAIT_PRIMARY + detail_names:
         src = attachments_dir / exported_attachment(attachments, logical)
         if not src.is_file():
             raise ValueError(f"{logical}: missing raw screenshot PNG")
         info = read_png_metadata(src)
         display_landscape = info["display_width"] > info["display_height"]
-        if logical in LANDSCAPE_PRIMARY and not display_landscape:
+        if logical in LANDSCAPE_PRIMARY + IPAD_DETAIL_LANDSCAPE and not display_landscape:
             raise ValueError(f"{logical}: full-screen capture does not display in landscape")
-        if logical in PORTRAIT_PRIMARY and display_landscape:
+        if logical in PORTRAIT_PRIMARY + IPAD_DETAIL_PORTRAIT and display_landscape:
             raise ValueError(f"{logical}: portrait evidence displays in landscape")
-        preferred = logical in LANDSCAPE_PRIMARY + PORTRAIT_PRIMARY
+        preferred = logical in LANDSCAPE_PRIMARY + PORTRAIT_PRIMARY + detail_names
         target = output_dir / (logical + ".raw.png")
         shutil.copyfile(src, target)
         validated[logical] = {**info, "file": target.name,
@@ -220,6 +224,17 @@ def verify_and_copy(attachments_dir, output_dir):
         last = validated[after]["raster_scanlines_sha256"]
         if first is not None and first == last:
             raise ValueError(f"{before} and {after}: duplicate decoded screenshot pixels")
+    if require_ipad_details:
+        # Screen orientation can be faked with EXIF alone. Reject duplicate
+        # real decoded pixels even when PNG metadata/encoding differs.
+        landscape = validated[IPAD_DETAIL_LANDSCAPE[0]]
+        portrait = validated[IPAD_DETAIL_PORTRAIT[0]]
+        if landscape["sha256"] == portrait["sha256"]:
+            raise ValueError("iPad Game Details portrait/landscape: duplicate raw screenshot bytes")
+        first = landscape["raster_scanlines_sha256"]
+        last = portrait["raster_scanlines_sha256"]
+        if first is not None and first == last:
+            raise ValueError("iPad Game Details portrait/landscape: duplicate decoded screenshot pixels")
     report = {
         "status": "screen-orientation-verified",
         "capture_source": "native XCTest xcresulttool export attachments",
@@ -227,6 +242,7 @@ def verify_and_copy(attachments_dir, output_dir):
         "landscape_preferred": list(LANDSCAPE_PRIMARY),
         "app_window_landscape_diagnostic_only": list(LANDSCAPE_DIAGNOSTIC),
         "verified": validated,
+        "ipad_details_required": require_ipad_details,
         "media_ready": False,
         "note": "A correct screenshot orientation cannot establish an approved gameplay clip or poster.",
     }
@@ -238,9 +254,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--require-ipad-details", action="store_true",
+                        help="Require original native iPad Game Details portrait/landscape captures")
     args = parser.parse_args()
     try:
-        report = verify_and_copy(args.input, args.out)
+        report = verify_and_copy(args.input, args.out,
+                                 require_ipad_details=args.require_ipad_details)
         print(json.dumps({"status": report["status"], "verified_count": len(report["verified"])}))
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
         parser.exit(1, f"UI screenshot evidence failed: {error}\n")

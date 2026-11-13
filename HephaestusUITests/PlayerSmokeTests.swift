@@ -402,6 +402,117 @@ final class PlayerSmokeTests: XCTestCase {
                       "Closing game details must preserve the browsable origin post.")
     }
 
+    /// One real feed post opens the same native Game Details sheet on iPad.
+    /// The design must become two-column in landscape and return to one
+    /// column in portrait, without replacing published metadata with fixtures.
+    @MainActor
+    func testArcadePulseIPadGameDetailsAdaptiveLayout() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Adaptive two-column details are iPad-only.")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+        let window = app.windows.firstMatch
+        let orientationDeadline = Date().addingTimeInterval(12)
+        while window.frame.width <= window.frame.height && Date() < orientationDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "iPad Game Details test needs an actual landscape viewport.")
+
+        let more = app.descendants(matching: .any)["More game actions"].firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let pending = app.buttons["feed.retryLoading"].firstMatch
+        let deadline = Date().addingTimeInterval(120)
+        var lastRetry = Date.distantPast
+        var attemptedRetry = false
+        while !more.exists && Date() < deadline {
+            if Date().timeIntervalSince(lastRetry) >= 20 {
+                let available = retry.exists ? retry : pending
+                if available.exists {
+                    // The loading skeleton can disappear between isHittable
+                    // and tap(), producing XCT's invalid {inf,inf} hit point.
+                    // Use its current finite 44pt+ snapshot coordinate only;
+                    // never fabricate a game or count Retry as feed success.
+                    let frame = available.frame
+                    let bounds = app.frame
+                    let center = CGPoint(x: frame.midX, y: frame.midY)
+                    if frame.origin.x.isFinite && frame.origin.y.isFinite &&
+                       frame.width.isFinite && frame.height.isFinite &&
+                       frame.width >= 44 && frame.height >= 44 &&
+                       bounds.contains(center) && !more.exists {
+                        let origin = app.coordinate(
+                            withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                        origin.withOffset(CGVector(
+                            dx: center.x - bounds.minX,
+                            dy: center.y - bounds.minY
+                        )).tap()
+                        lastRetry = Date()
+                        attemptedRetry = true
+                    }
+                }
+            }
+            _ = more.waitForExistence(timeout: 4)
+        }
+        if !more.exists {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "arcade-pulse-ipad-game-details-live-feed-unavailable"
+            shot.lifetime = .keepAlways
+            add(shot)
+            print("GAME_DETAILS_FEED_FAILURE retry_attempted=\(attemptedRetry) loading=\(pending.exists) error=\(retry.exists)")
+        }
+        XCTAssertTrue(more.exists && more.isHittable,
+                      "Require a genuine live feed game's More action.");
+        more.tap()
+        let openDetails = app.buttons["Game details"].firstMatch
+        XCTAssertTrue(openDetails.waitForExistence(timeout: 5))
+        openDetails.tap()
+        let title = app.descendants(matching: .any)["game.details.title"].firstMatch
+        let landscapeColumn = app.descendants(matching: .any)["game.details.twoColumn"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertTrue(landscapeColumn.waitForExistence(timeout: 10),
+                      "Landscape iPad Game Details must show the media and metadata side by side.")
+        let preview = app.descendants(matching: .any)["game.details.preview"].firstMatch
+        XCTAssertTrue(preview.exists,
+                      "Two-column detail must show real artwork or an honest fallback.")
+        let play = app.buttons["game.play"].firstMatch
+        XCTAssertGreaterThanOrEqual(preview.frame.width, 450,
+                                    "Landscape two-column preview must remain media-dominant.")
+        XCTAssertGreaterThanOrEqual(title.frame.minX, preview.frame.maxX + 12,
+                                    "The native Game Details title must be beside preview, not below it.")
+        XCTAssertTrue(play.exists && play.isHittable)
+        XCTAssertGreaterThanOrEqual(play.frame.height, 44)
+        XCTAssertTrue(app.buttons["Share game"].firstMatch.exists,
+                      "Sharing the actual published game must be available.")
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-ipad-game-details-landscape-two-column"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+
+        XCUIDevice.shared.orientation = .portrait
+        let portraitDeadline = Date().addingTimeInterval(12)
+        while window.frame.width >= window.frame.height && Date() < portraitDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertLessThan(window.frame.width, window.frame.height,
+                          "Portrait screenshot must follow a completed iPad rotation.")
+        let single = app.descendants(matching: .any)["game.details.singleColumn"].firstMatch
+        XCTAssertTrue(single.waitForExistence(timeout: 10),
+                      "Portrait iPad Details should collapse into one readable column.")
+        XCTAssertTrue(title.exists && app.buttons["game.play"].firstMatch.exists,
+                      "Orientation changes must preserve title and live Play.")
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-ipad-game-details-portrait-single-column"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["game.play"].firstMatch.waitForExistence(timeout: 10),
+                      "Dismissing Details must return to the original browsable post.")
+    }
+
     /// Verify the actual social sheet on a live feed, not the design render.
     /// No synthetic comments or engagement counters are injected.
     @MainActor

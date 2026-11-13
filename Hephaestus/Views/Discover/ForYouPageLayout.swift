@@ -25,6 +25,20 @@ enum ForYouPageLayout {
         isRegular && width > height && width >= 1_024 && !isAccessibilityText
     }
 
+    /// Real Game Details adapt separately from the swipe feed. An iPad
+    /// landscape needs enough width *and* height for media + readable actual
+    /// metadata; portrait, Split View and enlarged text stay one column.
+    static func showsIPadGameDetailsTwoColumn(
+        width: CGFloat, height: CGFloat, isRegular: Bool, isLargeText: Bool
+    ) -> Bool {
+        isRegular && width > height && width >= 960 && height >= 620 && !isLargeText
+    }
+
+    static func gameDetailsPreviewWidth(containerWidth: CGFloat) -> CGFloat {
+        let usable = max(0, min(containerWidth - 36, 1_200))
+        return usable * 0.55
+    }
+
     static func contextPanelWidth(containerWidth: CGFloat) -> CGFloat {
         min(300, containerWidth * 0.27)
     }

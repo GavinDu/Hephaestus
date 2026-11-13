@@ -97,6 +97,34 @@ struct HephaestusTests {
         }
     }
 
+    @Test func arcadePulseIPadGameDetailsKeepsMediaAndActionsReadable() {
+        #expect(ForYouPageLayout.showsIPadGameDetailsTwoColumn(
+            width: 1_366, height: 1_024, isRegular: true, isLargeText: false))
+        #expect(ForYouPageLayout.showsIPadGameDetailsTwoColumn(
+            width: 1_194, height: 834, isRegular: true, isLargeText: false))
+        // Portrait, compact Split View, short Stage Manager and high text
+        // must have one readable scrolling detail column, not clipped media.
+        #expect(!ForYouPageLayout.showsIPadGameDetailsTwoColumn(
+            width: 1_024, height: 1_366, isRegular: true, isLargeText: false))
+        #expect(!ForYouPageLayout.showsIPadGameDetailsTwoColumn(
+            width: 860, height: 700, isRegular: true, isLargeText: false))
+        #expect(!ForYouPageLayout.showsIPadGameDetailsTwoColumn(
+            width: 1_366, height: 600, isRegular: true, isLargeText: false))
+        #expect(!ForYouPageLayout.showsIPadGameDetailsTwoColumn(
+            width: 1_366, height: 1_024, isRegular: true, isLargeText: true))
+        #expect(!ForYouPageLayout.showsIPadGameDetailsTwoColumn(
+            width: 1_366, height: 1_024, isRegular: false, isLargeText: false))
+        for width: CGFloat in [960, 1_024, 1_194, 1_366] {
+            let media = ForYouPageLayout.gameDetailsPreviewWidth(containerWidth: width)
+            let content = min(width - 36, 1_200)
+            let metadata = content - media - 24
+            #expect(media >= 480)
+            #expect(metadata >= 350)
+            #expect(media + metadata + 24 <= content)
+        }
+        #expect(ForYouPageLayout.gameDetailsPreviewWidth(containerWidth: 20) == 0)
+    }
+
     @Test func compactLandscapeOverlayPreservesPlayerSpaceAndNavigation() {
         #expect(ForYouPageLayout.usesCompactLandscapeOverlay(
             verticalSizeClass: .compact, horizontalSizeClass: .compact, hasImmersivePager: true))
