@@ -196,6 +196,20 @@ struct HephaestusTests {
         #expect(response.nextCursor == nil)
     }
 
+    @Test func remixEligibilityIsServerDecidedNotDerivedFromPublicFeedPresence() throws {
+        let blocked = try JSONDecoder().decode(
+            RemixEligibility.self,
+            from: Data(#"{"eligible":false,"reason":"Creator has not allowed remixing.","game_id":"game-1"}"#.utf8))
+        #expect(!blocked.eligible)
+        #expect(blocked.gameID == "game-1")
+        #expect(!blocked.reason.isEmpty)
+        let allowed = try JSONDecoder().decode(
+            RemixEligibility.self,
+            from: Data(#"{"eligible":true,"reason":"","game_id":"sample-ribbon-sky"}"#.utf8))
+        #expect(allowed.eligible)
+        #expect(allowed.gameID == "sample-ribbon-sky")
+    }
+
     @Test func socialFeedScopesAreStableAndDistinct() {
         #expect(SocialFeedScope.allCases.map(\.rawValue) == ["for_you", "following", "friends"])
         #expect(SocialFeedScope.allCases.map(\.title) == ["For You", "Following", "Friends"])
@@ -1119,6 +1133,25 @@ struct HephaestusTests {
     #expect(!allowed("owner-A", "owner-A", "token-A", "token-A", 5, 6))
     #expect(!allowed("owner-A", "owner-A", nil, "token-A"))
     #expect(!allowed("", "", nil, nil))
+}
+
+
+@Test func remixEligibilitySnapshotNeverSurvivesCredentialRotationOrLogout() {
+    func apply(_ startOwner: String, _ currentOwner: String,
+               _ startToken: String?, _ currentToken: String?,
+               _ startEpoch: Int = 2, _ currentEpoch: Int = 2) -> Bool {
+        RemixSessionPolicy.canApply(
+            expectedOwner: startOwner, currentOwner: currentOwner,
+            expectedToken: startToken, currentToken: currentToken,
+            expectedRevision: startEpoch, currentRevision: currentEpoch)
+    }
+    #expect(apply("accountA", "accountA", "token-A", "token-A"))
+    #expect(!apply("accountA", "accountA", "token-A", "token-rotated"))
+    #expect(!apply("accountA", "accountB", "token-A", "token-B"))
+    #expect(!apply("accountA", "", "token-A", nil))
+    #expect(!apply("", "", nil, nil))
+    #expect(!apply("accountA", "accountA", "token-A", "token-A", 2, 3))
+    #expect(!apply("accountA", "accountA", nil, "token-A"))
 }
 
 @Test func playerNativeSheetRejectsStaleAndRevokedEpochCallbacks() {

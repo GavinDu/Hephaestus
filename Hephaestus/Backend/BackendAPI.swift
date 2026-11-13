@@ -331,6 +331,17 @@ struct CreatorProjectsResponse: Decodable {
     }
 }
 
+struct RemixEligibility: Decodable {
+    let eligible: Bool
+    let reason: String
+    let gameID: String
+
+    enum CodingKeys: String, CodingKey {
+        case eligible, reason
+        case gameID = "game_id"
+    }
+}
+
 struct CreatorDiscoveryEntry: Decodable, Identifiable {
     var creator_id: String
     var post_count: Int
@@ -521,7 +532,7 @@ final class BackendAPI: ObservableObject {
     private struct CommentsResponse: Decodable { var comments: [SocialComment] }
     private struct CommentResponse: Decodable { var comment: SocialComment }
     private struct PostResponse: Decodable { var post: FeedGame }
-    private struct PublishBody: Encodable { var caption: String; var topics: [String]; var remix_parent_id: String? }
+    private struct PublishBody: Encodable { var caption: String; var topics: [String]; var remix_parent_id: String?; var allow_remixes: Bool }
     private struct ReactionBody: Encodable { var reaction: String }
     private struct CommentBody: Encodable { var body: String }
     private struct ReportBody: Encodable { var reason: String }
@@ -734,6 +745,30 @@ final class BackendAPI: ObservableObject {
         _ = try? await session.data(for: req)
     }
 
+    private struct CreateRemixBody: Encodable {
+        let parent_game_id: String
+        let intent: String
+    }
+
+    /// Advisory UI eligibility only. The backend independently enforces
+    /// the same source rights when creating the child game/job.
+    func fetchRemixEligibility(gameID: String) async throws -> RemixEligibility {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        guard let id = gameID.addingPercentEncoding(withAllowedCharacters: allowed),
+              !id.isEmpty else {
+            throw APIError.invalidInput("Invalid source game.")
+        }
+        let request = try makeRequest("v1/games/\(id)/remix-eligibility")
+        return try await send(RemixEligibility.self, request)
+    }
+
+    func createRemix(parentGameID: String, intent: String) async throws -> CreateGameResponse {
+        let request = try makeRequest(
+            "v1/games", method: "POST",
+            body: CreateRemixBody(parent_game_id: parentGameID, intent: intent))
+        return try await send(CreateGameResponse.self, request)
+    }
+
     func fetchCreatorProfile(id: String) async throws -> CreatorProfile {
         let req = try makeRequest("v1/users/\(id)")
         return try await send(CreatorProfile.self, req)
@@ -758,8 +793,10 @@ final class BackendAPI: ObservableObject {
         return try await send(CreatorDiscoveryResponse.self, request)
     }
 
-    func publishPost(gameID: String, caption: String, topics: [String], remixParentID: String? = nil) async throws -> FeedGame {
-        let body = PublishBody(caption: caption, topics: topics, remix_parent_id: remixParentID)
+    func publishPost(gameID: String, caption: String, topics: [String],
+                     remixParentID: String? = nil, allowRemixes: Bool = false) async throws -> FeedGame {
+        let body = PublishBody(caption: caption, topics: topics,
+                               remix_parent_id: remixParentID, allow_remixes: allowRemixes)
         let req = try makeRequest("v1/games/\(gameID)/publish", method: "POST", body: body)
         return try await send(PostResponse.self, req).post
     }
