@@ -123,6 +123,13 @@ struct HephaestusTests {
             #expect(media + metadata + 24 <= content)
         }
         #expect(ForYouPageLayout.gameDetailsPreviewWidth(containerWidth: 20) == 0)
+        // Landscape Game Details must use the available safe viewport height
+        // rather than the previous hard 520pt media ceiling. This expands
+        // genuine artwork or an honest no-preview fallback identically.
+        #expect(ForYouPageLayout.gameDetailsPreviewHeight(containerHeight: 1_000) == 640)
+        #expect(ForYouPageLayout.gameDetailsPreviewHeight(containerHeight: 760) >= 550)
+        #expect(ForYouPageLayout.gameDetailsPreviewHeight(containerHeight: 620) >= 450)
+        #expect(ForYouPageLayout.gameDetailsPreviewHeight(containerHeight: 0) == 0)
     }
 
     @Test func compactLandscapeOverlayPreservesPlayerSpaceAndNavigation() {
