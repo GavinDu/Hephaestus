@@ -221,6 +221,13 @@ struct LibraryView: View {
                     Text(BackendConfig.currentUserID.isEmpty
                          ? "Signed-out activity on this device. Cleared when you change accounts."
                          : "Recent activity for this account on this device.")
+                        .fixedSize(horizontal: false, vertical: true)
+                        // iPhone's translucent bottom tabs can visually cover
+                        // the last line of the section footer. Keep enough
+                        // trailing scroll space to read the privacy notice.
+                        .padding(.bottom,
+                                 UIDevice.current.userInterfaceIdiom == .phone ? 32 : 8)
+                        .accessibilityIdentifier("library.privacyFooter")
                 }
             }
             .listStyle(.insetGrouped)
