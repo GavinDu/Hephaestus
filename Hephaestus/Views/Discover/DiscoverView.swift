@@ -332,6 +332,42 @@ struct DiscoverView: View {
                             .accessibilityIdentifier("feed.pagination.retry")
                         }
                     }
+                } else if isLoading && games.isEmpty && verticalSizeClass == .compact {
+                    // A scrolling grid of skeletons pushes the real actions out
+                    // of the tiny iPhone landscape viewport. Keep recovery at
+                    // the top of the native stage with a stable hit-test frame.
+                    // Portrait and iPad retain their full skeleton layout.
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Finding something fun…")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Loading games")
+
+                        if isSlowLoading {
+                            Text(onOpenLibrary == nil
+                                 ? "Still connecting to the live game feed. You can retry."
+                                 : "Still connecting to the live game feed. You can retry or open Library.")
+                                .font(.subheadline)
+                                .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("feed.loading.slow")
+                        }
+
+                        HStack(spacing: 12) {
+                            feedLoadingRetry
+                            if isSlowLoading {
+                                feedSlowLoadingLibrary
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
                     ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
