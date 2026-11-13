@@ -421,6 +421,147 @@ final class PlayerSmokeTests: XCTestCase {
                       "Open Library must navigate to native Library; no fake offline game.")
     }
 
+    /// A timed-out *transport* must expose a real escape hatch; this fixture
+    /// stalls only the request and never creates or approves a fake game.
+    /// Live-swipe and real-backend smoke tests use no fixture launch argument.
+    @MainActor
+    func testArcadePulseStalledFeedWatchdogOpensRecovery() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-stalled-feed")
+        app.launch()
+        // A separate, short slow-status phase must be genuinely reachable
+        // before the timeout. Both screenshots are native app captures; the
+        // request is deliberately stalled but NO game/content is synthesized.
+        let slow = app.descendants(matching: .any)["feed.loading.slow"].firstMatch
+        XCTAssertTrue(slow.waitForExistence(timeout: 10),
+                      "An unusually slow live request must explain progress before timeout.")
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
+                       "A slow request must not fabricate a playable post.")
+        let slowLibrary = app.buttons["feed.loading.library"].firstMatch
+        XCTAssertTrue(slowLibrary.exists && slowLibrary.isHittable,
+                      "Library must be reachable before a slow connection times out.")
+        XCTAssertGreaterThanOrEqual(slowLibrary.frame.height, 44)
+        let slowScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        slowScreenshot.name = "arcade-pulse-feed-still-connecting"
+        slowScreenshot.lifetime = .keepAlways
+        add(slowScreenshot)
+
+        let recover = app.descendants(matching: .any)["feed.error.recovery"].firstMatch
+        XCTAssertTrue(recover.waitForExistence(timeout: 20),
+                      "The UI must leave an indefinitely waiting skeleton.")
+        XCTAssertFalse(slow.exists,
+                       "Slow-status text must retire when the timeout recovery is shown.")
+        let retry = app.buttons["feed.error.retry"].firstMatch
+        let library = app.buttons["feed.error.library"].firstMatch
+        XCTAssertTrue(retry.exists && retry.isHittable,
+                      "The timed-out service must offer a genuine Retry action.")
+        XCTAssertTrue(library.exists && library.isHittable,
+                      "The user must be able to leave the stalled feed for Library.")
+        XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+        XCTAssertTrue(app.staticTexts[
+            "The game feed is taking too long to load. Try again or open Library."
+        ].firstMatch.exists)
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
+                       "A stalled request is not grounds to create a synthetic game.")
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-feed-stalled-recovery-portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            XCTAssertTrue(library.waitForExistence(timeout: 10) && library.isHittable)
+            let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            landscape.name = "arcade-pulse-feed-stalled-recovery-ipad-landscape"
+            landscape.lifetime = .keepAlways
+            add(landscape)
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCTAssertTrue(library.waitForExistence(timeout: 10) && library.isHittable)
+        library.tap()
+        let destination = app.descendants(matching: .any)[
+            "library.arcadePulse"
+        ].firstMatch
+        if !destination.waitForExistence(timeout: 10) {
+            // Record a real post-tap screenshot and navigation diagnosis.
+            // Do not weaken the strict Library route assertion.
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "arcade-pulse-feed-timeout-library-tap-failure"
+            failure.lifetime = .keepAlways
+            add(failure)
+            print("FEED_TIMEOUT_LIBRARY_TAP selected_library=\(app.tabBars.buttons[\"Library\"].firstMatch.isSelected) still_discover=\(app.tabBars.buttons[\"Discover\"].firstMatch.isSelected)")
+        }
+        XCTAssertTrue(destination.exists,
+                      "Library navigation must still work after timeout.")
+    }
+
+    /// A genuine loading request must have a functional escape before the
+    /// 45-second production watchdog, including in iPad split navigation.
+    @MainActor
+    func testArcadePulseSlowFeedCanOpenRealLibrary() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-stalled-feed")
+        app.launch()
+        let slow = app.descendants(matching: .any)["feed.loading.slow"].firstMatch
+        XCTAssertTrue(slow.waitForExistence(timeout: 12),
+                      "A slow live request must expose its truthful status.")
+        let open = app.buttons["feed.loading.library"].firstMatch
+        XCTAssertTrue(open.exists && open.isHittable,
+                      "An accessible Library escape must work before timeout.")
+        XCTAssertGreaterThanOrEqual(open.frame.height, 44)
+        open.tap()
+        let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 10),
+                      "The slow-load Library action must navigate to real native Library.")
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "arcade-pulse-slow-feed-real-library-escape"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+    }
+
+    /// The short landscape viewport cannot hide the real slow-feed escape
+    /// controls under the bottom tabs as they remain visibly tappable.
+    @MainActor
+    func testArcadePulseSlowFeedLandscapeActionsAreReachable() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("Compact-height iPhone landscape navigation gate.")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-stalled-feed")
+        app.launch()
+        let slow = app.descendants(matching: .any)["feed.loading.slow"].firstMatch
+        XCTAssertTrue(slow.waitForExistence(timeout: 12))
+        let retry = app.buttons["feed.retryLoading"].firstMatch
+        let library = app.buttons["feed.loading.library"].firstMatch
+        XCTAssertTrue(retry.exists && retry.isHittable)
+        XCTAssertTrue(library.exists && library.isHittable)
+        XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+        XCTAssertLessThan(retry.frame.maxX, library.frame.minX + 1,
+                          "Retry and Library must form non-overlapping landscape buttons.")
+        let window = app.windows.firstMatch
+        XCTAssertLessThanOrEqual(retry.frame.maxY, window.frame.maxY + 1)
+        XCTAssertLessThanOrEqual(library.frame.maxY, window.frame.maxY + 1)
+        let tabs = app.tabBars.firstMatch
+        if tabs.exists {
+            XCTAssertLessThanOrEqual(retry.frame.maxY, tabs.frame.minY + 1,
+                                     "Retry must remain above bottom navigation.")
+            XCTAssertLessThanOrEqual(library.frame.maxY, tabs.frame.minY + 1,
+                                     "Library must remain above bottom navigation.")
+        }
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "arcade-pulse-slow-feed-iphone-landscape-actions"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     /// Verify the real saved/recent game library remains reachable through
     /// native tabs and preserves truthful empty/network states.
     @MainActor
@@ -606,8 +747,24 @@ final class PlayerSmokeTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(openProfile.waitForExistence(timeout: 10) && openProfile.isHittable)
         openProfile.tap()
-        XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
-                      "The Studio CTA must navigate to the actual Profile sign-in flow.")
+        // Apple's SignInWithAppleButton bridges AuthenticationServices
+        // UIKit: XCTest does not consistently classify it as .button.
+        // Verify both the *real* Profile destination and its native sign-in
+        // element, not merely the label within the former Studio screen.
+        let profileHelp = app.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS %@", "Sign in with Apple to publish")
+        ).firstMatch
+        XCTAssertTrue(profileHelp.waitForExistence(timeout: 12),
+                      "Studio must navigate to the actual signed-out Profile view.")
+        let appleSignIn = app.descendants(matching: .any)["profile.appleSignIn"].firstMatch
+        XCTAssertTrue(appleSignIn.waitForExistence(timeout: 10) && appleSignIn.isHittable,
+                      "Profile must expose the native Sign in with Apple control.")
+        XCTAssertGreaterThanOrEqual(appleSignIn.frame.height, 44,
+                                    "Apple sign-in entry must remain an accessible touch target.")
+        let profileShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        profileShot.name = "arcade-pulse-ipad-studio-to-real-profile-sign-in"
+        profileShot.lifetime = .keepAlways
+        add(profileShot)
     }
 
     /// In accessibility text sizes the multi-column explainer is intentionally

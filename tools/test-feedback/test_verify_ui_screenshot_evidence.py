@@ -51,17 +51,26 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             p.write_bytes(png(10, 20, 8))
             self.assertEqual(module.read_png_metadata(p)["display_width"], 20)
 
-    def fixture(self, folder, corrupt_fullscreen=False, omit=None):
+    def fixture(self, folder, corrupt_fullscreen=False, omit=None, include_slow=False):
         attachments = []
+        slow = (module.SLOW_FEED_PORTRAIT + module.SLOW_FEED_LANDSCAPE
+                if include_slow else ())
         for name in (module.LANDSCAPE_PRIMARY +
-                     module.LANDSCAPE_DIAGNOSTIC + module.PORTRAIT_PRIMARY):
+                     module.LANDSCAPE_DIAGNOSTIC + module.PORTRAIT_PRIMARY + slow):
             if name == omit:
                 continue
             file = name + ".png"
             # Full screen raw portrait + EXIF 8 -> landscape displayed.
             # App-window raw landscape + EXIF 8 -> incorrect portrait displayed.
             rgb = b"\x50\x40\x20" if "after-swipe" in name else b"\x20\x50\x80"
-            if name in module.LANDSCAPE_PRIMARY:
+            if name in module.SLOW_FEED_PORTRAIT + module.SLOW_FEED_LANDSCAPE:
+                rgb = {
+                    "arcade-pulse-feed-still-connecting": b"\x22\x44\x66",
+                    "arcade-pulse-feed-stalled-recovery-portrait": b"\x66\x33\x22",
+                    "arcade-pulse-slow-feed-real-library-escape": b"\x44\x66\x22",
+                    "arcade-pulse-feed-stalled-recovery-ipad-landscape": b"\x66\x22\x44",
+                }[name]
+            if name in module.LANDSCAPE_PRIMARY + module.SLOW_FEED_LANDSCAPE:
                 payload = png(10, 20, 1 if corrupt_fullscreen else 8, rgb=rgb)
             elif name in module.LANDSCAPE_DIAGNOSTIC:
                 payload = png(20, 10, 8, rgb=rgb)
@@ -87,6 +96,47 @@ class ScreenshotEvidenceTests(unittest.TestCase):
                                  (source / (name + ".png")).read_bytes())
             for name in module.LANDSCAPE_DIAGNOSTIC:
                 self.assertFalse(report["verified"][name]["preferred_for_visual_review"])
+
+    def test_required_slow_feed_native_captures_pass_and_remain_unmodified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            output = Path(directory) / "review"
+            source.mkdir()
+            self.fixture(source, include_slow=True)
+            report = module.verify_and_copy(source, output, require_slow_feed=True)
+            self.assertTrue(report["slow_feed_evidence_required"])
+            for name in module.SLOW_FEED_PORTRAIT + module.SLOW_FEED_LANDSCAPE:
+                self.assertIn(name, report["verified"])
+                self.assertTrue(report["verified"][name]["preferred_for_visual_review"])
+                self.assertEqual((output / (name + ".raw.png")).read_bytes(),
+                                 (source / (name + ".png")).read_bytes())
+
+    def test_slow_feed_evidence_missing_wrong_orientation_or_reused_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            folder.mkdir()
+            self.fixture(folder)
+            with self.assertRaisesRegex(ValueError, "expected exactly one"):
+                module.verify_and_copy(folder, Path(directory) / "no-slow",
+                                       require_slow_feed=True)
+            self.fixture(folder, include_slow=True,
+                         omit=module.SLOW_FEED_LANDSCAPE[0])
+            with self.assertRaisesRegex(ValueError, "expected exactly one"):
+                module.verify_and_copy(folder, Path(directory) / "no-landscape",
+                                       require_slow_feed=True)
+            self.fixture(folder, include_slow=True)
+            landscape = folder / (module.SLOW_FEED_LANDSCAPE[0] + ".png")
+            landscape.write_bytes(png(10, 20, 1))
+            with self.assertRaisesRegex(ValueError, "does not display in landscape"):
+                module.verify_and_copy(folder, Path(directory) / "bad-orientation",
+                                       require_slow_feed=True)
+            self.fixture(folder, include_slow=True)
+            before, after = module.SLOW_FEED_PORTRAIT[:2]
+            (folder / (after + ".png")).write_bytes(
+                (folder / (before + ".png")).read_bytes())
+            with self.assertRaisesRegex(ValueError, "duplicate raw screenshot bytes"):
+                module.verify_and_copy(folder, Path(directory) / "duplicate",
+                                       require_slow_feed=True)
 
     def test_exact_duplicate_swipe_capture_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

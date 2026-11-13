@@ -30,6 +30,16 @@ PORTRAIT_PRIMARY = (
     "feed-ui-evaluator-before-swipe-portrait",
     "feed-ui-evaluator-after-swipe-portrait",
 )
+# Evidence from the test-only stalled *transport*. No game or success
+# fixture is injected: these prove truthful native UI and real navigation.
+SLOW_FEED_PORTRAIT = (
+    "arcade-pulse-feed-still-connecting",
+    "arcade-pulse-feed-stalled-recovery-portrait",
+    "arcade-pulse-slow-feed-real-library-escape",
+)
+SLOW_FEED_LANDSCAPE = (
+    "arcade-pulse-feed-stalled-recovery-ipad-landscape",
+)
 
 
 def tiff_orientation(data):
@@ -186,22 +196,25 @@ def exported_attachment(attachments, logical_name):
     return name
 
 
-def verify_and_copy(attachments_dir, output_dir):
+def verify_and_copy(attachments_dir, output_dir, require_slow_feed=False):
     manifest = json.loads((attachments_dir / "manifest.json").read_text())
     attachments = [x for entry in manifest for x in entry.get("attachments", [])]
     validated = {}
     output_dir.mkdir(parents=True, exist_ok=True)
-    for logical in LANDSCAPE_PRIMARY + LANDSCAPE_DIAGNOSTIC + PORTRAIT_PRIMARY:
+    expected = LANDSCAPE_PRIMARY + LANDSCAPE_DIAGNOSTIC + PORTRAIT_PRIMARY
+    if require_slow_feed:
+        expected += SLOW_FEED_PORTRAIT + SLOW_FEED_LANDSCAPE
+    for logical in expected:
         src = attachments_dir / exported_attachment(attachments, logical)
         if not src.is_file():
             raise ValueError(f"{logical}: missing raw screenshot PNG")
         info = read_png_metadata(src)
         display_landscape = info["display_width"] > info["display_height"]
-        if logical in LANDSCAPE_PRIMARY and not display_landscape:
+        if logical in LANDSCAPE_PRIMARY + SLOW_FEED_LANDSCAPE and not display_landscape:
             raise ValueError(f"{logical}: full-screen capture does not display in landscape")
-        if logical in PORTRAIT_PRIMARY and display_landscape:
+        if logical in PORTRAIT_PRIMARY + SLOW_FEED_PORTRAIT and display_landscape:
             raise ValueError(f"{logical}: portrait evidence displays in landscape")
-        preferred = logical in LANDSCAPE_PRIMARY + PORTRAIT_PRIMARY
+        preferred = logical in LANDSCAPE_PRIMARY + PORTRAIT_PRIMARY + SLOW_FEED_PORTRAIT + SLOW_FEED_LANDSCAPE
         target = output_dir / (logical + ".raw.png")
         shutil.copyfile(src, target)
         validated[logical] = {**info, "file": target.name,
@@ -220,6 +233,17 @@ def verify_and_copy(attachments_dir, output_dir):
         last = validated[after]["raster_scanlines_sha256"]
         if first is not None and first == last:
             raise ValueError(f"{before} and {after}: duplicate decoded screenshot pixels")
+    if require_slow_feed:
+        # The slow state and the recovered error state must be independent
+        # captures. Changed metadata or recompression cannot establish a
+        # genuine visual transition.
+        before, after = SLOW_FEED_PORTRAIT[:2]
+        if validated[before]["sha256"] == validated[after]["sha256"]:
+            raise ValueError(f"{before} and {after}: duplicate raw screenshot bytes")
+        first = validated[before]["raster_scanlines_sha256"]
+        last = validated[after]["raster_scanlines_sha256"]
+        if first is not None and first == last:
+            raise ValueError(f"{before} and {after}: duplicate decoded screenshot pixels")
     report = {
         "status": "screen-orientation-verified",
         "capture_source": "native XCTest xcresulttool export attachments",
@@ -228,6 +252,7 @@ def verify_and_copy(attachments_dir, output_dir):
         "app_window_landscape_diagnostic_only": list(LANDSCAPE_DIAGNOSTIC),
         "verified": validated,
         "media_ready": False,
+        "slow_feed_evidence_required": require_slow_feed,
         "note": "A correct screenshot orientation cannot establish an approved gameplay clip or poster.",
     }
     (output_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
@@ -238,9 +263,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--require-slow-feed", action="store_true")
     args = parser.parse_args()
     try:
-        report = verify_and_copy(args.input, args.out)
+        report = verify_and_copy(args.input, args.out,
+                                 require_slow_feed=args.require_slow_feed)
         print(json.dumps({"status": report["status"], "verified_count": len(report["verified"])}))
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
         parser.exit(1, f"UI screenshot evidence failed: {error}\n")

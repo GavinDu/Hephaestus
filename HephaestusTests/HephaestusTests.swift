@@ -1235,6 +1235,33 @@ struct HephaestusTests {
     #expect(!mayEvict(true, false))
 }
 
+// The public feed must never show a previous request's cards after a
+// timed-out skeleton has switched to the real Retry/Library recovery view.
+@Test @MainActor func arcadePulseFeedTimeoutRevokesStaleNetworkGeneration() {
+    let coordinator = FeedRequestCoordinator()
+    let first = coordinator.begin {
+        try await Task.sleep(for: .seconds(120))
+        throw CancellationError()
+    }
+    #expect(coordinator.isCurrent(first.generation))
+    #expect(coordinator.expireIfCurrent(first.generation))
+    #expect(!coordinator.isCurrent(first.generation))
+    #expect(!coordinator.expireIfCurrent(first.generation),
+            "A stale watchdog must not revoke the next request.")
+
+    let next = coordinator.begin {
+        try await Task.sleep(for: .seconds(120))
+        throw CancellationError()
+    }
+    #expect(coordinator.isCurrent(next.generation))
+    #expect(!coordinator.expireIfCurrent(first.generation),
+            "An old timeout cannot cancel a later user Retry.")
+    #expect(coordinator.isCurrent(next.generation))
+    next.request.cancel()
+    first.request.cancel()
+}
+
+
 // A live HTTPS outage is a real error; it must produce a legible recovery
 // explanation rather than raw TLS/certificate jargon or fabricated feed cards.
 @Test func arcadePulseFeedFailureCopyIsActionableAndTruthful() {
