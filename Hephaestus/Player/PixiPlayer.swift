@@ -120,6 +120,126 @@ struct PlayerFirstSceneRenderSubmissionGate {
     }
 }
 
+/// Reject delayed messages from recently retired documents when the same
+/// WebView navigates to a fresh runtime session. An unbound replacement
+/// document must not accept a retired session's first queued message.
+/// Keep only a fixed number of IDs regardless of game duration.
+/// This is defense-in-depth; a per-navigation runtime nonce would prove
+/// provenance across arbitrarily many document reloads.
+struct PlayerRuntimeSessionBindingGate {
+    static let maximumRetiredSessions = 8
+    private(set) var activeSessionID: String?
+    private var retiredSessionIDs: [String] = []
+    var retiredCount: Int { retiredSessionIDs.count }
+
+    mutating func bind(_ sessionID: String) -> Bool {
+        guard !sessionID.isEmpty, sessionID.count <= 128,
+              !retiredSessionIDs.contains(sessionID) else { return false }
+        if let activeSessionID { return activeSessionID == sessionID }
+        activeSessionID = sessionID
+        return true
+    }
+
+    mutating func beginNavigation() {
+        if let old = activeSessionID, !retiredSessionIDs.contains(old) {
+            retiredSessionIDs.append(old)
+            if retiredSessionIDs.count > Self.maximumRetiredSessions {
+                retiredSessionIDs.removeFirst(retiredSessionIDs.count - Self.maximumRetiredSessions)
+            }
+        }
+        activeSessionID = nil
+    }
+
+    mutating func clear() {
+        activeSessionID = nil
+        retiredSessionIDs.removeAll(keepingCapacity: false)
+    }
+}
+
+/// Shipping WKWebView coordinator's pure launch transition gate (#202/#203).
+/// It is NOT a second gameplay engine and never downloads/executes Game IR.
+/// Navigation, render-submission and input can arrive out of order due to
+/// WebKit prewarm handoff; their accepted milestones must remain monotonic.
+/// A navigation finish never proves renderer/GPU readiness or interaction.
+struct PlayerHostLaunchReducer {
+    enum Phase: Equatable {
+        case navigating
+        case documentLoaded
+        case sceneSubmitted
+        case interactive
+        case navigationFailed
+        case webProcessTerminated
+        case detached
+    }
+
+    private(set) var phase: Phase = .navigating
+    private(set) var observedTerminalNavigation = false
+    private var hasSceneSubmission = false
+    private var firstInputGate = PlayerFirstInputGate()
+
+    var isAttached: Bool { phase != .detached }
+    var permitsRuntimeEvents: Bool {
+        switch phase {
+        case .navigationFailed, .webProcessTerminated, .detached: return false
+        default: return true
+        }
+    }
+
+    mutating func navigationStarted() {
+        // Fatal load failures and WebContent death require a new Coordinator;
+        // stale callbacks may not revive the same failed attachment.
+        guard permitsRuntimeEvents else { return }
+        phase = .navigating
+        observedTerminalNavigation = false
+        hasSceneSubmission = false
+        firstInputGate = PlayerFirstInputGate()
+    }
+
+    mutating func navigationFinished() -> Bool {
+        guard permitsRuntimeEvents, !observedTerminalNavigation else { return false }
+        observedTerminalNavigation = true
+        if phase == .navigating { phase = .documentLoaded }
+        return true
+    }
+
+    mutating func sceneSubmitted() -> Bool {
+        guard permitsRuntimeEvents, !hasSceneSubmission else { return false }
+        hasSceneSubmission = true
+        // A callback may arrive after first input due to WebKit delivery
+        // order. Record the milestone but never regress the higher phase.
+        if phase == .navigating || phase == .documentLoaded {
+            phase = .sceneSubmitted
+        }
+        return true
+    }
+
+    mutating func firstInput(milliseconds: Int?) -> Bool {
+        guard permitsRuntimeEvents,
+              firstInputGate.accept(milliseconds: milliseconds) else { return false }
+        phase = .interactive
+        return true
+    }
+
+    mutating func navigationFailed() -> Bool {
+        guard isAttached, !observedTerminalNavigation, phase != .webProcessTerminated else { return false }
+        observedTerminalNavigation = true
+        phase = .navigationFailed
+        return true
+    }
+
+    mutating func webProcessTerminated() -> Bool {
+        guard permitsRuntimeEvents else { return false }
+        observedTerminalNavigation = true
+        phase = .webProcessTerminated
+        return true
+    }
+
+    mutating func detach() {
+        phase = .detached
+        observedTerminalNavigation = true
+    }
+}
+
 /// Maps a WKWebView load failure to the player-facing error state
 /// (Hephaestus #53). Two rules, both fail-closed:
 ///   - the UI shows only a fixed message per category, never the raw
@@ -1456,10 +1576,11 @@ private struct PlayerWebView: UIViewRepresentable {
         private var navigationFailureGate = PlayerNavigationFailureGate()
         private var metricSequenceGate = PlayerRuntimeMetricSequenceGate()
         private var firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
-        private var firstInputGate = PlayerFirstInputGate()
-        private var runtimeSessionID: String?
-        private var isActive = true
-        private var hasObservedTerminalNavigation = false
+        private var launchLifecycle = PlayerHostLaunchReducer()
+        private var runtimeSessionGate = PlayerRuntimeSessionBindingGate()
+        private var runtimeSessionID: String? { runtimeSessionGate.activeSessionID }
+        private var isActive: Bool { launchLifecycle.isAttached }
+        private var hasObservedTerminalNavigation: Bool { launchLifecycle.observedTerminalNavigation }
         lazy var messageProxy = WeakScriptMessageHandler(delegate: self)
 
         init(gameID: String, expectedURL: URL,
@@ -1481,7 +1602,8 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
-            guard isActive, message.name == PlayerWebView.messageName,
+            guard isActive, launchLifecycle.permitsRuntimeEvents,
+                  message.name == PlayerWebView.messageName,
                   message.frameInfo.isMainFrame,
                   sameOrigin(message.frameInfo.securityOrigin),
                   let body = message.body as? [String: Any],
@@ -1489,9 +1611,9 @@ private struct PlayerWebView: UIViewRepresentable {
                   let runtimeSessionID = body["sessionId"] as? String,
                   !runtimeSessionID.isEmpty, runtimeSessionID.count <= 128,
                   body["gameId"] as? String == expectedGameID,
-                  let type = body["type"] as? String else { return }
-            if let boundSessionID = self.runtimeSessionID, boundSessionID != runtimeSessionID { return }
-            self.runtimeSessionID = runtimeSessionID
+                  let type = body["type"] as? String,
+                  (type == "player_metric" || type == "verified_run_available"),
+                  runtimeSessionGate.bind(runtimeSessionID) else { return }
             if type == "player_metric" {
                 handleMetric(body, runtimeSessionID: runtimeSessionID)
                 return
@@ -1505,7 +1627,8 @@ private struct PlayerWebView: UIViewRepresentable {
                 guard let self else { return }
                 do {
                     let result = try await BackendAPI.shared.fetchVerifiedRunResult(runID: runID)
-                    guard self.isActive, self.runtimeSessionID == runtimeSessionID,
+                    guard self.launchLifecycle.permitsRuntimeEvents,
+                          self.runtimeSessionID == runtimeSessionID,
                           result.gameID == expectedGameID, result.isVerified else { return }
                     onVerifiedRun(result)
                 } catch {
@@ -1525,7 +1648,8 @@ private struct PlayerWebView: UIViewRepresentable {
             switch metric {
             case "first_scene_render_submit":
                 guard let ms = PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(body["ms"]),
-                      firstSceneRenderSubmissionGate.accept(milliseconds: ms) else { return }
+                      firstSceneRenderSubmissionGate.accept(milliseconds: ms),
+                      launchLifecycle.sceneSubmitted() else { return }
                 // This metric may be lost when a pooled WebView was already
                 // warmed before the Coordinator attached. The backend also
                 // captures the milestone independently for that case.
@@ -1536,9 +1660,9 @@ private struct PlayerWebView: UIViewRepresentable {
                 )
             case "first_input":
                 guard let ms = body["ms"] as? Int,
-                      firstInputGate.accept(milliseconds: ms) else { return }
+                      launchLifecycle.firstInput(milliseconds: ms) else { return }
                 Task { @MainActor [weak self] in
-                    guard let self, self.isActive,
+                    guard let self, self.launchLifecycle.permitsRuntimeEvents,
                           self.runtimeSessionID == runtimeSessionID else { return }
                     self.onFirstInput()
                 }
@@ -1571,13 +1695,13 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func observeProgress(of webView: WKWebView) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
-                guard let self, self.isActive else { return }
+                guard let self, self.launchLifecycle.permitsRuntimeEvents else { return }
                 self.onProgress(view.estimatedProgress)
             }
         }
 
         func stopObserving() {
-            isActive = false
+            launchLifecycle.detach()
             prewarmRecoveryArmed = false
             prewarmLoadingObservation?.invalidate()
             prewarmLoadingObservation = nil
@@ -1586,8 +1710,7 @@ private struct PlayerWebView: UIViewRepresentable {
             acceptedRunIDs.removeAll()
             metricSequenceGate.reset()
             firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
-            firstInputGate = PlayerFirstInputGate()
-            runtimeSessionID = nil
+            runtimeSessionGate.clear()
         }
 
         @MainActor
@@ -1614,8 +1737,7 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func reportPrewarmedFinishIfActive() {
-            guard isActive, !hasObservedTerminalNavigation else { return }
-            hasObservedTerminalNavigation = true
+            guard launchLifecycle.navigationFinished() else { return }
             disarmPrewarmRecovery()
             onProgress(1)
             onLoadFinish()
@@ -1638,15 +1760,23 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            guard isActive else { return }
-            hasObservedTerminalNavigation = false
+            guard launchLifecycle.permitsRuntimeEvents else { return }
+            launchLifecycle.navigationStarted()
+            // A real reload has a new web runtime session. Stale metrics,
+            // run IDs, and in-flight verified-result lookups from the old
+            // document must not be associated with the replacement page.
+            runtimeSessionGate.beginNavigation()
+            acceptedRunIDs.removeAll()
+            // New trusted document restarts metric sequence and first render.
+            metricSequenceGate.reset()
+            firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
             navigationFailureGate.beginNavigation()
             onProgress(0)
         }
 
         private func reportNavigationFailure(_ error: Error) {
-            guard isActive, navigationFailureGate.shouldReportFailure() else { return }
-            hasObservedTerminalNavigation = true
+            guard isActive, launchLifecycle.navigationFailed(),
+                  navigationFailureGate.shouldReportFailure() else { return }
             disarmPrewarmRecovery()
             onLoadFail(error)
         }
@@ -1703,8 +1833,7 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            guard isActive else { return }
-            hasObservedTerminalNavigation = true
+            guard launchLifecycle.webProcessTerminated() else { return }
             disarmPrewarmRecovery()
             onTerminate()
         }
