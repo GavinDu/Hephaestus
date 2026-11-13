@@ -480,6 +480,10 @@ final class PlayerSmokeTests: XCTestCase {
         let play = app.buttons["game.play"].firstMatch
         XCTAssertGreaterThanOrEqual(preview.frame.width, 450,
                                     "Landscape two-column preview must remain media-dominant.")
+        XCTAssertGreaterThanOrEqual(preview.frame.height, window.frame.height * 0.52,
+                                    "iPad landscape Game Details must use the available screen height, not leave a small preview above an empty lower half.")
+        XCTAssertLessThanOrEqual(preview.frame.maxY, window.frame.maxY + 2,
+                                 "Larger preview must remain within the native visible window.")
         XCTAssertGreaterThanOrEqual(title.frame.minX, preview.frame.maxX + 12,
                                     "The native Game Details title must be beside preview, not below it.")
         XCTAssertTrue(play.exists && play.isHittable)
