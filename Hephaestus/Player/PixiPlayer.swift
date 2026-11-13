@@ -108,6 +108,57 @@ struct PlayerRuntimeMetricSequenceGate {
     mutating func reset() { highestSequenceByMetric.removeAll() }
 }
 
+/// Validated v1 telemetry payload decoded *before* consuming a metric sequence.
+/// A malformed high-sequence message must never hide a later legitimate
+/// first-render, first-input, or performance-window milestone. The shipping
+/// trusted Pixi producer sends exactly the common keys and one typed payload.
+enum PlayerNativeMetricPayload {
+    case firstSceneRenderSubmit(milliseconds: Int)
+    case firstInput(milliseconds: Int)
+    case perfWindow(p95: Int, average: Int, count: Int)
+
+    var metric: String {
+        switch self {
+        case .firstSceneRenderSubmit: return "first_scene_render_submit"
+        case .firstInput: return "first_input"
+        case .perfWindow: return "perf_window"
+        }
+    }
+
+    static func parse(_ body: [String: Any]) -> Self? {
+        let common: Set<String> = ["schema", "type", "sessionId", "gameId", "metric", "sequence"]
+        guard body["schema"] as? Int == 1,
+              body["type"] as? String == "player_metric",
+              body["sessionId"] as? String != nil,
+              body["gameId"] as? String != nil,
+              body["sequence"] as? Int != nil,
+              let kind = body["metric"] as? String else { return nil }
+        switch kind {
+        case "first_scene_render_submit":
+            guard Set(body.keys) == common.union(["ms"]),
+                  let ms = PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(body["ms"])
+            else { return nil }
+            return .firstSceneRenderSubmit(milliseconds: ms)
+        case "first_input":
+            guard Set(body.keys) == common.union(["ms"]),
+                  let ms = body["ms"] as? Int, (0...86_400_000).contains(ms)
+            else { return nil }
+            return .firstInput(milliseconds: ms)
+        case "perf_window":
+            guard Set(body.keys) == common.union(["frameTimeP95Ms", "frameTimeAvgMs", "frameCount"]),
+                  let p95 = body["frameTimeP95Ms"] as? Int,
+                  let average = body["frameTimeAvgMs"] as? Int,
+                  let count = body["frameCount"] as? Int,
+                  (0...60_000).contains(p95), (0...60_000).contains(average),
+                  (1...10_000).contains(count)
+            else { return nil }
+            return .perfWindow(p95: p95, average: average, count: count)
+        default:
+            return nil
+        }
+    }
+}
+
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
@@ -1753,15 +1804,16 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         private func handleMetric(_ body: [String: Any], runtimeSessionID: String) {
-            guard Set(body.keys).isSubset(of: ["schema", "type", "sessionId", "gameId", "metric", "sequence", "ms", "frameTimeP95Ms", "frameTimeAvgMs", "frameCount"]),
-                  let metric = body["metric"] as? String,
+            // Reject malformed/extra fields *before* advancing the per-kind
+            // high-water mark. Otherwise a bad sequence=100000 can suppress
+            // a later valid scene/input message with a smaller sequence.
+            guard let payload = PlayerNativeMetricPayload.parse(body),
                   let sequence = body["sequence"] as? Int,
-                  metricSequenceGate.accept(metric: metric, sequence: sequence) else { return }
-            let metricID = "\(runtimeSessionID):\(metric):\(sequence)"
-            switch metric {
-            case "first_scene_render_submit":
-                guard let ms = PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(body["ms"]),
-                      firstSceneRenderSubmissionGate.accept(milliseconds: ms),
+                  metricSequenceGate.accept(metric: payload.metric, sequence: sequence) else { return }
+            let metricID = "\(runtimeSessionID):\(payload.metric):\(sequence)"
+            switch payload {
+            case .firstSceneRenderSubmit(let ms):
+                guard firstSceneRenderSubmissionGate.accept(milliseconds: ms),
                       launchLifecycle.sceneSubmitted() else { return }
                 // This metric may be lost when a pooled WebView was already
                 // warmed before the Coordinator attached. The backend also
@@ -1771,9 +1823,8 @@ private struct PlayerWebView: UIViewRepresentable {
                     name: "FirstSceneRenderSubmitted",
                     message: "renderer-submitted-ms=\(ms); not display-presented or interactive"
                 )
-            case "first_input":
-                guard let ms = body["ms"] as? Int,
-                      launchLifecycle.firstInput(milliseconds: ms) else { return }
+            case .firstInput(let ms):
+                guard launchLifecycle.firstInput(milliseconds: ms) else { return }
                 Task { @MainActor [weak self] in
                     // After a retry, session equality alone cannot authorize
                     // the retired Coordinator to update the old player sheet.
@@ -1785,19 +1836,12 @@ private struct PlayerWebView: UIViewRepresentable {
                     gameID: expectedGameID, kind: "player_first_input",
                     timeToFirstInputMS: ms, eventID: "ios-metric:\(metricID)"
                 ) }
-            case "perf_window":
-                guard let p95 = body["frameTimeP95Ms"] as? Int,
-                      let avg = body["frameTimeAvgMs"] as? Int,
-                      let count = body["frameCount"] as? Int,
-                      (0...60_000).contains(p95), (0...60_000).contains(avg),
-                      (1...10_000).contains(count) else { return }
+            case .perfWindow(let p95, let avg, let count):
                 Task { await BackendAPI.shared.trackSocialEvent(
                     gameID: expectedGameID, kind: "player_perf_window",
                     frameTimeP95MS: p95, frameTimeAvgMS: avg,
                     frameCount: count, eventID: "ios-metric:\(metricID)"
                 ) }
-            default:
-                return
             }
         }
 
