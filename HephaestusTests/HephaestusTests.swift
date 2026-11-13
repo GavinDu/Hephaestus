@@ -1107,6 +1107,56 @@ struct HephaestusTests {
     }
 }
 
+@Test func runtimeMetricSequenceGateIsBoundedMonotonicAndKindAllowlisted() {
+    var gate = PlayerRuntimeMetricSequenceGate()
+    let firstRender = gate.accept(metric: "first_scene_render_submit", sequence: 1)
+    let duplicateRender = gate.accept(metric: "first_scene_render_submit", sequence: 1)
+    let newerRender = gate.accept(metric: "first_scene_render_submit", sequence: 5)
+    let oldRender = gate.accept(metric: "first_scene_render_submit", sequence: 3)
+    let independentInput = gate.accept(metric: "first_input", sequence: 2)
+    let firstWindow = gate.accept(metric: "perf_window", sequence: 8)
+    let invalidKind = gate.accept(metric: "unbounded_custom_metric", sequence: 10)
+    let invalidLow = gate.accept(metric: "perf_window", sequence: -1)
+    let invalidHigh = gate.accept(metric: "perf_window", sequence: 100_001)
+    #expect(firstRender)
+    #expect(!duplicateRender)
+    #expect(newerRender)
+    #expect(!oldRender)
+    #expect(independentInput)
+    #expect(firstWindow)
+    #expect(!invalidKind)
+    #expect(!invalidLow)
+    #expect(!invalidHigh)
+    #expect(gate.highestSequenceByMetric.count == 3)
+    #expect(gate.highestSequenceByMetric["first_scene_render_submit"] == 5)
+    #expect(gate.highestSequenceByMetric["first_input"] == 2)
+    #expect(gate.highestSequenceByMetric["perf_window"] == 8)
+    gate.reset()
+    #expect(gate.highestSequenceByMetric.isEmpty)
+    let freshSession = gate.accept(metric: "first_scene_render_submit", sequence: 1)
+    #expect(freshSession)
+}
+
+@Test func firstSceneRenderSubmissionGateAcceptsOneValidMilestoneOnly() {
+    var gate = PlayerFirstSceneRenderSubmissionGate()
+    let missing = gate.accept(milliseconds: nil)
+    let negative = gate.accept(milliseconds: -1)
+    let excessive = gate.accept(milliseconds: 3_600_001)
+    let first = gate.accept(milliseconds: 0)
+    let repeatedNewSequence = gate.accept(milliseconds: 50)
+    #expect(!missing)
+    #expect(!negative)
+    #expect(!excessive)
+    #expect(first)
+    #expect(!repeatedNewSequence)
+    #expect(gate.accepted)
+
+    var boundary = PlayerFirstSceneRenderSubmissionGate()
+    let maximum = boundary.accept(milliseconds: 3_600_000)
+    #expect(maximum)
+    #expect(boundary.accepted)
+}
+
 
 
 @Test func playerMemoryPressureEvictsOnlyUnattachedSpeculativePrewarm() {
