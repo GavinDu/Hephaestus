@@ -182,6 +182,11 @@ jobs:
           else
             echo "No .xcresult from this run; consult the preceding test failure log."
           fi
+      - name: Verify original iPhone player handoff screenshots
+        run: |
+          python3 tools/test-feedback/verify-player-handoff-evidence.py \
+            --input /tmp/player-presentation-iphone-screenshots \
+            --out /tmp/player-presentation-iphone-review
       # Archive Xcode's 1,000+ small bundle files before artifact upload.
       # Retain the full result and the independently exported PNG evidence;
       # uploading the directory itself caused repeated ArtifactService timeouts.
@@ -201,6 +206,7 @@ jobs:
             /tmp/player-presentation-smoke.log
             /tmp/player-presentation-smoke.xcresult.zip
             /tmp/player-presentation-iphone-screenshots
+            /tmp/player-presentation-iphone-review
           if-no-files-found: ignore
 
   ios-ipad-smoke:
@@ -257,6 +263,11 @@ jobs:
           else
             echo "No .xcresult from this run; consult the preceding test failure log."
           fi
+      - name: Verify original iPad player handoff screenshots
+        run: |
+          python3 tools/test-feedback/verify-player-handoff-evidence.py \
+            --input /tmp/player-presentation-ipad-screenshots \
+            --out /tmp/player-presentation-ipad-review
       - name: Package iPad result bundle
         if: always()
         shell: bash
@@ -273,6 +284,7 @@ jobs:
             /tmp/player-presentation-ipad.log
             /tmp/player-presentation-ipad.xcresult.zip
             /tmp/player-presentation-ipad-screenshots
+            /tmp/player-presentation-ipad-review
           if-no-files-found: ignore
 
   backend-play-contract:
