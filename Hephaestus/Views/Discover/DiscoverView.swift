@@ -71,6 +71,34 @@ struct DiscoverView: View {
         self.onOpenProfile = onOpenProfile
     }
 
+    // One functional set of recovery actions across all orientations.
+    // Compact iPhone landscape lays these out side by side so neither button
+    // disappears underneath the persistent bottom tab navigation.
+    private var feedRecoveryRetry: some View {
+        Button {
+            Task { await load() }
+        } label: {
+            Label("Try again", systemImage: "arrow.clockwise")
+                .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(ArcadePulseTheme.electricViolet)
+        .accessibilityIdentifier("feed.error.retry")
+    }
+
+    @ViewBuilder private var feedRecoveryLibrary: some View {
+        if let onOpenLibrary {
+            Button(action: onOpenLibrary) {
+                Label("Open Library", systemImage: "bookmark")
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(.bordered)
+            .tint(ArcadePulseTheme.neonMagenta)
+            .accessibilityIdentifier("feed.error.library")
+        }
+    }
+
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
@@ -80,6 +108,13 @@ struct DiscoverView: View {
     @State private var games: [FeedGame] = []
     @State private var playerRequest: PixiPlayerRequest?
     @State private var errorMessage: String?
+    // Transport errors are rendered in the empty-feed recovery surface.
+    // Social-action failures need their own visible alert while the live
+    // game remains on screen; otherwise users get no response to a failed tap.
+    @State private var socialActionError: String?
+    @State private var didPresentSocialErrorFixture = false
+    @State private var socialMutationGate = FeedSocialMutationGate()
+    @State private var socialMutationEpoch = 0
     @State private var isLoading = false
     @State private var searchText = ""
     @State private var savedGameIDs = Set<String>()
@@ -324,52 +359,53 @@ struct DiscoverView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                     } else if let errorMessage, games.isEmpty {
-                        VStack(spacing: 16) {
-                            Image(systemName: "wifi.exclamationmark")
-                                .font(.system(size: 38, weight: .medium))
-                                .foregroundStyle(ArcadePulseTheme.neonMagenta)
-                                .frame(width: 76, height: 76)
-                                .background(ArcadePulseTheme.electricViolet.opacity(0.16),
-                                            in: RoundedRectangle(cornerRadius: 20))
-                                .accessibilityHidden(true)
+                        // iPhone compact landscape has a short safe-area stage.
+                        // Keep both real recovery actions above the fold instead
+                        // of letting an ornamental icon and extra prose push
+                        // Library below the immediately reachable viewport.
+                        VStack(spacing: verticalSizeClass == .compact ? 10 : 16) {
+                            if verticalSizeClass != .compact {
+                                Image(systemName: "wifi.exclamationmark")
+                                    .font(.system(size: 38, weight: .medium))
+                                    .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                                    .frame(width: 76, height: 76)
+                                    .background(ArcadePulseTheme.electricViolet.opacity(0.16),
+                                                in: RoundedRectangle(cornerRadius: 20))
+                                    .accessibilityHidden(true)
+                            }
                             Text("Couldn't load the feed")
-                                .font(.system(.title2, design: .rounded).weight(.bold))
+                                .font(.system(verticalSizeClass == .compact ? .headline : .title2,
+                                              design: .rounded).weight(.bold))
                                 .foregroundStyle(.white)
                                 .accessibilityAddTraits(.isHeader)
                             Text(errorMessage)
                                 .font(.subheadline)
                                 .foregroundStyle(ArcadePulseTheme.textSecondary)
                                 .multilineTextAlignment(.center)
-                            Text("You can still check Library for games you've saved.")
-                                .font(.subheadline)
-                                .foregroundStyle(ArcadePulseTheme.textSecondary)
-                                .multilineTextAlignment(.center)
                                 .fixedSize(horizontal: false, vertical: true)
-                            Button {
-                                Task { await load() }
-                            } label: {
-                                Label("Try again", systemImage: "arrow.clockwise")
-                                    .frame(maxWidth: .infinity, minHeight: 48)
+                            if verticalSizeClass != .compact {
+                                Text("You can still check Library for games you've saved.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(ArcadePulseTheme.electricViolet)
-                            .accessibilityIdentifier("feed.error.retry")
-                            if let onOpenLibrary {
-                                Button(action: onOpenLibrary) {
-                                    Label("Open Library", systemImage: "bookmark")
-                                        .frame(maxWidth: .infinity, minHeight: 48)
+                            if verticalSizeClass == .compact {
+                                HStack(spacing: 12) {
+                                    feedRecoveryRetry
+                                    feedRecoveryLibrary
                                 }
-                                .buttonStyle(.bordered)
-                                .tint(ArcadePulseTheme.neonMagenta)
-                                .accessibilityIdentifier("feed.error.library")
+                            } else {
+                                feedRecoveryRetry
+                                feedRecoveryLibrary
                             }
                         }
-                        .padding(24)
+                        .padding(verticalSizeClass == .compact ? 14 : 24)
                         .frame(maxWidth: 520)
                         .background(ArcadePulseTheme.surface,
                                     in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 32)
+                        .padding(.vertical, verticalSizeClass == .compact ? 8 : 32)
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("feed.error.recovery")
                     } else if visibleGames.isEmpty {
@@ -513,6 +549,7 @@ struct DiscoverView: View {
                         savedGameIDs: savedGameIDs,
                         likedGameIDs: likedGameIDs,
                         followedCreatorIDs: followedCreatorIDs,
+                        pendingSocialMutations: Set(socialMutationGate.pending.keys),
                         onPlay: { play($0) },
                         onToggleSaved: { toggleSaved($0) },
                         onToggleLike: { toggleLike($0) },
@@ -573,6 +610,45 @@ struct DiscoverView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { FeedPreviewPlayback.shared.stop() }
             }
+            .onReceive(NotificationCenter.default.publisher(
+                for: .hephaestusBackendSessionDidChange
+            )) { _ in
+                // Viewer-specific social status and pending writes are not
+                // reusable on sign-out or account replacement.
+                socialMutationEpoch &+= 1
+                socialMutationGate.revokeAll()
+                savedGameIDs.removeAll()
+                likedGameIDs.removeAll()
+                followedCreatorIDs.removeAll()
+                mutedTopics.removeAll()
+                games.removeAll()
+                settledForYouGameID = nil
+                nextCursor = nil
+                loadMoreError = nil
+                errorMessage = nil
+                socialActionError = nil
+                FeedPreviewPlayback.shared.stop()
+                Task { await load() }
+            }
+            .onChange(of: games.count) { _, count in
+                // A display-only failure fixture for native iPhone/iPad UI
+                // review. The game must still be from the live backend;
+                // never inject a game or mutate the social relationship.
+                if count > 0, !didPresentSocialErrorFixture,
+                   ProcessInfo.processInfo.arguments.contains(
+                       "--ui-test-social-action-error-state") {
+                    didPresentSocialErrorFixture = true
+                    socialWriteFailure("Saving this game")
+                }
+            }
+            .alert("Couldn't update this action", isPresented: Binding(
+                get: { socialActionError != nil },
+                set: { if !$0 { socialActionError = nil } }
+            )) {
+                Button("OK", role: .cancel) { socialActionError = nil }
+            } message: {
+                Text(socialActionError ?? "Try again.")
+            }
             .onChange(of: playerRequest?.gameID) { _, gameID in
                 if gameID != nil { FeedPreviewPlayback.shared.stop() }
             }
@@ -584,7 +660,7 @@ struct DiscoverView: View {
                     // Never synthesize a feed game, player, or login session.
                     games = []
                     isLoading = false
-                    errorMessage = "Test-only: public feed request unavailable."
+                    errorMessage = FeedErrorPresentation.message(for: URLError(.secureConnectionFailed))
                 } else {
                     await load()
                 }
@@ -648,8 +724,8 @@ struct DiscoverView: View {
                 FeedPreferencesSheet(
                     availableTopics: availableTopics,
                     selectedTopics: mutedTopics,
-                    onSave: { topics in saveMutedTopics(topics) },
-                    onReset: { resetFeedPreferences() }
+                    onSave: { topics in await saveMutedTopics(topics) },
+                    onReset: { await resetFeedPreferences() }
                 )
             }
         }
@@ -720,54 +796,112 @@ struct DiscoverView: View {
         }
     }
 
+    private func socialWriteFailure(_ action: String, error: Error? = nil) {
+        socialActionError = FeedSocialErrorPresentation.message(
+            action: action, error: error,
+            signedIn: !BackendConfig.currentUserID.isEmpty)
+    }
+
     private func toggleSaved(_ game: FeedGame) {
+        guard let lease = socialMutationGate.begin(.save, id: game.id) else { return }
         let shouldSave = !savedGameIDs.contains(game.id)
+        let viewerID = BackendConfig.currentUserID
+        let epoch = socialMutationEpoch
         Task {
+            defer { socialMutationGate.finish(.save, id: game.id, lease: lease) }
             do {
                 try await BackendAPI.shared.setSaved(game.id, saved: shouldSave)
+                guard epoch == socialMutationEpoch,
+                      viewerID == BackendConfig.currentUserID else { return }
                 if shouldSave { savedGameIDs.insert(game.id) } else { savedGameIDs.remove(game.id) }
                 UserDefaults.standard.set(savedGameIDs.sorted(), forKey: "hephaestus.savedGames")
-                if shouldSave { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "save") }
-            } catch { errorMessage = "Couldn't update saved games: \(error.localizedDescription)" }
+                if shouldSave {
+                    await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "save")
+                }
+            } catch {
+                guard epoch == socialMutationEpoch,
+                      viewerID == BackendConfig.currentUserID else { return }
+                socialWriteFailure("Saving this game", error: error)
+            }
         }
     }
 
     private func toggleLike(_ game: FeedGame) {
+        guard let lease = socialMutationGate.begin(.like, id: game.id) else { return }
         let shouldLike = !likedGameIDs.contains(game.id)
+        let viewerID = BackendConfig.currentUserID
+        let epoch = socialMutationEpoch
         Task {
+            defer { socialMutationGate.finish(.like, id: game.id, lease: lease) }
             do {
-                try await BackendAPI.shared.setReaction(game.id, reaction: shouldLike ? "like" : nil)
+                try await BackendAPI.shared.setReaction(
+                    game.id, reaction: shouldLike ? "like" : nil)
+                guard epoch == socialMutationEpoch,
+                      viewerID == BackendConfig.currentUserID else { return }
                 if shouldLike { likedGameIDs.insert(game.id) } else { likedGameIDs.remove(game.id) }
-            } catch { errorMessage = "Couldn't update reaction: \(error.localizedDescription)" }
+            } catch {
+                guard epoch == socialMutationEpoch,
+                      viewerID == BackendConfig.currentUserID else { return }
+                socialWriteFailure("Liking this game", error: error)
+            }
         }
     }
 
     private func toggleFollow(_ creatorID: String) async {
+        guard let lease = socialMutationGate.begin(.follow, id: creatorID) else { return }
+        defer { socialMutationGate.finish(.follow, id: creatorID, lease: lease) }
+        let viewerID = BackendConfig.currentUserID
+        let epoch = socialMutationEpoch
         let shouldFollow = !followedCreatorIDs.contains(creatorID)
         do {
             try await BackendAPI.shared.setFollowing(creatorID, following: shouldFollow)
-            if shouldFollow { followedCreatorIDs.insert(creatorID) } else { followedCreatorIDs.remove(creatorID) }
+            guard epoch == socialMutationEpoch,
+                  viewerID == BackendConfig.currentUserID else { return }
+            if shouldFollow { followedCreatorIDs.insert(creatorID) }
+            else { followedCreatorIDs.remove(creatorID) }
             if let gameID = games.first(where: { $0.ownerID == creatorID })?.id {
                 await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "follow")
             }
+            guard epoch == socialMutationEpoch,
+                  viewerID == BackendConfig.currentUserID else { return }
             await load()
-        } catch { errorMessage = "Couldn't update follow: \(error.localizedDescription)" }
+        } catch {
+            guard epoch == socialMutationEpoch,
+                  viewerID == BackendConfig.currentUserID else { return }
+            socialWriteFailure("Following this creator", error: error)
+        }
     }
 
     private func blockCreator(_ creatorID: String) async {
+        let viewerID = BackendConfig.currentUserID
+        let epoch = socialMutationEpoch
         do {
             try await BackendAPI.shared.blockCreator(creatorID, blocked: true)
+            guard epoch == socialMutationEpoch,
+                  viewerID == BackendConfig.currentUserID else { return }
             games.removeAll { $0.ownerID == creatorID }
             repairPagerSelection()
-        } catch { errorMessage = "Couldn't block creator: \(error.localizedDescription)" }
+        } catch {
+            guard epoch == socialMutationEpoch,
+                  viewerID == BackendConfig.currentUserID else { return }
+            socialWriteFailure("Blocking this creator", error: error)
+        }
     }
 
     private func markNotInterested(_ game: FeedGame) async {
+        let viewerID = BackendConfig.currentUserID
+        let epoch = socialMutationEpoch
         do {
             try await BackendAPI.shared.markNotInterested(gameID: game.id)
+            guard epoch == socialMutationEpoch,
+                  viewerID == BackendConfig.currentUserID else { return }
             games.removeAll { $0.id == game.id }
             repairPagerSelection()
-        } catch { errorMessage = "Couldn't save feedback: \(error.localizedDescription)" }
+        } catch {
+            guard epoch == socialMutationEpoch,
+                  viewerID == BackendConfig.currentUserID else { return }
+            socialWriteFailure("Saving your feedback", error: error)
+        }
     }
 
     private func repairPagerSelection() {
@@ -775,27 +909,43 @@ struct DiscoverView: View {
         settledForYouGameID = games.first?.id
     }
 
-    private func saveMutedTopics(_ topics: [String]) {
-        Task {
-            do {
-                try await BackendAPI.shared.setMutedTopics(topics)
-                mutedTopics = Set(topics.map { $0.lowercased() })
-                await load()
-            } catch {
-                errorMessage = "Couldn't update feed preferences: \(error.localizedDescription)"
-            }
+    private func saveMutedTopics(_ topics: [String]) async -> Bool {
+        // Native UI-only failure simulation. Never alter backend preferences
+        // to exercise a declined request or fabricate feed/game content.
+        if ProcessInfo.processInfo.arguments.contains(
+            "--ui-test-feed-preferences-failure-state") { return false }
+        let epoch = socialMutationEpoch
+        let viewer = BackendConfig.currentUserID
+        do {
+            try await BackendAPI.shared.setMutedTopics(topics)
+            guard epoch == socialMutationEpoch,
+                  viewer == BackendConfig.currentUserID else { return false }
+            mutedTopics = Set(topics.map { $0.lowercased() })
+            // An acknowledged mutation can close the modal immediately;
+            // the subsequent feed refresh must not block its confirmation.
+            Task { await load() }
+            return true
+        } catch {
+            // The sheet owns its error text and stays open; a presenting
+            // feed alert can be lost behind a dismissing modal.
+            return false
         }
     }
 
-    private func resetFeedPreferences() {
-        Task {
-            do {
-                try await BackendAPI.shared.resetFeedPreferences()
-                mutedTopics.removeAll()
-                await load()
-            } catch {
-                errorMessage = "Couldn't reset feed preferences: \(error.localizedDescription)"
-            }
+    private func resetFeedPreferences() async -> Bool {
+        if ProcessInfo.processInfo.arguments.contains(
+            "--ui-test-feed-preferences-failure-state") { return false }
+        let epoch = socialMutationEpoch
+        let viewer = BackendConfig.currentUserID
+        do {
+            try await BackendAPI.shared.resetFeedPreferences()
+            guard epoch == socialMutationEpoch,
+                  viewer == BackendConfig.currentUserID else { return false }
+            mutedTopics.removeAll()
+            Task { await load() }
+            return true
+        } catch {
+            return false
         }
     }
 
@@ -852,8 +1002,28 @@ struct DiscoverView: View {
             }
         } catch {
             if requestedScope == selectedFeed && feedRequestCoordinator.isCurrent(generation) {
-                errorMessage = error.localizedDescription
+                errorMessage = FeedErrorPresentation.message(for: error)
             }
+        }
+    }
+}
+
+/// User-facing Discover error copy. Never claim the feed loaded, and avoid
+/// surfacing raw TLS/transport jargon as the primary recovery explanation.
+/// The UI still exposes Retry and the actual saved-game Library route.
+enum FeedErrorPresentation {
+    static func message(for error: Error) -> String {
+        switch (error as? URLError)?.code {
+        case .secureConnectionFailed, .serverCertificateHasBadDate,
+             .serverCertificateNotYetValid, .serverCertificateUntrusted,
+             .serverCertificateHasUnknownRoot:
+            return "The game service couldn't establish a secure connection. Check your network and try again."
+        case .notConnectedToInternet, .networkConnectionLost:
+            return "You seem to be offline. Check your internet connection and try again."
+        case .timedOut:
+            return "The game service is taking too long to respond. Try again."
+        default:
+            return "The game feed isn't available right now. Try again in a moment."
         }
     }
 }
@@ -907,6 +1077,19 @@ private struct SocialFeedUnavailableView: View {
     }
 }
 
+/// Keep system sharing anchored to a mounted feed view. Embedding ShareLink
+/// directly inside a SwiftUI Menu can dismiss its presenter before the
+/// UIActivityViewController appears on some iOS releases.
+private struct ArcadePulseGameShareSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
 private struct ForYouGamePage: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -914,6 +1097,7 @@ private struct ForYouGamePage: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsExpressionDetails = false
+    @State private var showsAccessibleShareSheet = false
     // A URL in the feed does not establish that its image decoded successfully.
     // Keep accessibility/media audits tied to the exact poster that rendered.
     @State private var loadedPosterURL: String?
@@ -925,6 +1109,9 @@ private struct ForYouGamePage: View {
     let isLiked: Bool
     let isFollowingCreator: Bool
     let canFollowCreator: Bool
+    let isSavePending: Bool
+    let isLikePending: Bool
+    let isFollowPending: Bool
     let isSettled: Bool
     let onPlay: () -> Void
     let onToggleSaved: () -> Void
@@ -1057,6 +1244,26 @@ private struct ForYouGamePage: View {
                           caption: caption, action: action)
     }
 
+    // A network lease suppresses duplicate taps, but suppression without
+    // feedback feels like an unresponsive control. Keep progress visible,
+    // descriptive to VoiceOver and at least as tappable-sized as the rail.
+    private func pendingAction(_ text: String, key: String, vertical: Bool) -> some View {
+        VStack(spacing: 3) {
+            ProgressView()
+                .tint(.white)
+                .controlSize(.small)
+            Text(text)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+        }
+        .frame(minWidth: 48, minHeight: vertical ? 58 : 44)
+        .foregroundStyle(.white)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text + ", in progress")
+        .accessibilityIdentifier("feed.social.pending." + key)
+    }
+
     private func sourceLabel(_ type: String) -> String {
         switch type {
         case "drawing": "a drawing"
@@ -1068,12 +1275,20 @@ private struct ForYouGamePage: View {
     }
 
     @ViewBuilder private func socialActionButtons(vertical: Bool) -> some View {
-        iconAction(isSaved ? "bookmark.fill" : "bookmark",
-                   label: isSaved ? "Remove from library" : "Save game",
-                   caption: vertical ? "Save" : nil, action: onToggleSaved)
-        iconAction(isLiked ? "heart.fill" : "heart",
-                   label: isLiked ? "Unlike game" : "Like game",
-                   caption: vertical ? "Like" : nil, action: onToggleLike)
+        if isSavePending {
+            pendingAction(isSaved ? "Removing…" : "Saving…", key: "save", vertical: vertical)
+        } else {
+            iconAction(isSaved ? "bookmark.fill" : "bookmark",
+                       label: isSaved ? "Remove from library" : "Save game",
+                       caption: vertical ? "Save" : nil, action: onToggleSaved)
+        }
+        if isLikePending {
+            pendingAction(isLiked ? "Unliking…" : "Liking…", key: "like", vertical: vertical)
+        } else {
+            iconAction(isLiked ? "heart.fill" : "heart",
+                       label: isLiked ? "Unlike game" : "Like game",
+                       caption: vertical ? "Like" : nil, action: onToggleLike)
+        }
         iconAction("bubble.right", label: "View comments",
                    caption: vertical ? "Comment" : nil, action: onOpenComments)
         Menu {
@@ -1085,33 +1300,14 @@ private struct ForYouGamePage: View {
                 Button("Block creator", role: .destructive, action: onBlockCreator)
             }
         } label: {
-            VStack(spacing: 1) {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                if vertical {
-                    Text("More")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-            }
-            .frame(minWidth: 48, minHeight: vertical ? 58 : 44)
-            .contentShape(Rectangle())
+            ArcadePulseActionGlyph(symbol: "ellipsis", caption: vertical ? "More" : nil)
         }
         .foregroundStyle(.white)
         .accessibilityLabel("More game actions")
         .accessibilitySortPriority(70)
         ShareLink(item: shareURL) {
-            VStack(spacing: 1) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                if vertical {
-                    Text("Share")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-            }
-            .frame(minWidth: 48, minHeight: vertical ? 58 : 44)
-            .contentShape(Rectangle())
+            ArcadePulseActionGlyph(symbol: "square.and.arrow.up",
+                                   caption: vertical ? "Share" : nil)
         }
         .simultaneousGesture(TapGesture().onEnded {
             Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
@@ -1120,8 +1316,60 @@ private struct ForYouGamePage: View {
         .accessibilityLabel("Share \(game.title)")
     }
 
+    /// A labeled menu is critical for low-vision users who enlarge text but
+    /// do not use VoiceOver. Do not force them to interpret five unlabeled
+    /// symbols or let a tall rail obscure the one-post preview/Play target.
+    private func accessibleSocialMenu(vertical: Bool) -> some View {
+        Menu {
+            Button(isSaved ? "Remove from library" : "Save game",
+                   systemImage: isSaved ? "bookmark.fill" : "bookmark",
+                   action: onToggleSaved)
+            Button(isLiked ? "Unlike game" : "Like game",
+                   systemImage: isLiked ? "heart.fill" : "heart",
+                   action: onToggleLike)
+            Button("View comments", systemImage: "bubble.right",
+                   action: onOpenComments)
+            Button("Share game", systemImage: "square.and.arrow.up") {
+                // Let the Menu dismiss before the *mounted page* presents the
+                // native share UI. Never present a ShareLink from the menu VC.
+                showsAccessibleShareSheet = true
+                Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
+            }
+            Divider()
+            Button("Game details", systemImage: "info.circle", action: onOpenDetails)
+            Button("Report game", role: .destructive, action: onReport)
+            Button("Not interested", action: onNotInterested)
+            if game.ownerID != nil {
+                Button("Block creator", role: .destructive, action: onBlockCreator)
+            }
+        } label: {
+            Group {
+                if vertical {
+                    VStack(spacing: 3) {
+                        Image(systemName: "ellipsis.circle.fill")
+                            .font(.title2)
+                        Text("Actions").font(.caption.weight(.bold))
+                    }
+                    .frame(minWidth: 88, minHeight: 68)
+                } else {
+                    Label("Actions", systemImage: "ellipsis.circle.fill")
+                        .font(.headline)
+                        .frame(minWidth: 112, minHeight: 48)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .background(.black.opacity(0.52), in: Capsule())
+        .accessibilityLabel("Game actions")
+        .accessibilityIdentifier("feed.actions.accessible")
+    }
+
     @ViewBuilder private func socialActions(vertical: Bool) -> some View {
-        if vertical {
+        if ArcadePulseActionGlyph.usesAccessibleMenu(for: dynamicTypeSize) {
+            accessibleSocialMenu(vertical: vertical)
+        } else if vertical {
             VStack(spacing: 5) { socialActionButtons(vertical: true) }
                 .padding(4)
                 .background(.black.opacity(0.3), in: Capsule())
@@ -1204,14 +1452,25 @@ private struct ForYouGamePage: View {
                 Spacer(minLength: 4)
                 if canFollowCreator {
                     Button(action: onToggleFollow) {
-                        Label(isFollowingCreator ? "Following" : "Follow", systemImage: isFollowingCreator ? "person.fill.checkmark" : "person.badge.plus")
-                            .font(.caption.weight(.bold))
-                            .frame(minHeight: 44)
-                            .padding(.horizontal, 10)
+                        HStack(spacing: 6) {
+                            if isFollowPending {
+                                ProgressView().tint(.white).controlSize(.small)
+                            }
+                            Label(isFollowPending ? "Updating…" :
+                                  (isFollowingCreator ? "Following" : "Follow"),
+                                  systemImage: isFollowingCreator ? "person.fill.checkmark" : "person.badge.plus")
+                                .font(.caption.weight(.bold))
+                        }
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 10)
                     }
                     .buttonStyle(.bordered)
                     .tint(.white)
-                    .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
+                    .disabled(isFollowPending)
+                    .accessibilityLabel(isFollowPending ? "Updating follow" :
+                                        (isFollowingCreator ? "Unfollow creator" : "Follow creator"))
+                    .accessibilityValue(isFollowPending ? "In progress" : "")
+                    .accessibilityIdentifier("feed.creator.follow")
                     .accessibilitySortPriority(70)
                 }
             }
@@ -1416,6 +1675,9 @@ private struct ForYouGamePage: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .sheet(isPresented: $showsAccessibleShareSheet) {
+            ArcadePulseGameShareSheet(url: shareURL)
+        }
         .sheet(isPresented: $showsExpressionDetails) {
             NavigationStack {
                 ScrollView {
@@ -1501,6 +1763,7 @@ private struct ForYouPagerView: View {
     let savedGameIDs: Set<String>
     let likedGameIDs: Set<String>
     let followedCreatorIDs: Set<String>
+    let pendingSocialMutations: Set<FeedSocialMutationGate.Key>
     let onPlay: (FeedGame) -> Void
     let onToggleSaved: (FeedGame) -> Void
     let onToggleLike: (FeedGame) -> Void
@@ -1525,6 +1788,11 @@ private struct ForYouPagerView: View {
             isLiked: likedGameIDs.contains(game.id),
             isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
             canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.currentUserID,
+            isSavePending: pendingSocialMutations.contains(.init(kind: .save, id: game.id)),
+            isLikePending: pendingSocialMutations.contains(.init(kind: .like, id: game.id)),
+            isFollowPending: game.ownerID.map {
+                pendingSocialMutations.contains(.init(kind: .follow, id: $0))
+            } ?? false,
             isSettled: game.id == settledGameID,
             onPlay: { onPlay(game) },
             onToggleSaved: { onToggleSaved(game) },
@@ -2392,9 +2660,12 @@ private struct FeedPreferencesSheet: View {
     @Environment(\.dismiss) private var dismiss
     let availableTopics: [String]
     let selectedTopics: Set<String>
-    let onSave: ([String]) -> Void
-    let onReset: () -> Void
+    let onSave: ([String]) async -> Bool
+    let onReset: () async -> Bool
     @State private var selected = Set<String>()
+    @State private var isUpdating = false
+    @State private var updateError: String?
+    @State private var presentationEpoch = 0
 
     var body: some View {
         NavigationStack {
@@ -2412,18 +2683,73 @@ private struct FeedPreferencesSheet: View {
                                 else { selected.remove(topic) }
                             }
                         ))
+                        .disabled(isUpdating)
+                    }
+                }
+                if isUpdating {
+                    Section {
+                        ProgressView("Confirming your preferences…")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityIdentifier("feed.preferences.updating")
+                    }
+                }
+                if let updateError {
+                    Section {
+                        Label(updateError, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.subheadline)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("feed.preferences.error")
+                        Text("Your selections are still editable. Retry when the service is available.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Section {
-                    Button("Save preferences") {
-                        onSave(selected.sorted())
-                        dismiss()
+                    Button {
+                        guard !isUpdating else { return }
+                        isUpdating = true
+                        updateError = nil
+                        let epoch = presentationEpoch
+                        Task {
+                            let confirmed = await onSave(selected.sorted())
+                            guard epoch == presentationEpoch else { return }
+                            isUpdating = false
+                            if confirmed {
+                                dismiss()
+                            } else {
+                                updateError = "Couldn't confirm the new preferences. The sheet is still open."
+                            }
+                        }
+                    } label: {
+                        Label(isUpdating ? "Saving preferences…" : "Save preferences",
+                              systemImage: isUpdating ? "arrow.triangle.2.circlepath" : "checkmark")
+                            .frame(minHeight: 44)
                     }
-                    Button("Reset recommendations", role: .destructive) {
-                        selected.removeAll()
-                        onReset()
-                        dismiss()
+                    .disabled(isUpdating)
+                    .accessibilityIdentifier("feed.preferences.save")
+                    Button(role: .destructive) {
+                        guard !isUpdating else { return }
+                        isUpdating = true
+                        updateError = nil
+                        let epoch = presentationEpoch
+                        Task {
+                            let confirmed = await onReset()
+                            guard epoch == presentationEpoch else { return }
+                            isUpdating = false
+                            if confirmed {
+                                selected.removeAll()
+                                dismiss()
+                            } else {
+                                updateError = "Couldn't confirm resetting recommendations. Your selections are still shown."
+                            }
+                        }
+                    } label: {
+                        Label("Reset recommendations", systemImage: "arrow.counterclockwise")
+                            .frame(minHeight: 44)
                     }
+                    .disabled(isUpdating)
+                    .accessibilityIdentifier("feed.preferences.reset")
                 }
             }
             .navigationTitle("Tune your feed")
@@ -2434,6 +2760,17 @@ private struct FeedPreferencesSheet: View {
                 }
             }
             .onAppear { selected = selectedTopics }
+            .onReceive(NotificationCenter.default.publisher(
+                for: .hephaestusBackendSessionDidChange
+            )) { _ in
+                // Drop private muted-topic selections as soon as the viewer
+                // changes; a late old-account response cannot re-open it.
+                presentationEpoch &+= 1
+                selected.removeAll()
+                updateError = nil
+                isUpdating = false
+                dismiss()
+            }
         }
     }
 }

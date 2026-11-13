@@ -6,6 +6,15 @@ on:
   push:
     branches: [main, feat/native-game-ir-player]
 
+# GitHub-hosted macOS capacity is finite. Every intermediate PR commit
+# previously queued three new macOS jobs with no supersession: obsolete
+# screenshots and Xcode results could never certify the newest PR head.
+# Cancel only older runs of *the same PR*. Main and other branch pushes
+# use their unique run_id, so no required main verification is discarded.
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   xcode:
     runs-on: macos-latest
@@ -200,10 +209,13 @@ jobs:
             -destination "platform=iOS Simulator,id=${{ steps.ipad.outputs.udid }}" \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedUIEvaluationAndSwipe \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedSupportsAccessibilityDynamicType \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSocialWriteFailureDoesNotHideLiveGame \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedPreferencesFailureStaysEditable \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutState \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutAccessibilityTextSize \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateEntryConsentAndControls \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedUnavailableRecoveryToLibrary \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/ipad-feed-ui.log || {
               grep -E "error:|XCTAssert" /tmp/ipad-feed-ui.log | sort -u | head -30 | while read -r l; do
@@ -235,11 +247,12 @@ jobs:
       # Native app-window landscape attachments can export with a misleading
       # portrait crop and black bands. Keep originals; validate and separately
       # publish orientation-correct *full-screen* evidence for review.
-      - name: Validate native iPad screenshot orientation and review evidence
+      - name: Validate native iPad feed and Library screenshot evidence
         run: |
           python3 tools/test-feedback/verify-ui-screenshot-evidence.py \
             --input /tmp/ipad-feed-ui-screenshots \
-            --out /tmp/ipad-feed-ui-review
+            --out /tmp/ipad-feed-ui-review \
+            --require-ipad-library
       - name: Upload iPad UI evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
