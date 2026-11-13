@@ -323,6 +323,22 @@ enum PlayerPrewarmCompletionPolicy {
     }
 }
 
+/// An attached player lease belongs to one SwiftUI Coordinator, even
+/// when the next retry reuses the same WKWebView instance. Dismantling an
+/// obsolete Coordinator must not remove the successor's script handler,
+/// invalidate its navigation or blank its canvas.
+enum PlayerAttachmentLeasePolicy {
+    static func mayRecycle(
+        isCurrentPooledView: Bool,
+        isAttached: Bool,
+        expectedLease: UInt64,
+        currentLease: UInt64
+    ) -> Bool {
+        isCurrentPooledView && isAttached &&
+            expectedLease != 0 && expectedLease == currentLease
+    }
+}
+
 /// Credential changes are security boundaries. An old speculative
 /// WebKit page cannot be reused after the Keychain bearer session rotates.
 enum PlayerSessionCachePolicy {
@@ -345,6 +361,7 @@ enum PlayerWebViewPool {
     private static var currentURL: URL?
     private static var loadedURL: URL?
     private static var isAttached = false
+    private static var attachmentLease: UInt64 = 0
     private static var sessionFingerprint: String?
     private static let sessionObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
         forName: .hephaestusBackendSessionDidChange, object: nil, queue: .main
@@ -408,7 +425,7 @@ enum PlayerWebViewPool {
         DevLog.info(.player, "prewarming player page for \(gameID)")
     }
 
-    static func take(url: URL) -> (webView: WKWebView, shouldLoad: Bool, didFinish: Bool) {
+    static func take(url: URL) -> (webView: WKWebView, shouldLoad: Bool, didFinish: Bool, lease: UInt64) {
         ensureCurrentCredentialScope()
         // Ownership moves to a real interactive sheet. An expiry task must
         // never stop or blank the WebView after that handoff.
@@ -421,16 +438,22 @@ enum PlayerWebViewPool {
         let alreadyLoading = currentURL == url && view.isLoading
         let shouldLoad = !didFinish && !alreadyLoading
         isAttached = true
+        // Every distinct interactive SwiftUI Coordinator owns a new lease,
+        // even if it reuses the same prewarmed WKWebView after a retry.
+        attachmentLease &+= 1
         currentURL = url
         if shouldLoad { loadedURL = nil }
         view.navigationDelegate = nil
-        return (view, shouldLoad, didFinish)
+        return (view, shouldLoad, didFinish, attachmentLease)
     }
 
     /// Only the currently attached navigation may be recovered. A previously
     /// dismissed sheet must never reload a WebView now owned by another game.
-    static func ownsAttachedNavigation(_ webView: WKWebView, url: URL) -> Bool {
-        pooledView === webView && isAttached && currentURL == url
+    static func ownsAttachedNavigation(_ webView: WKWebView, url: URL, lease: UInt64) -> Bool {
+        // A prewarm-recovery KVO callback from an old Coordinator may run
+        // after a new retry takes the same pooled WebView and game URL.
+        // URL/instance equality alone cannot authorize an old lease to reload.
+        ownsActiveAttachment(webView, lease: lease) && currentURL == url
     }
 
     /// A detached/stale WebView cannot navigate on the pooled game's behalf.
@@ -466,8 +489,17 @@ enum PlayerWebViewPool {
         self.currentURL = nil
     }
 
-    static func recycle(_ webView: WKWebView) {
-        guard pooledView === webView else { return }
+    static func ownsActiveAttachment(_ webView: WKWebView, lease: UInt64) -> Bool {
+        PlayerAttachmentLeasePolicy.mayRecycle(
+            isCurrentPooledView: pooledView === webView,
+            isAttached: isAttached,
+            expectedLease: lease,
+            currentLease: attachmentLease
+        )
+    }
+
+    static func recycle(_ webView: WKWebView, lease: UInt64) {
+        guard ownsActiveAttachment(webView, lease: lease) else { return }
         prewarmExpiryTask?.cancel()
         prewarmExpiryTask = nil
         prewarmEpoch &+= 1
@@ -1311,6 +1343,11 @@ private struct PlayerWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let handoff = PlayerWebViewPool.take(url: url)
         let webView = handoff.webView
+        context.coordinator.attachmentLease = handoff.lease
+        // A newer .id(attempt) may mount before the old coordinator's
+        // dismantle callback. Replace its script handler explicitly:
+        // registering a duplicate WebKit handler name otherwise throws.
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: Self.messageName)
         webView.configuration.userContentController.add(context.coordinator.messageProxy, name: Self.messageName)
         webView.navigationDelegate = context.coordinator
         context.coordinator.observeProgress(of: webView)
@@ -1339,11 +1376,18 @@ private struct PlayerWebView: UIViewRepresentable {
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
         coordinator.stopObserving()
+        // Old sheet teardown may run after a new retry has already taken
+        // ownership of the *same* view. Never remove its new handler or
+        // recycle its live navigation on behalf of the retired coordinator.
+        guard PlayerWebViewPool.ownsActiveAttachment(
+            webView, lease: coordinator.attachmentLease
+        ) else { return }
         webView.configuration.userContentController.removeScriptMessageHandler(forName: messageName)
-        PlayerWebViewPool.recycle(webView)
+        PlayerWebViewPool.recycle(webView, lease: coordinator.attachmentLease)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        var attachmentLease: UInt64 = 0
         let expectedGameID: String
         let expectedURL: URL
         let onProgress: (Double) -> Void
@@ -1523,7 +1567,9 @@ private struct PlayerWebView: UIViewRepresentable {
 
         @MainActor
         func recoverUnobservedWarmupIfNeeded(_ webView: WKWebView, expectedURL: URL) {
-            guard PlayerWebViewPool.ownsAttachedNavigation(webView, url: expectedURL),
+            guard PlayerWebViewPool.ownsAttachedNavigation(
+                    webView, url: expectedURL, lease: attachmentLease
+                  ),
                   PlayerPrewarmHandoffPolicy.shouldRecoverUnobservedFinish(
                     isActive: isActive, stillLoading: webView.isLoading,
                     hasObservedTerminalNavigation: hasObservedTerminalNavigation,

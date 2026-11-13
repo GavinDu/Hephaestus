@@ -948,6 +948,34 @@ struct HephaestusTests {
     ))
 }
 
+@Test func playerAttachmentLeaseRejectsStaleCoordinatorDismantle() {
+    func owns(_ pooled: Bool, _ attached: Bool,
+              _ expected: UInt64, _ current: UInt64) -> Bool {
+        PlayerAttachmentLeasePolicy.mayRecycle(
+            isCurrentPooledView: pooled,
+            isAttached: attached,
+            expectedLease: expected,
+            currentLease: current
+        )
+    }
+    // Normal close of the currently attached game may recycle its WebView.
+    #expect(owns(true, true, 1, 1))
+    #expect(owns(true, true, 100, 100))
+    // A retry may mount a new Coordinator before SwiftUI dismantles
+    // the previous one, even when they temporarily share the SAME view.
+    #expect(!owns(true, true, 1, 2))
+    #expect(!owns(true, true, 2, 3))
+    // A former lease must not remove a successor's script message handler
+    // or blank its active WebKit navigation.
+    #expect(!owns(false, true, 2, 2))
+    #expect(!owns(true, false, 2, 2))
+    #expect(!owns(true, true, 0, 0))
+    #expect(!owns(true, true, 0, 1))
+    #expect(!owns(true, true, 3, 2))
+    // Account replacement/recycle invalidates the old pool owner.
+    #expect(!owns(false, false, 1, 1))
+}
+
 @Test func prewarmCompletionCannotMarkOldOrSessionRevokedViewLoaded() {
     let original = URL(string: "https://example.test/player?game=sky&quality=high")!
     let same = URL(string: "https://example.test/player?game=sky&quality=high")!
