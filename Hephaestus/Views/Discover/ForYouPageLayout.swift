@@ -1,5 +1,65 @@
 import SwiftUI
 
+/// A viewer-scoped mutation gate for real social API calls. A second tap on
+/// the same entity does not issue a contradictory request before the first
+/// network write finishes. UUID leases prevent an old-account callback from
+/// releasing a new account's in-flight action after sign-out/account switch.
+struct FeedSocialMutationGate {
+    enum Kind: Hashable {
+        case save
+        case like
+        case follow
+    }
+
+    struct Key: Hashable {
+        let kind: Kind
+        let id: String
+    }
+
+    private(set) var pending: [Key: UUID] = [:]
+
+    mutating func begin(_ kind: Kind, id: String) -> UUID? {
+        guard !id.isEmpty else { return nil }
+        let key = Key(kind: kind, id: id)
+        guard pending[key] == nil else { return nil }
+        let lease = UUID()
+        pending[key] = lease
+        return lease
+    }
+
+    mutating func finish(_ kind: Kind, id: String, lease: UUID) {
+        let key = Key(kind: kind, id: id)
+        if pending[key] == lease {
+            pending.removeValue(forKey: key)
+        }
+    }
+
+    mutating func revokeAll() {
+        pending.removeAll()
+    }
+}
+
+/// Social write errors are separate from the feed-transport recovery state.
+/// Display the actual authorization situation without leaking internal API
+/// error descriptions, account identifiers or transport hostnames.
+enum FeedSocialErrorPresentation {
+    static func message(action: String, error: Error?, signedIn: Bool) -> String {
+        guard signedIn else {
+            return "Sign in from Profile to use social actions. Your game is still available."
+        }
+        if let apiError = error as? APIError,
+           case let .badStatus(status) = apiError {
+            if status == 401 {
+                return "Your session has expired. Sign in again from Profile."
+            }
+            if status == 403 {
+                return "This action isn't allowed for this account."
+            }
+        }
+        return "\(action) couldn't be confirmed. Your displayed status has not changed. Check your connection and try again."
+    }
+}
+
 /// Pure sizing policy for the full-screen For You pager.
 /// Compact layouts fill the available width; regular layouts preserve a
 /// portrait 9:16 stage with a readable maximum width.

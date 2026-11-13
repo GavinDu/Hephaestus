@@ -52,12 +52,14 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             self.assertEqual(module.read_png_metadata(p)["display_width"], 20)
 
     def fixture(self, folder, corrupt_fullscreen=False, omit=None,
-                include_ipad_details=False):
+                include_ipad_library=False, include_ipad_details=False):
         attachments = []
+        library = ((module.IPAD_LIBRARY_PORTRAIT, module.IPAD_LIBRARY_LANDSCAPE)
+                   if include_ipad_library else ())
         details = (module.IPAD_DETAIL_LANDSCAPE + module.IPAD_DETAIL_PORTRAIT
                    if include_ipad_details else ())
         for name in (module.LANDSCAPE_PRIMARY +
-                     module.LANDSCAPE_DIAGNOSTIC + module.PORTRAIT_PRIMARY + details):
+                     module.LANDSCAPE_DIAGNOSTIC + module.PORTRAIT_PRIMARY + library + details):
             if name == omit:
                 continue
             file = name + ".png"
@@ -68,6 +70,10 @@ class ScreenshotEvidenceTests(unittest.TestCase):
                 payload = png(10, 20, 8, rgb=b"\x40\x60\x80")
             elif name in module.IPAD_DETAIL_PORTRAIT:
                 payload = png(10, 20, 1, rgb=b"\x60\x40\x20")
+            elif name == module.IPAD_LIBRARY_PORTRAIT:
+                payload = png(10, 20, 1, rgb=b"\x20\x50\x80")
+            elif name == module.IPAD_LIBRARY_LANDSCAPE:
+                payload = png(10, 20, 8, rgb=b"\x50\x40\x20")
             elif name in module.LANDSCAPE_PRIMARY:
                 payload = png(10, 20, 1 if corrupt_fullscreen else 8, rgb=rgb)
             elif name in module.LANDSCAPE_DIAGNOSTIC:
@@ -134,6 +140,56 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             p.write_bytes(raw)
             with self.assertRaisesRegex(ValueError, "invalid PNG chunk CRC"):
                 module.read_png_metadata(p)
+
+    def test_ipad_library_captures_required_with_raw_portrait_and_landscape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            review = Path(directory) / "review"
+            folder.mkdir()
+            self.fixture(folder, include_ipad_library=True)
+            report = module.verify_and_copy(folder, review, require_ipad_library=True)
+            self.assertTrue(report["ipad_library_required"])
+            for name in (module.IPAD_LIBRARY_PORTRAIT, module.IPAD_LIBRARY_LANDSCAPE):
+                self.assertIn(name, report["verified"])
+                self.assertTrue(report["verified"][name]["preferred_for_visual_review"])
+                self.assertEqual(
+                    (review / (name + ".raw.png")).read_bytes(),
+                    (folder / (name + ".png")).read_bytes(),
+                )
+            self.assertLess(
+                report["verified"][module.IPAD_LIBRARY_PORTRAIT]["display_width"],
+                report["verified"][module.IPAD_LIBRARY_PORTRAIT]["display_height"],
+            )
+            self.assertGreater(
+                report["verified"][module.IPAD_LIBRARY_LANDSCAPE]["display_width"],
+                report["verified"][module.IPAD_LIBRARY_LANDSCAPE]["display_height"],
+            )
+
+    def test_ipad_library_missing_or_wrong_orientation_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            folder.mkdir()
+            self.fixture(folder)
+            # Pre-existing feed captures are insufficient to approve Library.
+            with self.assertRaisesRegex(ValueError, "arcade-pulse-library-ipad-portrait: expected exactly one"):
+                module.verify_and_copy(folder, Path(directory) / "out", require_ipad_library=True)
+            self.fixture(folder, include_ipad_library=True)
+            landscape = folder / (module.IPAD_LIBRARY_LANDSCAPE + ".png")
+            landscape.write_bytes(png(10, 20, 1, rgb=b"\x50\x40\x20"))
+            with self.assertRaisesRegex(ValueError, "arcade-pulse-library-ipad-landscape: full-screen capture does not display in landscape"):
+                module.verify_and_copy(folder, Path(directory) / "out2", require_ipad_library=True)
+
+    def test_ipad_library_reused_pixels_with_changed_exif_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            folder.mkdir()
+            self.fixture(folder, include_ipad_library=True)
+            landscape = folder / (module.IPAD_LIBRARY_LANDSCAPE + ".png")
+            # Different EXIF orientation and file bytes cannot disguise
+            # the same reused portrait raster as a landscape capture.
+            landscape.write_bytes(png(10, 20, 8, rgb=b"\x20\x50\x80"))
+            with self.assertRaisesRegex(ValueError, "iPad Library portrait/landscape: duplicate decoded screenshot pixels"):
+                module.verify_and_copy(folder, Path(directory) / "out", require_ipad_library=True)
 
     def test_ipad_details_requires_original_distinct_both_orientation_captures(self):
         with tempfile.TemporaryDirectory() as directory:

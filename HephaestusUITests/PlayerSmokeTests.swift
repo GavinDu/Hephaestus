@@ -259,6 +259,90 @@ final class PlayerSmokeTests: XCTestCase {
         }
     }
 
+    /// The preferences modal may not claim a successful write until the
+    /// backend confirms. Simulate a failed write without changing any user
+    /// settings or generating fictitious game/creator data.
+    @MainActor
+    func testArcadePulseFeedPreferencesFailureStaysEditable() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-feed-preferences-failure-state")
+        app.launch()
+        let open = app.buttons["Tune feed recommendations"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 15) && open.isHittable)
+        open.tap()
+        let title = app.navigationBars["Tune your feed"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        let save = app.descendants(matching: .any)["feed.preferences.save"].firstMatch
+        let reset = app.descendants(matching: .any)["feed.preferences.reset"].firstMatch
+        XCTAssertTrue(save.exists && save.isHittable)
+        XCTAssertGreaterThanOrEqual(save.frame.height, 44)
+        save.tap()
+        let error = app.descendants(matching: .any)["feed.preferences.error"].firstMatch
+        XCTAssertTrue(error.waitForExistence(timeout: 10),
+                      "Failed preferences update must be visible inside the still-open sheet.")
+        XCTAssertTrue(title.exists && save.isEnabled,
+                      "Failure must preserve selections and permit a real retry.")
+        let saveShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        saveShot.name = "arcade-pulse-feed-preferences-save-failed"
+        saveShot.lifetime = .keepAlways
+        add(saveShot)
+        XCTAssertTrue(reset.exists && reset.isHittable)
+        reset.tap()
+        XCTAssertTrue(error.waitForExistence(timeout: 10))
+        XCTAssertTrue(title.exists,
+                      "Reset failure cannot close the sheet or pretend preferences were cleared.")
+        let resetShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        resetShot.name = "arcade-pulse-feed-preferences-reset-failed"
+        resetShot.lifetime = .keepAlways
+        add(resetShot)
+        let done = app.buttons["Done"].firstMatch
+        XCTAssertTrue(done.exists && done.isHittable)
+        done.tap()
+        XCTAssertFalse(title.waitForExistence(timeout: 2),
+                       "Done must still dismiss the editable preferences sheet.")
+    }
+
+    /// The social write failure is display-only and deliberately injected
+    /// AFTER a genuine backend feed appears. There is no fake post, no API
+    /// mutation and no invented engagement count. Even on an available
+    /// media stage the failed social action must be audible and dismissible.
+    @MainActor
+    func testArcadePulseSocialWriteFailureDoesNotHideLiveGame() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-social-action-error-state")
+        app.launch()
+        let alert = app.alerts["Couldn't update this action"].firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 150),
+                      "Only a real loaded feed may trigger social error-state evaluation.")
+        let signedOutGuidance = alert.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS %@", "Sign in from Profile")
+        ).firstMatch
+        let uncertainNetworkFailure = alert.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS %@", "couldn't be confirmed")
+        ).firstMatch
+        XCTAssertTrue(signedOutGuidance.exists || uncertainNetworkFailure.exists,
+                      "Show actionable guest authentication guidance or an honest unconfirmed-write status; never claim the server changed nothing.")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "arcade-pulse-live-feed-social-action-error"
+        shot.lifetime = .keepAlways
+        add(shot)
+        let dismiss = alert.buttons["OK"].firstMatch
+        XCTAssertTrue(dismiss.exists && dismiss.isHittable)
+        dismiss.tap()
+        let play = app.buttons["game.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 10) && play.isHittable,
+                      "Dismissed social error must retain the same live playable feed.")
+        XCTAssertGreaterThanOrEqual(play.frame.height, 44)
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "arcade-pulse-live-feed-after-social-error"
+        after.lifetime = .keepAlways
+        add(after)
+    }
+
     /// This isolated error-state screenshot exercises real navigation without
     /// pretending the production feed returned a playable game. The separate
     /// testDiscoverLaunchesPlayer still requires the live backend to work.
@@ -358,12 +442,111 @@ final class PlayerSmokeTests: XCTestCase {
         screenshot.name = "arcade-pulse-library-iphone"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+        // When signed out, an account-owned saved list must offer a real
+        // Profile route rather than a misleading empty collection.
+        let signIn = app.buttons["library.signIn"].firstMatch
+        // Clean native CI is signed out; fail if the real CTA is absent.
+        XCTAssertTrue(signIn.waitForExistence(timeout: 10))
+        if signIn.exists {
+            XCTAssertTrue(signIn.isHittable)
+            XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+            signIn.tap()
+            let profile = app.tabBars.buttons["Profile"].firstMatch
+            XCTAssertTrue(profile.waitForExistence(timeout: 10) && profile.isSelected,
+                          "Library sign-in must navigate to the real Profile tab.")
+            libraryTab.tap()
+            XCTAssertTrue(library.waitForExistence(timeout: 10))
+        }
         let discover = app.tabBars.buttons["Discover"].firstMatch
         XCTAssertTrue(discover.exists && discover.isHittable,
                       "Native tab navigation must remain reachable.")
         discover.tap()
         XCTAssertTrue(app.navigationBars.firstMatch.waitForExistence(timeout: 10),
                       "Returning from Library must restore the Discover navigation stack.")
+    }
+
+    /// The final privacy notice must remain readable in the native iPhone
+    /// Library list, not disappear under the translucent bottom tab bar.
+    /// This exercises real guest/session UI; it injects no saved games.
+    @MainActor
+    func testArcadePulseLibraryPrivacyNoticeCanScrollAboveTabs() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("iPhone tab bar overlap regression.")
+        }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+        let libraryTab = app.tabBars.buttons["Library"].firstMatch
+        XCTAssertTrue(libraryTab.waitForExistence(timeout: 15))
+        libraryTab.tap()
+        let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 10))
+        let footer = app.descendants(matching: .any)["library.privacyFooter"].firstMatch
+        XCTAssertTrue(footer.waitForExistence(timeout: 10),
+                      "The Library must show truthful account/session privacy guidance.")
+        let tabs = app.tabBars.firstMatch
+        for _ in 0..<5 {
+            if footer.isHittable && (!tabs.exists ||
+               footer.frame.maxY <= tabs.frame.minY + 2) { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(footer.isHittable,
+                      "The privacy footer must be reachable by scrolling.")
+        if tabs.exists {
+            XCTAssertLessThanOrEqual(footer.frame.maxY, tabs.frame.minY + 2,
+                                     "Privacy notice text must not hide beneath the bottom tabs.")
+        }
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "arcade-pulse-library-privacy-footer-iphone"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+    }
+
+    /// Open the actual saved/recent Library stage in iPad portrait and landscape.
+    /// No account, mock saved items or successful API response is injected.
+    @MainActor
+    func testArcadePulseLibraryIPadAdaptiveLayout() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("The expanded Library screenshot is iPad-only.")
+        }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-library-entry")
+        app.launch()
+        let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 15),
+                      "iPad Library must render in the adaptive detail stage.")
+        let signIn = app.buttons["library.signIn"].firstMatch
+        XCTAssertTrue(signIn.waitForExistence(timeout: 10),
+                      "A clean unauthenticated simulator must show the real saved-game sign-in route.")
+        XCTAssertTrue(signIn.isHittable)
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-library-ipad-portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let orientationDeadline = Date().addingTimeInterval(10)
+        while window.frame.width <= window.frame.height && Date() < orientationDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "Capture must follow a completed landscape rotation.")
+        XCTAssertTrue(library.waitForExistence(timeout: 10))
+        XCTAssertTrue(signIn.isHittable,
+                      "iPad landscape Library sign-in must not be hidden by the sidebar.")
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-library-ipad-landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+
+        signIn.tap()
+        XCTAssertTrue(app.navigationBars["Profile"].firstMatch.waitForExistence(timeout: 10),
+                      "iPad Library sign-in must open the actual Profile destination.")
     }
 
     /// Open actual game details through the settled post's native More menu.

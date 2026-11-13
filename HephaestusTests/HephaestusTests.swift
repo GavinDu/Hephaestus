@@ -30,6 +30,68 @@ struct HephaestusTests {
         #expect(ArcadePulseActionGlyph.usesAccessibleMenu(for: .accessibility5))
     }
 
+    @Test func arcadePulseSocialActionErrorCopyDoesNotExposeRawBackendFailures() {
+        let anonymous = FeedSocialErrorPresentation.message(
+            action: "Saving this game", error: APIError.badStatus(401), signedIn: false)
+        #expect(anonymous.contains("Sign in from Profile"))
+        #expect(!anonymous.localizedCaseInsensitiveContains("HTTP"))
+
+        let expired = FeedSocialErrorPresentation.message(
+            action: "Liking this game", error: APIError.badStatus(401), signedIn: true)
+        #expect(expired.contains("session has expired"))
+
+        let forbidden = FeedSocialErrorPresentation.message(
+            action: "Following this creator", error: APIError.badStatus(403), signedIn: true)
+        #expect(forbidden.contains("isn't allowed"))
+        #expect(!forbidden.contains("403"))
+
+        let uncertain = FeedSocialErrorPresentation.message(
+            action: "Saving this game",
+            error: URLError(.networkConnectionLost), signedIn: true)
+        #expect(uncertain.contains("couldn't be confirmed"))
+        #expect(uncertain.contains("displayed status has not changed"))
+        #expect(!uncertain.localizedCaseInsensitiveContains("URL"))
+    }
+
+    @Test func arcadePulseSocialMutationLeasesRejectDoubleTapAndStaleAccountCompletion() throws {
+        var gate = FeedSocialMutationGate()
+        // Swift Testing macros internally capture the expression's receiver
+        // as an immutable value. Evaluate mutating actions beforehand, then
+        // assert against their immutable results (Xcode 26 compiler fix).
+        let invalid = gate.begin(.like, id: "")
+        #expect(invalid == nil)
+        let maybeFirst = gate.begin(.save, id: "public-game")
+        let first = try #require(maybeFirst)
+        let repeatedSave = gate.begin(.save, id: "public-game")
+        #expect(repeatedSave == nil)
+        let maybeLike = gate.begin(.like, id: "public-game")
+        let like = try #require(maybeLike)
+        let maybeFollow = gate.begin(.follow, id: "creator-a")
+        let follow = try #require(maybeFollow)
+        #expect(gate.pending.count == 3)
+        gate.finish(.like, id: "public-game", lease: like)
+        #expect(gate.pending.count == 2)
+        gate.finish(.save, id: "public-game", lease: UUID())
+        let staleSave = gate.begin(.save, id: "public-game")
+        #expect(staleSave == nil)
+        gate.finish(.save, id: "public-game", lease: first)
+        let resumedSave = gate.begin(.save, id: "public-game")
+        #expect(resumedSave != nil)
+
+        // Logout invalidates earlier account leases; stale completions must
+        // not release the next viewer's pending request for the same creator.
+        gate.revokeAll()
+        #expect(gate.pending.isEmpty)
+        let maybeSecond = gate.begin(.follow, id: "creator-a")
+        let second = try #require(maybeSecond)
+        gate.finish(.follow, id: "creator-a", lease: follow)
+        let staleFollow = gate.begin(.follow, id: "creator-a")
+        #expect(staleFollow == nil)
+        gate.finish(.follow, id: "creator-a", lease: second)
+        let resumedFollow = gate.begin(.follow, id: "creator-a")
+        #expect(resumedFollow != nil)
+    }
+
     @Test func arcadePulseFoundationUsesSinglePaletteAndAccessibleTargetSizes() {
         #expect(ArcadePulseTheme.fallbackPalettes.count == 5)
         #expect(ArcadePulseTheme.minimumTarget >= 44)
@@ -1142,6 +1204,56 @@ struct HephaestusTests {
     }
 }
 
+@Test func runtimeMetricSequenceGateIsBoundedMonotonicAndKindAllowlisted() {
+    var gate = PlayerRuntimeMetricSequenceGate()
+    let firstRender = gate.accept(metric: "first_scene_render_submit", sequence: 1)
+    let duplicateRender = gate.accept(metric: "first_scene_render_submit", sequence: 1)
+    let newerRender = gate.accept(metric: "first_scene_render_submit", sequence: 5)
+    let oldRender = gate.accept(metric: "first_scene_render_submit", sequence: 3)
+    let independentInput = gate.accept(metric: "first_input", sequence: 2)
+    let firstWindow = gate.accept(metric: "perf_window", sequence: 8)
+    let invalidKind = gate.accept(metric: "unbounded_custom_metric", sequence: 10)
+    let invalidLow = gate.accept(metric: "perf_window", sequence: -1)
+    let invalidHigh = gate.accept(metric: "perf_window", sequence: 100_001)
+    #expect(firstRender)
+    #expect(!duplicateRender)
+    #expect(newerRender)
+    #expect(!oldRender)
+    #expect(independentInput)
+    #expect(firstWindow)
+    #expect(!invalidKind)
+    #expect(!invalidLow)
+    #expect(!invalidHigh)
+    #expect(gate.highestSequenceByMetric.count == 3)
+    #expect(gate.highestSequenceByMetric["first_scene_render_submit"] == 5)
+    #expect(gate.highestSequenceByMetric["first_input"] == 2)
+    #expect(gate.highestSequenceByMetric["perf_window"] == 8)
+    gate.reset()
+    #expect(gate.highestSequenceByMetric.isEmpty)
+    let freshSession = gate.accept(metric: "first_scene_render_submit", sequence: 1)
+    #expect(freshSession)
+}
+
+@Test func firstSceneRenderSubmissionGateAcceptsOneValidMilestoneOnly() {
+    var gate = PlayerFirstSceneRenderSubmissionGate()
+    let missing = gate.accept(milliseconds: nil)
+    let negative = gate.accept(milliseconds: -1)
+    let excessive = gate.accept(milliseconds: 3_600_001)
+    let first = gate.accept(milliseconds: 0)
+    let repeatedNewSequence = gate.accept(milliseconds: 50)
+    #expect(!missing)
+    #expect(!negative)
+    #expect(!excessive)
+    #expect(first)
+    #expect(!repeatedNewSequence)
+    #expect(gate.accepted)
+
+    var boundary = PlayerFirstSceneRenderSubmissionGate()
+    let maximum = boundary.accept(milliseconds: 3_600_000)
+    #expect(maximum)
+    #expect(boundary.accepted)
+}
+
 
 
 @Test func playerMemoryPressureEvictsOnlyUnattachedSpeculativePrewarm() {
@@ -1156,6 +1268,98 @@ struct HephaestusTests {
     #expect(!mayEvict(true, true))
     #expect(!mayEvict(false, false))
     #expect(!mayEvict(true, false))
+}
+
+
+// Saved games are owner-private even when the UI also has on-device recent
+// entries. No response from the old user or an old retry may restore titles.
+@Test func arcadePulseLibrarySavedResponsesAreAccountBound() {
+    func accepted(_ startedOwner: String, _ currentOwner: String,
+                  _ startedToken: String?, _ currentToken: String?,
+                  _ startedRevision: Int = 9, _ currentRevision: Int = 9) -> Bool {
+        LibrarySavedRequestPolicy.canApply(
+            startedRevision: startedRevision, currentRevision: currentRevision,
+            startedOwner: startedOwner, currentOwner: currentOwner,
+            startedToken: startedToken, currentToken: currentToken)
+    }
+    #expect(accepted("A", "A", "credential-A", "credential-A"))
+    #expect(!accepted("A", "B", "credential-A", "credential-B"))
+    #expect(!accepted("A", "", "credential-A", nil))
+    #expect(!accepted("A", "A", "credential-A", "credential-new"))
+    #expect(!accepted("A", "A", "credential-A", "credential-A", 9, 10))
+    #expect(!accepted("", "", nil, nil))
+    #expect(!accepted("A", "A", nil, nil))
+    #expect(!accepted("A", "A", nil, "credential-A"))
+
+    // Defensive render gate also protects views that were offscreen when
+    // the account-switch notification was sent.
+    let firstCredential = LibrarySavedRequestPolicy.digest("bearer-A")
+    let rotatedCredential = LibrarySavedRequestPolicy.digest("bearer-rotated")
+    let sameCredential = LibrarySavedRequestPolicy.digest("bearer-A")
+    func visible(_ storedOwner: String?, _ currentOwner: String,
+                 _ storedDigest: Data?, _ currentDigest: Data?) -> Bool {
+        LibrarySavedRequestPolicy.canDisplay(
+            loadedOwner: storedOwner, currentOwner: currentOwner,
+            loadedSessionDigest: storedDigest, currentSessionDigest: currentDigest
+        )
+    }
+    #expect(visible("A", "A", firstCredential, sameCredential))
+    #expect(!visible("A", "B", firstCredential, sameCredential))
+    #expect(!visible("A", "", firstCredential, sameCredential))
+    #expect(!visible(nil, "A", firstCredential, sameCredential))
+    #expect(!visible("A", "A", firstCredential, rotatedCredential))
+    #expect(!visible("A", "A", nil, sameCredential))
+    #expect(!visible("A", "A", firstCredential, nil))
+    #expect(LibrarySavedRequestPolicy.digest(nil) == nil)
+}
+
+
+// Previously a single UserDefaults key persisted published and possibly
+// restricted-scope feed titles across every account on the device. New
+// storage keys are deterministic per subject, and the old unscoped list is
+// discarded rather than migrated to whichever account logs in first.
+@Test func arcadePulseRecentHistoryNeverLeaksAcrossAccounts() {
+    let guest = RecentGames.storageKey(for: "")
+    let ownerA = RecentGames.storageKey(for: "private-owner-A")
+    let ownerB = RecentGames.storageKey(for: "private-owner-B")
+    #expect(guest != ownerA)
+    #expect(guest != ownerB)
+    #expect(ownerA != ownerB)
+    #expect(ownerA == RecentGames.storageKey(for: "private-owner-A"))
+    #expect(!ownerA.contains("private-owner-A"))
+    #expect(!ownerB.contains("private-owner-B"))
+    #expect(ownerA != RecentGames.legacyKey)
+    #expect(guest != RecentGames.legacyKey)
+
+    let suite = "hephaestus.recent-history-privacy-tests"
+    guard let defaults = UserDefaults(suiteName: suite) else {
+        Issue.record("Could not create an isolated UserDefaults test suite")
+        return
+    }
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let legacy = Data("previous account's private game title".utf8)
+    defaults.set(legacy, forKey: RecentGames.legacyKey)
+    let ownerAHistory = [RecentGame(gameID: "private-game-A", title: "Owner A's private title")]
+    let ownerBHistory = [RecentGame(gameID: "public-game-B", title: "Owner B's recent game")]
+    defaults.set(try? JSONEncoder().encode(ownerAHistory), forKey: ownerA)
+    defaults.set(try? JSONEncoder().encode(ownerBHistory), forKey: ownerB)
+    #expect(RecentGames.load(for: "private-owner-A", defaults: defaults).map(\.gameID) == ["private-game-A"])
+    #expect(RecentGames.load(for: "private-owner-B", defaults: defaults).map(\.gameID) == ["public-game-B"])
+    #expect(RecentGames.load(for: "", defaults: defaults).isEmpty)
+    // The actual load path purges old unscoped history instead of gifting
+    // its game title to the first account that opens Library after update.
+    #expect(defaults.data(forKey: RecentGames.legacyKey) == nil)
+    #expect(defaults.data(forKey: ownerA) != nil)
+    #expect(defaults.data(forKey: ownerB) != nil)
+
+    // A login/logout boundary also retires anonymous history, preserving
+    // authenticated account shelves.
+    defaults.set(try? JSONEncoder().encode(ownerBHistory), forKey: guest)
+    #expect(RecentGames.load(for: "", defaults: defaults).count == 1)
+    RecentGames.clearGuestHistory(defaults: defaults)
+    #expect(RecentGames.load(for: "", defaults: defaults).isEmpty)
+    #expect(RecentGames.load(for: "private-owner-A", defaults: defaults).count == 1)
+    #expect(RecentGames.load(for: "private-owner-B", defaults: defaults).count == 1)
 }
 
 // A live HTTPS outage is a real error; it must produce a legible recovery
@@ -1179,3 +1383,196 @@ struct HephaestusTests {
     #expect(!unexpected.localizedCaseInsensitiveContains("NSError"))
 }
 
+@Test func productionHostLifecycleTransitionsKeepMilestonesDistinct() {
+    var lifecycle = PlayerHostLaunchReducer()
+    #expect(lifecycle.phase == .navigating)
+    #expect(lifecycle.isAttached)
+    #expect(!lifecycle.observedTerminalNavigation)
+
+    let htmlLoaded = lifecycle.navigationFinished()
+    #expect(htmlLoaded)
+    #expect(lifecycle.phase == .documentLoaded)
+    #expect(lifecycle.observedTerminalNavigation)
+    // Navigation finish is NOT proof of a rendered frame or interaction.
+    let sceneSubmitted = lifecycle.sceneSubmitted()
+    #expect(sceneSubmitted)
+    #expect(lifecycle.phase == .sceneSubmitted)
+    let inputAccepted = lifecycle.firstInput(milliseconds: 120)
+    #expect(inputAccepted)
+    #expect(lifecycle.phase == .interactive)
+    let duplicateFinish = lifecycle.navigationFinished()
+    let duplicateScene = lifecycle.sceneSubmitted()
+    let duplicateInput = lifecycle.firstInput(milliseconds: 200)
+    #expect(!duplicateFinish)
+    #expect(!duplicateScene)
+    #expect(!duplicateInput)
+    #expect(lifecycle.phase == .interactive)
+    lifecycle.detach()
+    #expect(lifecycle.phase == .detached)
+    #expect(!lifecycle.permitsRuntimeEvents)
+    let staleFinish = lifecycle.navigationFinished()
+    let staleInput = lifecycle.firstInput(milliseconds: 5)
+    let staleScene = lifecycle.sceneSubmitted()
+    let staleCrash = lifecycle.webProcessTerminated()
+    #expect(!staleFinish)
+    #expect(!staleInput)
+    #expect(!staleScene)
+    #expect(!staleCrash)
+}
+
+@Test func productionHostLifecyclePrewarmAndMetricsMayArriveOutOfOrder() {
+    var lifecycle = PlayerHostLaunchReducer()
+    // A prewarmed page may begin sending events before the new
+    // Coordinator receives didFinish. Do not lie about HTML readiness.
+    let firstInput = lifecycle.firstInput(milliseconds: 10)
+    #expect(firstInput)
+    #expect(lifecycle.phase == .interactive)
+    let lateScene = lifecycle.sceneSubmitted()
+    #expect(lateScene)
+    #expect(lifecycle.phase == .interactive)
+    let lateFinish = lifecycle.navigationFinished()
+    #expect(lateFinish)
+    #expect(lifecycle.phase == .interactive)
+    #expect(lifecycle.observedTerminalNavigation)
+    let duplicateScene = lifecycle.sceneSubmitted()
+    #expect(!duplicateScene)
+}
+
+@Test func productionHostLifecycleFailedAndTerminatedSessionsStayTerminal() {
+    var failed = PlayerHostLaunchReducer()
+    let failure = failed.navigationFailed()
+    #expect(failure)
+    #expect(failed.phase == .navigationFailed)
+    #expect(failed.observedTerminalNavigation)
+    failed.navigationStarted()
+    #expect(failed.phase == .navigationFailed)
+    let lateFinish = failed.navigationFinished()
+    let lateScene = failed.sceneSubmitted()
+    let lateInput = failed.firstInput(milliseconds: 3)
+    let repeatedFailure = failed.navigationFailed()
+    #expect(!lateFinish)
+    #expect(!lateScene)
+    #expect(!lateInput)
+    #expect(!repeatedFailure)
+    let failCannotCrashAgain = failed.webProcessTerminated()
+    #expect(!failCannotCrashAgain)
+    #expect(failed.phase == .navigationFailed)
+
+    var terminated = PlayerHostLaunchReducer()
+    let ready = terminated.sceneSubmitted()
+    #expect(ready)
+    let processDied = terminated.webProcessTerminated()
+    #expect(processDied)
+    #expect(terminated.phase == .webProcessTerminated)
+    terminated.navigationStarted()
+    #expect(terminated.phase == .webProcessTerminated)
+    let postMortemInput = terminated.firstInput(milliseconds: 5)
+    let repeatedCrash = terminated.webProcessTerminated()
+    #expect(!postMortemInput)
+    #expect(!repeatedCrash)
+}
+
+@Test func productionHostLifecycleNavigationRestartResetsMilestonesOnlyWhileActive() {
+    var lifecycle = PlayerHostLaunchReducer()
+    let start = lifecycle.navigationFinished()
+    let input = lifecycle.firstInput(milliseconds: 20)
+    #expect(start && input)
+    lifecycle.navigationStarted()
+    #expect(lifecycle.phase == .navigating)
+    #expect(!lifecycle.observedTerminalNavigation)
+    let badInput = lifecycle.firstInput(milliseconds: -1)
+    let freshScene = lifecycle.sceneSubmitted()
+    let freshInput = lifecycle.firstInput(milliseconds: 50)
+    #expect(!badInput)
+    #expect(freshScene)
+    #expect(freshInput)
+    #expect(lifecycle.phase == .interactive)
+}
+
+
+@Test func hostRuntimeSessionBindingRejectsStaleWebKitMessagesAfterReload() {
+    var gate = PlayerRuntimeSessionBindingGate()
+    #expect(PlayerRuntimeSessionBindingGate.maximumRetiredSessions == 8)
+    let empty = gate.bind("")
+    let oversized = gate.bind(String(repeating: "x", count: 129))
+    let first = gate.bind("old-session")
+    let repeatedFirst = gate.bind("old-session")
+    let conflictingLive = gate.bind("unexpected-live")
+    #expect(!empty)
+    #expect(!oversized)
+    #expect(first)
+    #expect(repeatedFirst)
+    #expect(!conflictingLive)
+    #expect(gate.activeSessionID == "old-session")
+
+    gate.beginNavigation()
+    #expect(gate.activeSessionID == nil)
+    #expect(gate.retiredCount == 1)
+    let oldCallback = gate.bind("old-session")
+    let newDocument = gate.bind("new-session")
+    let oldAfterNew = gate.bind("old-session")
+    let conflictingNew = gate.bind("third-session")
+    #expect(!oldCallback)
+    #expect(newDocument)
+    #expect(!oldAfterNew)
+    #expect(!conflictingNew)
+    #expect(gate.activeSessionID == "new-session")
+    gate.clear()
+    #expect(gate.retiredCount == 0)
+    #expect(gate.activeSessionID == nil)
+    let freshCoordinator = gate.bind("old-session")
+    #expect(freshCoordinator)
+}
+
+@Test func hostRuntimeSessionBindingRetainsOnlyEightMostRecentDocuments() {
+    var gate = PlayerRuntimeSessionBindingGate()
+    var accepted = [Bool]()
+    for i in 0..<16 {
+        accepted.append(gate.bind("session-\(i)"))
+        gate.beginNavigation()
+        #expect(gate.retiredCount <= 8)
+    }
+    #expect(accepted.allSatisfy { $0 })
+    #expect(gate.retiredCount == 8)
+    for i in 8..<16 {
+        let rejected = gate.bind("session-\(i)")
+        #expect(!rejected)
+    }
+    let current = gate.bind("session-16")
+    #expect(current)
+    #expect(gate.activeSessionID == "session-16")
+}
+
+@Test func hostNavigationRestartsMetricEpochWithoutLyingAboutReadiness() {
+    var lifecycle = PlayerHostLaunchReducer()
+    var sequence = PlayerRuntimeMetricSequenceGate()
+    var scene = PlayerFirstSceneRenderSubmissionGate()
+    // Capture all mutating transition outcomes before Swift Testing macros:
+    // #expect expands closure expressions with an immutable capture context.
+    let firstSequence = sequence.accept(metric: "first_scene_render_submit", sequence: 1)
+    let firstScene = scene.accept(milliseconds: 30)
+    let firstSubmitted = lifecycle.sceneSubmitted()
+    let firstInputSequence = sequence.accept(metric: "first_input", sequence: 2)
+    let firstInput = lifecycle.firstInput(milliseconds: 70)
+    let firstInteractive = lifecycle.phase == .interactive
+    #expect(firstSequence && firstScene && firstSubmitted && firstInputSequence && firstInput)
+    #expect(firstInteractive)
+
+    // New WK document rotates session + metric gates on navigation start.
+    lifecycle.navigationStarted()
+    sequence.reset()
+    scene = PlayerFirstSceneRenderSubmissionGate()
+    let isNavigating = lifecycle.phase == .navigating
+    let nextSequence = sequence.accept(metric: "first_scene_render_submit", sequence: 1)
+    let nextScene = scene.accept(milliseconds: 20)
+    let nextSubmitted = lifecycle.sceneSubmitted()
+    let nextInputSequence = sequence.accept(metric: "first_input", sequence: 2)
+    let nextInput = lifecycle.firstInput(milliseconds: 60)
+    let nextInteractive = lifecycle.phase == .interactive
+    let duplicateSequence = sequence.accept(metric: "first_input", sequence: 2)
+    let duplicateScene = scene.accept(milliseconds: 50)
+    #expect(isNavigating)
+    #expect(nextSequence && nextScene && nextSubmitted && nextInputSequence && nextInput)
+    #expect(nextInteractive)
+    #expect(!duplicateSequence && !duplicateScene)
+}
