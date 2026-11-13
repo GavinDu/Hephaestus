@@ -240,6 +240,66 @@ struct PlayerHostLaunchReducer {
     }
 }
 
+/// A trusted player may restart repeatedly inside the same WK document.
+/// Only the newest notified result may reach the sheet, even if older network
+/// requests finish later. Recent dedup and in-flight/queued work remain bounded.
+/// This gate never authorizes a result; the backend and native verification
+/// checks must still validate every completed request.
+struct PlayerVerifiedRunNotificationGate {
+    static let maximumRecentRunIDs = 32
+    static let maximumConcurrentFetches = 2
+    private var recentRunIDs: [String] = []
+    private var pendingRunIDs = Set<String>()
+    private var deferredRunID: String?
+    private var latestRunID: String?
+
+    var recentCount: Int { recentRunIDs.count }
+    var pendingCount: Int { pendingRunIDs.count }
+    var deferredCount: Int { deferredRunID == nil ? 0 : 1 }
+
+    /// Accept a distinct candidate, returning the ID to fetch immediately,
+    /// or nil when the newest candidate is deferred behind two active fetches.
+    /// One deferred slot supersedes older waiting outcomes, not newer ones.
+    mutating func offer(_ runID: String) -> String? {
+        guard !runID.isEmpty, runID.count <= 128,
+              !recentRunIDs.contains(runID),
+              !pendingRunIDs.contains(runID),
+              deferredRunID != runID else { return nil }
+        recentRunIDs.append(runID)
+        if recentRunIDs.count > Self.maximumRecentRunIDs {
+            recentRunIDs.removeFirst(recentRunIDs.count - Self.maximumRecentRunIDs)
+        }
+        latestRunID = runID
+        if pendingRunIDs.count < Self.maximumConcurrentFetches {
+            pendingRunIDs.insert(runID)
+            return runID
+        }
+        deferredRunID = runID
+        return nil
+    }
+
+    func isLatest(_ runID: String) -> Bool {
+        latestRunID == runID
+    }
+
+    /// Release a completed request and, if still attached, promote the latest
+    /// deferred run. Never promote twice or resurrect after reset/detach.
+    mutating func complete(_ runID: String) -> String? {
+        guard pendingRunIDs.remove(runID) != nil else { return nil }
+        guard let next = deferredRunID else { return nil }
+        deferredRunID = nil
+        pendingRunIDs.insert(next)
+        return next
+    }
+
+    mutating func reset() {
+        recentRunIDs.removeAll(keepingCapacity: false)
+        pendingRunIDs.removeAll(keepingCapacity: false)
+        deferredRunID = nil
+        latestRunID = nil
+    }
+}
+
 /// Maps a WKWebView load failure to the player-facing error state
 /// (Hephaestus #53). Two rules, both fail-closed:
 ///   - the UI shows only a fixed message per category, never the raw
@@ -496,6 +556,15 @@ enum PlayerAttachmentLeasePolicy {
     ) -> Bool {
         isCurrentPooledView && isAttached &&
             expectedLease != 0 && expectedLease == currentLease
+    }
+}
+
+/// User-visible WebView callbacks belong to the currently attached sheet,
+/// not simply to whichever Coordinator still has a valid runtime session.
+/// A newer retry may take the pooled WebView before the old Coordinator ends.
+enum PlayerHostCallbackDeliveryPolicy {
+    static func mayDeliver(ownsCurrentAttachment: Bool, acceptsRuntimeEvents: Bool) -> Bool {
+        ownsCurrentAttachment && acceptsRuntimeEvents
     }
 }
 
@@ -1517,6 +1586,7 @@ private struct PlayerWebView: UIViewRepresentable {
         let handoff = PlayerWebViewPool.take(url: url)
         let webView = handoff.webView
         context.coordinator.attachmentLease = handoff.lease
+        context.coordinator.attachedWebView = webView
         // A newer .id(attempt) may mount before the old coordinator's
         // dismantle callback. Replace its script handler explicitly:
         // registering a duplicate WebKit handler name otherwise throws.
@@ -1561,6 +1631,19 @@ private struct PlayerWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var attachmentLease: UInt64 = 0
+        // Only weakly reference the pooled host; never retain a retired view
+        // merely because an asynchronous verified-result lookup is pending.
+        weak var attachedWebView: WKWebView?
+        private var ownsLiveAttachment: Bool {
+            guard let view = attachedWebView else { return false }
+            return PlayerWebViewPool.ownsActiveAttachment(view, lease: attachmentLease)
+        }
+        private var acceptsCurrentHostCallbacks: Bool {
+            PlayerHostCallbackDeliveryPolicy.mayDeliver(
+                ownsCurrentAttachment: ownsLiveAttachment,
+                acceptsRuntimeEvents: launchLifecycle.permitsRuntimeEvents
+            )
+        }
         let expectedGameID: String
         let expectedURL: URL
         let onProgress: (Double) -> Void
@@ -1572,7 +1655,9 @@ private struct PlayerWebView: UIViewRepresentable {
         private var progressObservation: NSKeyValueObservation?
         private var prewarmLoadingObservation: NSKeyValueObservation?
         private var prewarmRecoveryArmed = false
-        private var acceptedRunIDs = Set<String>()
+        private var verifiedRunGate = PlayerVerifiedRunNotificationGate()
+        // At most two concurrent result lookups; deferred work stays latest-only.
+        private var verifiedRunFetchTasks: [String: Task<Void, Never>] = [:]
         private var navigationFailureGate = PlayerNavigationFailureGate()
         private var metricSequenceGate = PlayerRuntimeMetricSequenceGate()
         private var firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
@@ -1602,7 +1687,8 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
-            guard isActive, launchLifecycle.permitsRuntimeEvents,
+            // Retired attachment cannot deliver callbacks during retry or sign-out.
+            guard acceptsCurrentHostCallbacks,
                   message.name == PlayerWebView.messageName,
                   message.frameInfo.isMainFrame,
                   sameOrigin(message.frameInfo.securityOrigin),
@@ -1621,18 +1707,45 @@ private struct PlayerWebView: UIViewRepresentable {
             guard type == "verified_run_available",
                   Set(body.keys).isSubset(of: ["schema", "type", "sessionId", "gameId", "runId"]),
                   let runID = body["runId"] as? String,
-                  !runID.isEmpty, runID.count <= 128,
-                  acceptedRunIDs.insert(runID).inserted else { return }
-            Task { @MainActor [weak self] in
+                  let toFetch = verifiedRunGate.offer(runID) else { return }
+            requestVerifiedRunResult(toFetch, runtimeSessionID: runtimeSessionID)
+        }
+
+        private func requestVerifiedRunResult(_ runID: String, runtimeSessionID: String) {
+            // The host owns the backend lookup tasks, not the lifetime of a
+            // reused WKWebView document. Cancellation on dismantle prevents
+            // stale lookups keeping a retired coordinator alive unnecessarily.
+            verifiedRunFetchTasks[runID] = Task { @MainActor [weak self] in
                 guard let self else { return }
+                defer {
+                    self.verifiedRunFetchTasks.removeValue(forKey: runID)
+                    if let next = self.verifiedRunGate.complete(runID),
+                       self.isActive, self.ownsLiveAttachment,
+                       self.runtimeSessionID == runtimeSessionID {
+                        self.requestVerifiedRunResult(next, runtimeSessionID: runtimeSessionID)
+                    }
+                }
                 do {
                     let result = try await BackendAPI.shared.fetchVerifiedRunResult(runID: runID)
-                    guard self.launchLifecycle.permitsRuntimeEvents,
+                    // In-page Play Again can post a newer run ID before this
+                    // older backend fetch completes. Never overwrite its result.
+                    // The request may have completed while the coordinator was
+                    // being dismantled; cancellation must also block delivery.
+                    guard !Task<Never, Never>.isCancelled,
+                          self.isActive, self.ownsLiveAttachment,
+                          self.launchLifecycle.permitsRuntimeEvents,
                           self.runtimeSessionID == runtimeSessionID,
-                          result.gameID == expectedGameID, result.isVerified else { return }
-                    onVerifiedRun(result)
+                          self.verifiedRunGate.isLatest(runID),
+                          result.gameID == self.expectedGameID, result.isVerified else { return }
+                    self.onVerifiedRun(result)
                 } catch {
-                    PlayerTelemetry.report(gameID: expectedGameID, kind: "ios-run-result-failed",
+                    // Dismissal, retry or sign-out cancels session-owned work;
+                    // expected cancellation is not a user-facing fetch error.
+                    guard !Task<Never, Never>.isCancelled,
+                          self.isActive, self.ownsLiveAttachment,
+                          self.launchLifecycle.permitsRuntimeEvents,
+                          self.runtimeSessionID == runtimeSessionID else { return }
+                    PlayerTelemetry.report(gameID: self.expectedGameID, kind: "ios-run-result-failed",
                                            name: "VerifiedRunResultFetchFailed",
                                            message: "verified result unavailable")
                 }
@@ -1662,7 +1775,9 @@ private struct PlayerWebView: UIViewRepresentable {
                 guard let ms = body["ms"] as? Int,
                       launchLifecycle.firstInput(milliseconds: ms) else { return }
                 Task { @MainActor [weak self] in
-                    guard let self, self.launchLifecycle.permitsRuntimeEvents,
+                    // After a retry, session equality alone cannot authorize
+                    // the retired Coordinator to update the old player sheet.
+                    guard let self, self.acceptsCurrentHostCallbacks,
                           self.runtimeSessionID == runtimeSessionID else { return }
                     self.onFirstInput()
                 }
@@ -1695,7 +1810,7 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func observeProgress(of webView: WKWebView) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
-                guard let self, self.launchLifecycle.permitsRuntimeEvents else { return }
+                guard let self, self.acceptsCurrentHostCallbacks else { return }
                 self.onProgress(view.estimatedProgress)
             }
         }
@@ -1707,7 +1822,10 @@ private struct PlayerWebView: UIViewRepresentable {
             prewarmLoadingObservation = nil
             progressObservation?.invalidate()
             progressObservation = nil
-            acceptedRunIDs.removeAll()
+            for task in verifiedRunFetchTasks.values { task.cancel() }
+            verifiedRunFetchTasks.removeAll(keepingCapacity: false)
+            verifiedRunGate.reset()
+            attachedWebView = nil
             metricSequenceGate.reset()
             firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
             runtimeSessionGate.clear()
@@ -1737,7 +1855,8 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func reportPrewarmedFinishIfActive() {
-            guard launchLifecycle.navigationFinished() else { return }
+            guard acceptsCurrentHostCallbacks,
+                  launchLifecycle.navigationFinished() else { return }
             disarmPrewarmRecovery()
             onProgress(1)
             onLoadFinish()
@@ -1760,13 +1879,17 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            guard launchLifecycle.permitsRuntimeEvents else { return }
+            guard acceptsCurrentHostCallbacks else { return }
             launchLifecycle.navigationStarted()
             // A real reload has a new web runtime session. Stale metrics,
             // run IDs, and in-flight verified-result lookups from the old
             // document must not be associated with the replacement page.
             runtimeSessionGate.beginNavigation()
-            acceptedRunIDs.removeAll()
+            // Revoke older document result requests before accepting a new
+            // metric and verified-run session; canceled results cannot win.
+            for task in verifiedRunFetchTasks.values { task.cancel() }
+            verifiedRunFetchTasks.removeAll(keepingCapacity: false)
+            verifiedRunGate.reset()
             // New trusted document restarts metric sequence and first render.
             metricSequenceGate.reset()
             firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
@@ -1775,7 +1898,8 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         private func reportNavigationFailure(_ error: Error) {
-            guard isActive, launchLifecycle.navigationFailed(),
+            guard acceptsCurrentHostCallbacks,
+                  launchLifecycle.navigationFailed(),
                   navigationFailureGate.shouldReportFailure() else { return }
             disarmPrewarmRecovery()
             onLoadFail(error)
@@ -1784,7 +1908,7 @@ private struct PlayerWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
-            let allow = isActive && PlayerWebViewPool.allowsMainFrameNavigation(
+            let allow = acceptsCurrentHostCallbacks && PlayerWebViewPool.allowsMainFrameNavigation(
                 webView, requestURL: navigationAction.request.url, isMainFrame: isMainFrame
             ) && PlayerMainFrameNavigationPolicy.shouldAllow(
                 requestURL: navigationAction.request.url, expectedURL: expectedURL,
@@ -1799,6 +1923,10 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            guard acceptsCurrentHostCallbacks else {
+                decisionHandler(.cancel)
+                return
+            }
             // Recheck the final main-document URL even if a redirect did not
             // generate a separate navigation-action policy callback.
             if navigationResponse.isForMainFrame &&
@@ -1833,7 +1961,8 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            guard launchLifecycle.webProcessTerminated() else { return }
+            guard acceptsCurrentHostCallbacks,
+                  launchLifecycle.webProcessTerminated() else { return }
             disarmPrewarmRecovery()
             onTerminate()
         }
