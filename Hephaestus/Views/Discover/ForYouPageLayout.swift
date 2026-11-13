@@ -1,8 +1,37 @@
 import SwiftUI
 
+/// Creator game-card layout policy. A stacked card in enlarged text keeps
+/// real backend titles and Play controls readable on iPhones and narrow iPads.
+enum CreatorGameRowLayout {
+    static func prefersStacked(
+        isIPad: Bool, isRegularWidth: Bool, isEnlargedText: Bool
+    ) -> Bool {
+        // Large iPhones can report regular horizontal size class in landscape.
+        // Only genuinely wide iPad layouts may retain the side-by-side card.
+        isEnlargedText && (!isIPad || !isRegularWidth)
+    }
+}
+
+/// Viewer-state gate for native creator follow buttons.
+/// Public creator counts remain backend-authoritative while a mutation or
+/// follow-status refresh is unresolved.
+enum CreatorFollowPresentationPolicy {
+    static func offersFollowAction(viewerID: String, creatorID: String) -> Bool {
+        !viewerID.isEmpty && !creatorID.isEmpty && viewerID != creatorID
+    }
+
+    static func canSubmit(
+        viewerID: String, creatorID: String,
+        isUpdating: Bool, needsConfirmation: Bool
+    ) -> Bool {
+        offersFollowAction(viewerID: viewerID, creatorID: creatorID) &&
+            !isUpdating && !needsConfirmation
+    }
+}
+
 /// Pure sizing policy for the full-screen For You pager.
-/// Compact layouts fill the available width; regular layouts preserve a
-/// portrait 9:16 stage with a readable maximum width.
+/// Compact layouts fill available width; regular iPad layouts preserve
+/// a portrait 9:16 stage with a readable maximum width.
 enum ForYouPageLayout {
     /// A stable per-game palette slot for truthful fallback artwork when no
     /// approved poster/clip exists. Hash through a larger prime first: reducing

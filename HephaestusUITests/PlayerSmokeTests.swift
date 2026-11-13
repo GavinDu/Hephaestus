@@ -184,15 +184,192 @@ final class PlayerSmokeTests: XCTestCase {
         let header = app.descendants(matching: .any)["creator.profile.header"].firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 30),
                       "Creator profile must render server-backed identity and metrics.")
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        // Avoid changing an actual backend Follow relation just to test UX.
+        // Assert truthful current viewer state and reachable controls instead.
+        let follow = app.descendants(matching: .any)["creator.profile.follow"].firstMatch
+        let guestHint = app.descendants(matching: .any)["creator.profile.signInHint"].firstMatch
+        let pendingConfirmation = app.descendants(matching: .any)[
+            "creator.profile.needsConfirmation"
+        ].firstMatch
+        let isGuest = guestHint.exists
+        XCTAssertFalse(pendingConfirmation.exists,
+                       "An unopened creator profile must not claim a follow write occurred.")
+        if guestHint.exists {
+            XCTAssertFalse(follow.exists,
+                           "Guests must not see an active Follow mutation without signing in.")
+        }
+        if follow.exists {
+            XCTAssertTrue(follow.isHittable, "A real Follow action must be reachable.")
+            XCTAssertGreaterThanOrEqual(follow.frame.height, 44,
+                                        "Follow must retain the accessible target size.")
+        }
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "arcade-pulse-creator-profile"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let window = app.windows.firstMatch
+            let deadline = Date().addingTimeInterval(12)
+            while window.frame.width <= window.frame.height && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+            XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                                 "iPad creator screenshot must be a true native landscape viewport.")
+            XCTAssertTrue(header.waitForExistence(timeout: 10),
+                          "Real creator metadata must survive rotation.")
+            XCTAssertLessThanOrEqual(header.frame.maxX, window.frame.maxX + 1,
+                                     "Creator header must stay inside the landscape safe viewport.")
+            if follow.exists {
+                XCTAssertTrue(follow.isHittable,
+                              "Follow must be reachable after iPad landscape rotation.")
+            }
+            let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            landscape.name = "arcade-pulse-ipad-creator-profile-landscape"
+            landscape.lifetime = .keepAlways
+            add(landscape)
+            XCUIDevice.shared.orientation = .portrait
+        }
         let done = app.buttons["Done"].firstMatch
         XCTAssertTrue(done.exists && done.isHittable)
         done.tap()
         XCTAssertTrue(app.buttons["game.play"].firstMatch.waitForExistence(timeout: 10),
                       "Closing creator profile must preserve the playable feed.")
+
+        if isGuest {
+            // Reopen the genuine creator after verifying Done→same feed,
+            // then exercise the new native authentication destination.
+            // Do not create a fake session or mutate production follows.
+            let again = app.buttons.matching(
+                NSPredicate(format: "label BEGINSWITH %@", "View profile for ")
+            ).firstMatch
+            XCTAssertTrue(again.waitForExistence(timeout: 10))
+            again.tap()
+            let signInRoute = app.descendants(matching: .any)[
+                "creator.profile.openProfile"
+            ].firstMatch
+            XCTAssertTrue(signInRoute.waitForExistence(timeout: 15) && signInRoute.isHittable,
+                          "Guest creator must offer a real Profile tab sign-in route.")
+            XCTAssertGreaterThanOrEqual(signInRoute.frame.height, 44)
+            signInRoute.tap()
+            let profileGuidance = app.staticTexts.containing(
+                NSPredicate(format: "label CONTAINS %@", "Sign in with Apple to publish")
+            ).firstMatch
+            XCTAssertTrue(profileGuidance.waitForExistence(timeout: 15),
+                          "Only the real native Profile destination may offer Apple sign-in.")
+            XCTAssertFalse(app.descendants(matching: .any)[
+                "creator.profile.header"
+            ].firstMatch.exists,
+                "Creator sheet must be dismissed before Profile is selected.")
+            let navigationEvidence = XCTAttachment(
+                screenshot: XCUIScreen.main.screenshot())
+            navigationEvidence.name = "arcade-pulse-creator-profile-to-real-signin"
+            navigationEvidence.lifetime = .keepAlways
+            add(navigationEvidence)
+        }
+    }
+
+    /// The nested route is genuinely different from opening a creator
+    /// directly in the feed: close Profile, then Creator Discovery, before
+    /// the root iPhone tab / iPad split-view destination changes.
+    @MainActor
+    func testArcadePulseCreatorDiscoveryGuestSignInNavigation() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+
+        let openDiscovery = app.buttons["Discover creators"].firstMatch
+        XCTAssertTrue(openDiscovery.waitForExistence(timeout: 20))
+        openDiscovery.tap()
+        XCTAssertTrue(app.navigationBars["Creators"].firstMatch.waitForExistence(timeout: 10))
+        // The native SwiftUI creator row may bridge through a wrapper
+        // element rather than XCUI .button. Use its accessible label on any
+        // descendant while requiring a genuine backend Creator entry.
+        let creator = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label BEGINSWITH %@", "View creator ")
+        ).firstMatch
+        let retry = app.buttons["creator.discovery.retry"].firstMatch
+        let deadline = Date().addingTimeInterval(120)
+        var lastRetry = Date.distantPast
+        while !creator.exists && Date() < deadline {
+            if retry.exists && Date().timeIntervalSince(lastRetry) >= 20 {
+                let frame = retry.frame
+                let bounds = app.frame
+                let center = CGPoint(x: frame.midX, y: frame.midY)
+                if frame.origin.x.isFinite && frame.origin.y.isFinite &&
+                   frame.width.isFinite && frame.height.isFinite &&
+                   frame.width >= 44 && frame.height >= 44 &&
+                   bounds.contains(center) && !creator.exists {
+                    let origin = app.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                    origin.withOffset(CGVector(
+                        dx: center.x - bounds.minX,
+                        dy: center.y - bounds.minY
+                    )).tap()
+                    lastRetry = Date()
+                }
+            }
+            _ = creator.waitForExistence(timeout: 4)
+        }
+        if !creator.exists {
+            let errorState = app.descendants(matching: .any)[
+                "creator.discovery.loadError"
+            ].firstMatch
+            let unavailable = errorState.exists
+            // The client exposes a fixed low-cardinality category only:
+            // never log creator IDs, returned JSON, tokens or request URLs.
+            let errorDescription = app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "creator.discovery.error.")
+            ).firstMatch
+            let categoryPrefix = "creator.discovery.error."
+            let errorIdentifier = errorDescription.exists ? errorDescription.identifier : ""
+            let rawCategory = errorIdentifier.hasPrefix(categoryPrefix)
+                ? String(errorIdentifier.dropFirst(categoryPrefix.count)) : "none"
+            let allowedCategories: Set<String> = [
+                "tls", "offline", "timeout", "network", "route_missing",
+                "rate_limited", "server_unavailable", "http_other",
+                "invalid_response", "invalid_input", "unavailable", "none"
+            ]
+            let category = allowedCategories.contains(rawCategory)
+                ? rawCategory : "unknown"
+            print("CREATOR_DISCOVERY_BACKEND_FAILURE service_unavailable=\(unavailable) category=\(category) retry_attempted=\(lastRetry != .distantPast)")
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "arcade-pulse-real-creator-service-unavailable"
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        XCTAssertTrue(creator.exists && creator.isHittable,
+                      "A genuine, hittable backend creator must exist before testing nested sign-in. Do not fake or bypass this prerequisite.")
+        creator.tap()
+        let header = app.descendants(matching: .any)[
+            "creator.profile.header"
+        ].firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 15))
+        let hint = app.descendants(matching: .any)[
+            "creator.profile.signInHint"
+        ].firstMatch
+        guard hint.exists else {
+            throw XCTSkip("Nested guest sign-in must use a signed-out test session.")
+        }
+        let route = app.descendants(matching: .any)[
+            "creator.profile.openProfile"
+        ].firstMatch
+        XCTAssertTrue(route.exists && route.isHittable)
+        XCTAssertGreaterThanOrEqual(route.frame.height, 44)
+        route.tap()
+        let profileGuidance = app.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS %@", "Sign in with Apple to publish")
+        ).firstMatch
+        XCTAssertTrue(profileGuidance.waitForExistence(timeout: 15),
+                      "Dismiss both creator sheets before presenting the actual Profile.")
+        XCTAssertFalse(header.exists,
+                       "A stale Creator Profile must not overlay the Profile sign-in entry.")
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "arcade-pulse-creator-search-to-real-signin"
+        evidence.lifetime = .keepAlways
+        add(evidence)
     }
 
     /// Prove the actual Create screen, not a marketing concept, exposes

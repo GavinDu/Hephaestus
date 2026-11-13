@@ -64,8 +64,11 @@ struct DiscoverView: View {
     // The host owns navigation, so this is an actual route to Library,
     // never a substitute game list or a fabricated preview.
     let onOpenLibrary: (() -> Void)?
-    init(onOpenLibrary: (() -> Void)? = nil) {
+    let onOpenProfile: (() -> Void)?
+    init(onOpenLibrary: (() -> Void)? = nil,
+         onOpenProfile: (() -> Void)? = nil) {
         self.onOpenLibrary = onOpenLibrary
+        self.onOpenProfile = onOpenProfile
     }
 
     // One functional set of recovery actions across all orientations.
@@ -121,6 +124,8 @@ struct DiscoverView: View {
     @State private var reportingGame: FeedGame?
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
+    @State private var openProfileAfterCreatorDismiss = false
+    @State private var openProfileAfterDiscoveryDismiss = false
     @State private var settledForYouGameID: String?
     @State private var resultPresentation: PlayerResultPresentation?
 
@@ -643,11 +648,32 @@ struct DiscoverView: View {
             .sheet(item: $reportingGame) { game in
                 ReportGameSheet(game: game)
             }
-            .sheet(item: $profileRequest) { request in
-                CreatorProfileSheet(creatorID: request.id)
+            .sheet(item: $profileRequest, onDismiss: {
+                // Route only after the modal's dismissal finishes, so the
+                // selected Profile tab/split-view is visible and touchable.
+                if openProfileAfterCreatorDismiss {
+                    openProfileAfterCreatorDismiss = false
+                    onOpenProfile?()
+                }
+            }) { request in
+                CreatorProfileSheet(
+                    creatorID: request.id,
+                    onRequestSignIn: onOpenProfile == nil ? nil : {
+                        openProfileAfterCreatorDismiss = true
+                        profileRequest = nil
+                    })
             }
-            .sheet(isPresented: $isCreatorDiscoveryPresented) {
-                CreatorDiscoverySheet()
+            .sheet(isPresented: $isCreatorDiscoveryPresented, onDismiss: {
+                if openProfileAfterDiscoveryDismiss {
+                    openProfileAfterDiscoveryDismiss = false
+                    onOpenProfile?()
+                }
+            }) {
+                CreatorDiscoverySheet(
+                    onRequestProfileSignIn: onOpenProfile == nil ? nil : {
+                        openProfileAfterDiscoveryDismiss = true
+                        isCreatorDiscoveryPresented = false
+                    })
             }
             .sheet(isPresented: $isFeedPreferencesPresented) {
                 FeedPreferencesSheet(
@@ -1836,14 +1862,83 @@ private struct CreatorProfileRequest: Identifiable {
     let id: String
 }
 
+/// User-facing creator discovery error copy: display an honest retry
+/// instead of leaking a certificate path, backend hostname, or transport
+/// diagnostic into a social browsing screen.
+enum CreatorDiscoveryErrorPresentation {
+    /// Stable, deliberately low-cardinality category for native CI failures.
+    /// Never expose a URL, request body, bearer token, creator ID or raw error.
+    static func diagnosticCategory(for error: Error) -> String {
+        if let networkError = error as? URLError {
+            switch networkError.code {
+            case .secureConnectionFailed, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .serverCertificateUntrusted,
+                 .serverCertificateHasUnknownRoot:
+                return "tls"
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "offline"
+            case .timedOut:
+                return "timeout"
+            default:
+                return "network"
+            }
+        }
+        if let apiError = error as? APIError {
+            switch apiError {
+            case .badStatus(404): return "route_missing"
+            case .badStatus(429): return "rate_limited"
+            case .badStatus(let code) where (500...599).contains(code): return "server_unavailable"
+            case .badStatus: return "http_other"
+            case .decoding: return "invalid_response"
+            case .invalidInput: return "invalid_input"
+            }
+        }
+        return "unavailable"
+    }
+
+    static func message(for error: Error) -> String {
+        switch diagnosticCategory(for: error) {
+        case "tls":
+            return "The creator service couldn't establish a secure connection. Check your network and try again."
+        case "offline":
+            return "You seem to be offline. Reconnect to explore creators."
+        case "timeout":
+            return "Creator discovery is taking too long to respond. Try again."
+        case "route_missing":
+            return "Creator discovery isn't available on this server right now. Try again later."
+        case "rate_limited":
+            return "Too many creator searches right now. Try again shortly."
+        case "invalid_response":
+            return "The creator service sent an unexpected response. Try again later."
+        default:
+            return "Creator discovery isn't available right now. Try again in a moment."
+        }
+    }
+}
+
+enum CreatorDiscoveryEmptyPresentation {
+    static func title(hasFilters: Bool) -> String {
+        hasFilters ? "No matching creators" : "No public creators yet"
+    }
+
+    static func message(hasFilters: Bool) -> String {
+        hasFilters
+            ? "Try another creator name, game title, or topic."
+            : "Creators appear here after their real games are published."
+    }
+}
+
 private struct CreatorDiscoverySheet: View {
+    let onRequestProfileSignIn: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
     @State private var topicText = ""
     @State private var creators: [CreatorDiscoveryEntry] = []
     @State private var nextCursor: String?
     @State private var profileRequest: CreatorProfileRequest?
+    @State private var openProfileAfterNestedDismiss = false
     @State private var errorMessage: String?
+    @State private var errorDiagnosticCategory: String?
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var loadGeneration = 0
@@ -1871,12 +1966,41 @@ private struct CreatorDiscoverySheet: View {
 
                 if isLoading && creators.isEmpty {
                     HStack { Spacer(); ProgressView("Finding creators…"); Spacer() }
-                } else if creators.isEmpty && errorMessage == nil {
+                } else if creators.isEmpty, let errorMessage {
+                    Section {
+                        ContentUnavailableView(
+                            "Couldn't load creators",
+                            systemImage: "wifi.exclamationmark",
+                            description: Text(errorMessage)
+                                // Identifier is nonspoken XCTest metadata. Do NOT
+                                // put internal failure codes in an accessibilityValue
+                                // read aloud by VoiceOver to real users.
+                                .accessibilityIdentifier(
+                                    "creator.discovery.error." + (errorDiagnosticCategory ?? "unavailable")
+                                )
+                        )
+                        .accessibilityIdentifier("creator.discovery.loadError")
+                        Button {
+                            Task { await load(reset: true) }
+                        } label: {
+                            Label("Try again", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("creator.discovery.retry")
+                    }
+                } else if creators.isEmpty {
+                    let hasFilters = !appliedSearchText.trimmingCharacters(
+                        in: .whitespacesAndNewlines).isEmpty ||
+                        !appliedTopicText.trimmingCharacters(
+                            in: .whitespacesAndNewlines).isEmpty
                     ContentUnavailableView(
-                        "No creators found",
+                        CreatorDiscoveryEmptyPresentation.title(hasFilters: hasFilters),
                         systemImage: "person.2",
-                        description: Text("Try another search or topic.")
+                        description: Text(
+                            CreatorDiscoveryEmptyPresentation.message(hasFilters: hasFilters))
                     )
+                    .accessibilityIdentifier("creator.discovery.empty")
                 } else {
                     Section("Creators") {
                         ForEach(creators) { creator in
@@ -1924,12 +2048,15 @@ private struct CreatorDiscoverySheet: View {
                     }
                 }
 
-                if let errorMessage {
+                if let errorMessage, !creators.isEmpty {
                     Section {
                         Label(errorMessage, systemImage: "exclamationmark.triangle")
-                            .font(.footnote)
-                            .foregroundStyle(.red)
+                            .font(.subheadline)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("creator.discovery.paginationError")
                         Button("Try again") { Task { await load(reset: true) } }
+                            .frame(minHeight: 44)
                     }
                 }
             }
@@ -1945,8 +2072,20 @@ private struct CreatorDiscoverySheet: View {
             }
             .refreshable { await load(reset: true) }
             .task { await load(reset: true) }
-            .sheet(item: $profileRequest) { request in
-                CreatorProfileSheet(creatorID: request.id)
+            .sheet(item: $profileRequest, onDismiss: {
+                // A creator opened from Search has two modal layers.
+                // Dismiss the inner profile, then Discovery, then navigate.
+                if openProfileAfterNestedDismiss {
+                    openProfileAfterNestedDismiss = false
+                    onRequestProfileSignIn?()
+                }
+            }) { request in
+                CreatorProfileSheet(
+                    creatorID: request.id,
+                    onRequestSignIn: onRequestProfileSignIn == nil ? nil : {
+                        openProfileAfterNestedDismiss = true
+                        profileRequest = nil
+                    })
             }
         }
     }
@@ -1970,6 +2109,7 @@ private struct CreatorDiscoverySheet: View {
             }
         }
         errorMessage = nil
+        errorDiagnosticCategory = nil
         do {
             let response = try await BackendAPI.shared.fetchCreators(
                 query: appliedSearchText,
@@ -1986,18 +2126,26 @@ private struct CreatorDiscoverySheet: View {
             nextCursor = response.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
         } catch {
             guard generation == loadGeneration else { return }
-            errorMessage = "Couldn't load creators: \(error.localizedDescription)"
+            errorMessage = CreatorDiscoveryErrorPresentation.message(for: error)
+            errorDiagnosticCategory = CreatorDiscoveryErrorPresentation.diagnosticCategory(for: error)
         }
     }
 }
 
 private struct CreatorProfileSheet: View {
     let creatorID: String
+    let onRequestSignIn: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var profile: CreatorProfile?
     @State private var errorMessage: String?
     @State private var isLoading = true
+    @State private var isFollowUpdating = false
+    @State private var followStatusNeedsRefresh = false
+    @State private var followActionError: String?
+    @State private var profileLoadRevision = 0
+    @State private var followMutationRevision = 0
     @State private var playerRequest: PixiPlayerRequest?
 
     var body: some View {
@@ -2037,18 +2185,85 @@ private struct CreatorProfileSheet: View {
                                     creatorMetric("Followers", value: profile.follower_count)
                                     creatorMetric("Following", value: profile.following_count)
                                 }
-                                if profile.creator_id != BackendConfig.currentUserID {
+                                if BackendConfig.currentUserID.isEmpty {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Label("Sign in to follow this creator.",
+                                              systemImage: "person.crop.circle")
+                                            .font(.subheadline)
+                                            .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .accessibilityIdentifier("creator.profile.signInHint")
+                                        if let onRequestSignIn {
+                                            Button(action: onRequestSignIn) {
+                                                Label("Go to Profile to sign in",
+                                                      systemImage: "person.crop.circle")
+                                                    .font(.headline.weight(.semibold))
+                                                    .frame(maxWidth: .infinity, minHeight: 48)
+                                            }
+                                            .buttonStyle(.borderedProminent)
+                                            .tint(ArcadePulseTheme.electricViolet)
+                                            .accessibilityIdentifier("creator.profile.openProfile")
+                                        }
+                                    }
+                                } else if CreatorFollowPresentationPolicy.offersFollowAction(
+                                    viewerID: BackendConfig.currentUserID,
+                                    creatorID: profile.creator_id
+                                ) {
                                     Button {
                                         Task { await toggleFollow(profile.is_following) }
                                     } label: {
-                                        Label(profile.is_following ? "Following" : "Follow creator",
-                                              systemImage: profile.is_following ? "person.fill.checkmark" : "person.badge.plus")
-                                            .font(.headline.weight(.semibold))
-                                            .frame(maxWidth: .infinity, minHeight: 48)
+                                        if isFollowUpdating {
+                                            Label("Updating follow…", systemImage: "arrow.triangle.2.circlepath")
+                                                .font(.headline.weight(.semibold))
+                                                .frame(maxWidth: .infinity, minHeight: 48)
+                                        } else {
+                                            Label(profile.is_following ? "Following" : "Follow creator",
+                                                  systemImage: profile.is_following ? "person.fill.checkmark" : "person.badge.plus")
+                                                .font(.headline.weight(.semibold))
+                                                .frame(maxWidth: .infinity, minHeight: 48)
+                                        }
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .tint(ArcadePulseTheme.electricViolet)
+                                    .disabled(!CreatorFollowPresentationPolicy.canSubmit(
+                                        viewerID: BackendConfig.currentUserID,
+                                        creatorID: profile.creator_id,
+                                        isUpdating: isFollowUpdating,
+                                        needsConfirmation: followStatusNeedsRefresh
+                                    ))
                                     .accessibilityIdentifier("creator.profile.follow")
+                                }
+                                if followStatusNeedsRefresh {
+                                    Label("Follow change sent, but the latest status could not be confirmed.",
+                                          systemImage: "exclamationmark.triangle.fill")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.orange)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .accessibilityIdentifier("creator.profile.needsConfirmation")
+                                    Button("Refresh follow status") { Task { await load() } }
+                                        .buttonStyle(.bordered)
+                                        .frame(minHeight: 44)
+                                        .accessibilityIdentifier("creator.profile.refreshFollow")
+                                }
+                                if let followActionError {
+                                    Label(followActionError, systemImage: "exclamationmark.triangle")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.orange)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .accessibilityIdentifier("creator.profile.followError")
+                                }
+                                if let errorMessage {
+                                    Label("Couldn't refresh creator: \(errorMessage)",
+                                          systemImage: "wifi.exclamationmark")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.orange)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .accessibilityIdentifier("creator.profile.refreshError")
+                                    if !followStatusNeedsRefresh {
+                                        Button("Retry creator details") { Task { await load() } }
+                                            .buttonStyle(.bordered)
+                                            .frame(minHeight: 44)
+                                    }
                                 }
                             }
                             .padding(18)
@@ -2097,6 +2312,22 @@ private struct CreatorProfileSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .task { await load() }
+            .onReceive(NotificationCenter.default.publisher(
+                for: .hephaestusBackendSessionDidChange
+            )) { _ in
+                // Public posts may stay public, but the viewer-specific
+                // is_following flag and private follow UI must be retired
+                // synchronously on a login/logout boundary.
+                profileLoadRevision += 1
+                followMutationRevision += 1
+                profile = nil
+                isLoading = true
+                isFollowUpdating = false
+                followStatusNeedsRefresh = false
+                followActionError = nil
+                errorMessage = nil
+                Task { await load() }
+            }
             .fullScreenCover(item: $playerRequest) { request in
                 PixiPlayerSheet(gameID: request.gameID, title: request.title)
             }
@@ -2117,7 +2348,18 @@ private struct CreatorProfileSheet: View {
     }
 
     private func creatorGameRow(_ game: FeedGame) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        // At enlarged text sizes, the fixed-size poster used to squeeze the
+        // title and Play control in compact iPhone / iPad Split View widths.
+        // Preserve the real poster and backend title while stacking the card.
+        let stacksForLargeText = CreatorGameRowLayout.prefersStacked(
+            isIPad: UIDevice.current.userInterfaceIdiom == .pad,
+            isRegularWidth: horizontalSizeClass == .regular,
+            isEnlargedText: dynamicTypeSize >= .xxLarge
+        )
+        let layout: AnyLayout = stacksForLargeText
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        return layout {
             ZStack {
                 LinearGradient(colors: ArcadePulseTheme.fallbackPalette(gameID: game.id),
                                startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -2136,7 +2378,9 @@ private struct CreatorProfileSheet: View {
                         .accessibilityLabel("Gameplay preview unavailable")
                 }
             }
-            .frame(width: 112, height: 116)
+            .frame(width: stacksForLargeText ? nil : 112,
+                   height: stacksForLargeText ? 152 : 116)
+            .frame(maxWidth: stacksForLargeText ? .infinity : nil)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 8) {
@@ -2159,13 +2403,15 @@ private struct CreatorProfileSheet: View {
                 } label: {
                     Label("Play game", systemImage: "play.fill")
                         .font(.subheadline.weight(.bold))
-                        .frame(minWidth: 110, minHeight: 44)
+                        .frame(minWidth: stacksForLargeText ? nil : 110,
+                               maxWidth: stacksForLargeText ? .infinity : nil,
+                               minHeight: 48)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(ArcadePulseTheme.playOrangeDeep)
                 .accessibilityIdentifier("creator.game.play.\(game.id)")
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2174,17 +2420,57 @@ private struct CreatorProfileSheet: View {
     }
 
     private func load() async {
-        isLoading = true
-        defer { isLoading = false }
-        do { profile = try await BackendAPI.shared.fetchCreatorProfile(id: creatorID); errorMessage = nil }
-        catch { errorMessage = error.localizedDescription }
+        profileLoadRevision += 1
+        let revision = profileLoadRevision
+        let viewer = BackendConfig.currentUserID
+        // A refresh must not blank a useful settled creator screen.
+        if profile == nil { isLoading = true }
+        defer {
+            if revision == profileLoadRevision { isLoading = false }
+        }
+        do {
+            let fetched = try await BackendAPI.shared.fetchCreatorProfile(id: creatorID)
+            guard revision == profileLoadRevision,
+                  viewer == BackendConfig.currentUserID else { return }
+            profile = fetched
+            errorMessage = nil
+            followActionError = nil
+            followStatusNeedsRefresh = false
+        } catch {
+            guard revision == profileLoadRevision,
+                  viewer == BackendConfig.currentUserID else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func toggleFollow(_ currentlyFollowing: Bool) async {
+        let viewer = BackendConfig.currentUserID
+        guard CreatorFollowPresentationPolicy.canSubmit(
+            viewerID: viewer, creatorID: creatorID,
+            isUpdating: isFollowUpdating,
+            needsConfirmation: followStatusNeedsRefresh
+        ) else { return }
+        followMutationRevision += 1
+        let mutation = followMutationRevision
+        isFollowUpdating = true
+        followActionError = nil
+        defer {
+            if mutation == followMutationRevision { isFollowUpdating = false }
+        }
         do {
             try await BackendAPI.shared.setFollowing(creatorID, following: !currentlyFollowing)
+            guard mutation == followMutationRevision,
+                  viewer == BackendConfig.currentUserID else { return }
+            // Write ACK is not proof of a refreshed follower count or
+            // viewer state. Disable a second mutation until the backend
+            // confirms it, or show a real Retry status affordance.
+            followStatusNeedsRefresh = true
             await load()
-        } catch { errorMessage = error.localizedDescription }
+        } catch {
+            guard mutation == followMutationRevision,
+                  viewer == BackendConfig.currentUserID else { return }
+            followActionError = "Couldn't update Follow: \(error.localizedDescription)"
+        }
     }
 }
 

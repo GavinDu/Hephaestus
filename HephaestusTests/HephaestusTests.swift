@@ -78,6 +78,91 @@ struct HephaestusTests {
             verticalSizeClass: .regular, horizontalSizeClass: .regular, searchText: ""))
     }
 
+    @Test func arcadePulseCreatorDiscoveryErrorsStayTruthfulAndPrivate() {
+        let tls = CreatorDiscoveryErrorPresentation.message(
+            for: URLError(.secureConnectionFailed))
+        #expect(tls.contains("secure connection"))
+        #expect(!tls.localizedCaseInsensitiveContains("certificate"))
+
+        let offline = CreatorDiscoveryErrorPresentation.message(
+            for: URLError(.notConnectedToInternet))
+        #expect(offline.contains("offline"))
+        let timeout = CreatorDiscoveryErrorPresentation.message(
+            for: URLError(.timedOut))
+        #expect(timeout.contains("too long"))
+        let unknown = CreatorDiscoveryErrorPresentation.message(
+            for: APIError.badStatus(503))
+        #expect(unknown.contains("isn't available"))
+        #expect(!unknown.contains("503"))
+        let classification = CreatorDiscoveryErrorPresentation.diagnosticCategory(for:)
+        #expect(classification(APIError.badStatus(404)) == "route_missing")
+        #expect(classification(APIError.badStatus(429)) == "rate_limited")
+        #expect(classification(APIError.badStatus(503)) == "server_unavailable")
+        #expect(classification(APIError.badStatus(500)) == "server_unavailable")
+        #expect(classification(APIError.badStatus(401)) == "http_other")
+        #expect(classification(APIError.decoding(URLError(.cannotParseResponse))) == "invalid_response")
+        #expect(classification(URLError(.secureConnectionFailed)) == "tls")
+        #expect(classification(URLError(.notConnectedToInternet)) == "offline")
+        #expect(classification(URLError(.timedOut)) == "timeout")
+
+        let noRoute = CreatorDiscoveryErrorPresentation.message(for: APIError.badStatus(404))
+        #expect(noRoute.contains("server"))
+        #expect(!noRoute.contains("404"))
+        let tooFast = CreatorDiscoveryErrorPresentation.message(for: APIError.badStatus(429))
+        #expect(tooFast.localizedCaseInsensitiveContains("try again"))
+        #expect(!tooFast.contains("429"))
+        let unexpected = CreatorDiscoveryErrorPresentation.message(
+            for: APIError.decoding(URLError(.cannotParseResponse)))
+        #expect(unexpected.contains("unexpected response"))
+        #expect(!unexpected.contains("decoding"))
+    }
+
+    @Test func arcadePulseCreatorDiscoveryDistinguishesRealEmptyFromFilteredEmpty() {
+        #expect(CreatorDiscoveryEmptyPresentation.title(hasFilters: false) ==
+                "No public creators yet")
+        #expect(CreatorDiscoveryEmptyPresentation.message(hasFilters: false)
+            .contains("real games"))
+        #expect(CreatorDiscoveryEmptyPresentation.title(hasFilters: true) ==
+                "No matching creators")
+        #expect(CreatorDiscoveryEmptyPresentation.message(hasFilters: true)
+            .contains("topic"))
+    }
+
+    @Test func arcadePulseCreatorGameCardsStackInNarrowEnlargedTextLayouts() {
+        #expect(CreatorGameRowLayout.prefersStacked(
+            isIPad: false, isRegularWidth: false, isEnlargedText: true))
+        // An iPhone Plus can claim regular width in landscape; it is still a phone.
+        #expect(CreatorGameRowLayout.prefersStacked(
+            isIPad: false, isRegularWidth: true, isEnlargedText: true))
+        #expect(CreatorGameRowLayout.prefersStacked(
+            isIPad: true, isRegularWidth: false, isEnlargedText: true))
+        #expect(!CreatorGameRowLayout.prefersStacked(
+            isIPad: true, isRegularWidth: true, isEnlargedText: true))
+        #expect(!CreatorGameRowLayout.prefersStacked(
+            isIPad: false, isRegularWidth: false, isEnlargedText: false))
+        #expect(!CreatorGameRowLayout.prefersStacked(
+            isIPad: true, isRegularWidth: true, isEnlargedText: false))
+    }
+
+    @Test func arcadePulseCreatorFollowControlsRequireAuthenticatedConfirmedViewerState() {
+        let policy = CreatorFollowPresentationPolicy.self
+        #expect(!policy.offersFollowAction(viewerID: "", creatorID: "author"))
+        #expect(!policy.offersFollowAction(viewerID: "reader", creatorID: ""))
+        #expect(!policy.offersFollowAction(viewerID: "author", creatorID: "author"))
+        #expect(policy.offersFollowAction(viewerID: "reader", creatorID: "author"))
+
+        #expect(policy.canSubmit(viewerID: "reader", creatorID: "author",
+                                 isUpdating: false, needsConfirmation: false))
+        #expect(!policy.canSubmit(viewerID: "reader", creatorID: "author",
+                                  isUpdating: true, needsConfirmation: false))
+        #expect(!policy.canSubmit(viewerID: "reader", creatorID: "author",
+                                  isUpdating: false, needsConfirmation: true))
+        #expect(!policy.canSubmit(viewerID: "", creatorID: "author",
+                                  isUpdating: false, needsConfirmation: false))
+        #expect(!policy.canSubmit(viewerID: "author", creatorID: "author",
+                                  isUpdating: false, needsConfirmation: false))
+    }
+
     @Test func arcadePulseIPadContextPanelNeverCrushesTheGameStage() {
         #expect(ForYouPageLayout.showsIPadContextPanel(
             width: 1_366, height: 1_024, isRegular: true, isAccessibilityText: false))
