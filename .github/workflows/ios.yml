@@ -6,6 +6,15 @@ on:
   push:
     branches: [main, feat/native-game-ir-player]
 
+# GitHub-hosted macOS capacity is finite. Every intermediate PR commit
+# previously queued three new macOS jobs with no supersession: obsolete
+# screenshots and Xcode results could never certify the newest PR head.
+# Cancel only older runs of *the same PR*. Main and other branch pushes
+# use their unique run_id, so no required main verification is discarded.
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   xcode:
     runs-on: macos-latest
