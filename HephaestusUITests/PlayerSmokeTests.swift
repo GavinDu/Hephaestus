@@ -449,7 +449,11 @@ final class PlayerSmokeTests: XCTestCase {
         add(slowScreenshot)
 
         let recover = app.descendants(matching: .any)["feed.error.recovery"].firstMatch
-        XCTAssertTrue(recover.waitForExistence(timeout: 20),
+        // The isolated stalled-transport fixture expires at 35 seconds so
+        // XCTest can capture and validate the intermediate real action row.
+        // Wait past that known fixture deadline; a failure is still a hard
+        // failure to transition to real Retry/Library, never a skip.
+        XCTAssertTrue(recover.waitForExistence(timeout: 50),
                       "The UI must leave an indefinitely waiting skeleton.")
         XCTAssertFalse(slow.exists,
                        "Slow-status text must retire when the timeout recovery is shown.")
