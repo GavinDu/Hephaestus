@@ -314,17 +314,16 @@ final class PlayerSmokeTests: XCTestCase {
             _ = creator.waitForExistence(timeout: 4)
         }
         if !creator.exists {
-            let errorState = app.descendants(matching: .any)[
-                "creator.discovery.loadError"
-            ].firstMatch
+            // A single parent identifier retains the trusted status category
+            // without changing the human-readable text or VoiceOver value.
+            let categoryPrefix = "creator.discovery.loadError."
+            let errorState = app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", categoryPrefix)
+            ).firstMatch
             let unavailable = errorState.exists
             // The client exposes a fixed low-cardinality category only:
             // never log creator IDs, returned JSON, tokens or request URLs.
-            let errorDescription = app.descendants(matching: .any).matching(
-                NSPredicate(format: "identifier BEGINSWITH %@", "creator.discovery.error.")
-            ).firstMatch
-            let categoryPrefix = "creator.discovery.error."
-            let errorIdentifier = errorDescription.exists ? errorDescription.identifier : ""
+            let errorIdentifier = unavailable ? errorState.identifier : ""
             let rawCategory = errorIdentifier.hasPrefix(categoryPrefix)
                 ? String(errorIdentifier.dropFirst(categoryPrefix.count)) : "none"
             let allowedCategories: Set<String> = [
