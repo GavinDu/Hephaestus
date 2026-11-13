@@ -30,6 +30,68 @@ struct HephaestusTests {
         #expect(ArcadePulseActionGlyph.usesAccessibleMenu(for: .accessibility5))
     }
 
+    @Test func arcadePulseSocialActionErrorCopyDoesNotExposeRawBackendFailures() {
+        let anonymous = FeedSocialErrorPresentation.message(
+            action: "Saving this game", error: APIError.badStatus(401), signedIn: false)
+        #expect(anonymous.contains("Sign in from Profile"))
+        #expect(!anonymous.localizedCaseInsensitiveContains("HTTP"))
+
+        let expired = FeedSocialErrorPresentation.message(
+            action: "Liking this game", error: APIError.badStatus(401), signedIn: true)
+        #expect(expired.contains("session has expired"))
+
+        let forbidden = FeedSocialErrorPresentation.message(
+            action: "Following this creator", error: APIError.badStatus(403), signedIn: true)
+        #expect(forbidden.contains("isn't allowed"))
+        #expect(!forbidden.contains("403"))
+
+        let uncertain = FeedSocialErrorPresentation.message(
+            action: "Saving this game",
+            error: URLError(.networkConnectionLost), signedIn: true)
+        #expect(uncertain.contains("couldn't be confirmed"))
+        #expect(uncertain.contains("displayed status has not changed"))
+        #expect(!uncertain.localizedCaseInsensitiveContains("URL"))
+    }
+
+    @Test func arcadePulseSocialMutationLeasesRejectDoubleTapAndStaleAccountCompletion() throws {
+        var gate = FeedSocialMutationGate()
+        // Swift Testing macros internally capture the expression's receiver
+        // as an immutable value. Evaluate mutating actions beforehand, then
+        // assert against their immutable results (Xcode 26 compiler fix).
+        let invalid = gate.begin(.like, id: "")
+        #expect(invalid == nil)
+        let maybeFirst = gate.begin(.save, id: "public-game")
+        let first = try #require(maybeFirst)
+        let repeatedSave = gate.begin(.save, id: "public-game")
+        #expect(repeatedSave == nil)
+        let maybeLike = gate.begin(.like, id: "public-game")
+        let like = try #require(maybeLike)
+        let maybeFollow = gate.begin(.follow, id: "creator-a")
+        let follow = try #require(maybeFollow)
+        #expect(gate.pending.count == 3)
+        gate.finish(.like, id: "public-game", lease: like)
+        #expect(gate.pending.count == 2)
+        gate.finish(.save, id: "public-game", lease: UUID())
+        let staleSave = gate.begin(.save, id: "public-game")
+        #expect(staleSave == nil)
+        gate.finish(.save, id: "public-game", lease: first)
+        let resumedSave = gate.begin(.save, id: "public-game")
+        #expect(resumedSave != nil)
+
+        // Logout invalidates earlier account leases; stale completions must
+        // not release the next viewer's pending request for the same creator.
+        gate.revokeAll()
+        #expect(gate.pending.isEmpty)
+        let maybeSecond = gate.begin(.follow, id: "creator-a")
+        let second = try #require(maybeSecond)
+        gate.finish(.follow, id: "creator-a", lease: follow)
+        let staleFollow = gate.begin(.follow, id: "creator-a")
+        #expect(staleFollow == nil)
+        gate.finish(.follow, id: "creator-a", lease: second)
+        let resumedFollow = gate.begin(.follow, id: "creator-a")
+        #expect(resumedFollow != nil)
+    }
+
     @Test func arcadePulseFoundationUsesSinglePaletteAndAccessibleTargetSizes() {
         #expect(ArcadePulseTheme.fallbackPalettes.count == 5)
         #expect(ArcadePulseTheme.minimumTarget >= 44)
@@ -1127,6 +1189,56 @@ struct HephaestusTests {
     }
 }
 
+@Test func runtimeMetricSequenceGateIsBoundedMonotonicAndKindAllowlisted() {
+    var gate = PlayerRuntimeMetricSequenceGate()
+    let firstRender = gate.accept(metric: "first_scene_render_submit", sequence: 1)
+    let duplicateRender = gate.accept(metric: "first_scene_render_submit", sequence: 1)
+    let newerRender = gate.accept(metric: "first_scene_render_submit", sequence: 5)
+    let oldRender = gate.accept(metric: "first_scene_render_submit", sequence: 3)
+    let independentInput = gate.accept(metric: "first_input", sequence: 2)
+    let firstWindow = gate.accept(metric: "perf_window", sequence: 8)
+    let invalidKind = gate.accept(metric: "unbounded_custom_metric", sequence: 10)
+    let invalidLow = gate.accept(metric: "perf_window", sequence: -1)
+    let invalidHigh = gate.accept(metric: "perf_window", sequence: 100_001)
+    #expect(firstRender)
+    #expect(!duplicateRender)
+    #expect(newerRender)
+    #expect(!oldRender)
+    #expect(independentInput)
+    #expect(firstWindow)
+    #expect(!invalidKind)
+    #expect(!invalidLow)
+    #expect(!invalidHigh)
+    #expect(gate.highestSequenceByMetric.count == 3)
+    #expect(gate.highestSequenceByMetric["first_scene_render_submit"] == 5)
+    #expect(gate.highestSequenceByMetric["first_input"] == 2)
+    #expect(gate.highestSequenceByMetric["perf_window"] == 8)
+    gate.reset()
+    #expect(gate.highestSequenceByMetric.isEmpty)
+    let freshSession = gate.accept(metric: "first_scene_render_submit", sequence: 1)
+    #expect(freshSession)
+}
+
+@Test func firstSceneRenderSubmissionGateAcceptsOneValidMilestoneOnly() {
+    var gate = PlayerFirstSceneRenderSubmissionGate()
+    let missing = gate.accept(milliseconds: nil)
+    let negative = gate.accept(milliseconds: -1)
+    let excessive = gate.accept(milliseconds: 3_600_001)
+    let first = gate.accept(milliseconds: 0)
+    let repeatedNewSequence = gate.accept(milliseconds: 50)
+    #expect(!missing)
+    #expect(!negative)
+    #expect(!excessive)
+    #expect(first)
+    #expect(!repeatedNewSequence)
+    #expect(gate.accepted)
+
+    var boundary = PlayerFirstSceneRenderSubmissionGate()
+    let maximum = boundary.accept(milliseconds: 3_600_000)
+    #expect(maximum)
+    #expect(boundary.accepted)
+}
+
 
 
 @Test func playerMemoryPressureEvictsOnlyUnattachedSpeculativePrewarm() {
@@ -1141,6 +1253,98 @@ struct HephaestusTests {
     #expect(!mayEvict(true, true))
     #expect(!mayEvict(false, false))
     #expect(!mayEvict(true, false))
+}
+
+
+// Saved games are owner-private even when the UI also has on-device recent
+// entries. No response from the old user or an old retry may restore titles.
+@Test func arcadePulseLibrarySavedResponsesAreAccountBound() {
+    func accepted(_ startedOwner: String, _ currentOwner: String,
+                  _ startedToken: String?, _ currentToken: String?,
+                  _ startedRevision: Int = 9, _ currentRevision: Int = 9) -> Bool {
+        LibrarySavedRequestPolicy.canApply(
+            startedRevision: startedRevision, currentRevision: currentRevision,
+            startedOwner: startedOwner, currentOwner: currentOwner,
+            startedToken: startedToken, currentToken: currentToken)
+    }
+    #expect(accepted("A", "A", "credential-A", "credential-A"))
+    #expect(!accepted("A", "B", "credential-A", "credential-B"))
+    #expect(!accepted("A", "", "credential-A", nil))
+    #expect(!accepted("A", "A", "credential-A", "credential-new"))
+    #expect(!accepted("A", "A", "credential-A", "credential-A", 9, 10))
+    #expect(!accepted("", "", nil, nil))
+    #expect(!accepted("A", "A", nil, nil))
+    #expect(!accepted("A", "A", nil, "credential-A"))
+
+    // Defensive render gate also protects views that were offscreen when
+    // the account-switch notification was sent.
+    let firstCredential = LibrarySavedRequestPolicy.digest("bearer-A")
+    let rotatedCredential = LibrarySavedRequestPolicy.digest("bearer-rotated")
+    let sameCredential = LibrarySavedRequestPolicy.digest("bearer-A")
+    func visible(_ storedOwner: String?, _ currentOwner: String,
+                 _ storedDigest: Data?, _ currentDigest: Data?) -> Bool {
+        LibrarySavedRequestPolicy.canDisplay(
+            loadedOwner: storedOwner, currentOwner: currentOwner,
+            loadedSessionDigest: storedDigest, currentSessionDigest: currentDigest
+        )
+    }
+    #expect(visible("A", "A", firstCredential, sameCredential))
+    #expect(!visible("A", "B", firstCredential, sameCredential))
+    #expect(!visible("A", "", firstCredential, sameCredential))
+    #expect(!visible(nil, "A", firstCredential, sameCredential))
+    #expect(!visible("A", "A", firstCredential, rotatedCredential))
+    #expect(!visible("A", "A", nil, sameCredential))
+    #expect(!visible("A", "A", firstCredential, nil))
+    #expect(LibrarySavedRequestPolicy.digest(nil) == nil)
+}
+
+
+// Previously a single UserDefaults key persisted published and possibly
+// restricted-scope feed titles across every account on the device. New
+// storage keys are deterministic per subject, and the old unscoped list is
+// discarded rather than migrated to whichever account logs in first.
+@Test func arcadePulseRecentHistoryNeverLeaksAcrossAccounts() {
+    let guest = RecentGames.storageKey(for: "")
+    let ownerA = RecentGames.storageKey(for: "private-owner-A")
+    let ownerB = RecentGames.storageKey(for: "private-owner-B")
+    #expect(guest != ownerA)
+    #expect(guest != ownerB)
+    #expect(ownerA != ownerB)
+    #expect(ownerA == RecentGames.storageKey(for: "private-owner-A"))
+    #expect(!ownerA.contains("private-owner-A"))
+    #expect(!ownerB.contains("private-owner-B"))
+    #expect(ownerA != RecentGames.legacyKey)
+    #expect(guest != RecentGames.legacyKey)
+
+    let suite = "hephaestus.recent-history-privacy-tests"
+    guard let defaults = UserDefaults(suiteName: suite) else {
+        Issue.record("Could not create an isolated UserDefaults test suite")
+        return
+    }
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let legacy = Data("previous account's private game title".utf8)
+    defaults.set(legacy, forKey: RecentGames.legacyKey)
+    let ownerAHistory = [RecentGame(gameID: "private-game-A", title: "Owner A's private title")]
+    let ownerBHistory = [RecentGame(gameID: "public-game-B", title: "Owner B's recent game")]
+    defaults.set(try? JSONEncoder().encode(ownerAHistory), forKey: ownerA)
+    defaults.set(try? JSONEncoder().encode(ownerBHistory), forKey: ownerB)
+    #expect(RecentGames.load(for: "private-owner-A", defaults: defaults).map(\.gameID) == ["private-game-A"])
+    #expect(RecentGames.load(for: "private-owner-B", defaults: defaults).map(\.gameID) == ["public-game-B"])
+    #expect(RecentGames.load(for: "", defaults: defaults).isEmpty)
+    // The actual load path purges old unscoped history instead of gifting
+    // its game title to the first account that opens Library after update.
+    #expect(defaults.data(forKey: RecentGames.legacyKey) == nil)
+    #expect(defaults.data(forKey: ownerA) != nil)
+    #expect(defaults.data(forKey: ownerB) != nil)
+
+    // A login/logout boundary also retires anonymous history, preserving
+    // authenticated account shelves.
+    defaults.set(try? JSONEncoder().encode(ownerBHistory), forKey: guest)
+    #expect(RecentGames.load(for: "", defaults: defaults).count == 1)
+    RecentGames.clearGuestHistory(defaults: defaults)
+    #expect(RecentGames.load(for: "", defaults: defaults).isEmpty)
+    #expect(RecentGames.load(for: "private-owner-A", defaults: defaults).count == 1)
+    #expect(RecentGames.load(for: "private-owner-B", defaults: defaults).count == 1)
 }
 
 // A live HTTPS outage is a real error; it must produce a legible recovery

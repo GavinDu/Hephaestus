@@ -90,6 +90,36 @@ struct PlayerFirstInputGate {
     }
 }
 
+/// Accept only trusted runtime metric kinds and their newer sequence values.
+/// The trusted JS runtime increments a global native sequence counter, so
+/// three per-kind high-water marks reject repeats without growing memory.
+/// The Coordinator separately binds sessionId and gameId before this gate.
+struct PlayerRuntimeMetricSequenceGate {
+    private(set) var highestSequenceByMetric: [String: Int] = [:]
+
+    mutating func accept(metric: String, sequence: Int) -> Bool {
+        guard (0...100_000).contains(sequence),
+              ["first_scene_render_submit", "first_input", "perf_window"].contains(metric),
+              sequence > (highestSequenceByMetric[metric] ?? -1) else { return false }
+        highestSequenceByMetric[metric] = sequence
+        return true
+    }
+
+    mutating func reset() { highestSequenceByMetric.removeAll() }
+}
+
+/// First scene submission is a one-time, validated milestone, not proof
+/// of GPU composition or the first interactive frame.
+struct PlayerFirstSceneRenderSubmissionGate {
+    private(set) var accepted = false
+
+    mutating func accept(milliseconds: Int?) -> Bool {
+        guard !accepted, let milliseconds, (0...3_600_000).contains(milliseconds) else { return false }
+        accepted = true
+        return true
+    }
+}
+
 /// Maps a WKWebView load failure to the player-facing error state
 /// (Hephaestus #53). Two rules, both fail-closed:
 ///   - the UI shows only a fixed message per category, never the raw
@@ -1424,7 +1454,8 @@ private struct PlayerWebView: UIViewRepresentable {
         private var prewarmRecoveryArmed = false
         private var acceptedRunIDs = Set<String>()
         private var navigationFailureGate = PlayerNavigationFailureGate()
-        private var acceptedMetricIDs = Set<String>()
+        private var metricSequenceGate = PlayerRuntimeMetricSequenceGate()
+        private var firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
         private var firstInputGate = PlayerFirstInputGate()
         private var runtimeSessionID: String?
         private var isActive = true
@@ -1489,12 +1520,12 @@ private struct PlayerWebView: UIViewRepresentable {
             guard Set(body.keys).isSubset(of: ["schema", "type", "sessionId", "gameId", "metric", "sequence", "ms", "frameTimeP95Ms", "frameTimeAvgMs", "frameCount"]),
                   let metric = body["metric"] as? String,
                   let sequence = body["sequence"] as? Int,
-                  sequence >= 0, sequence <= 100_000 else { return }
+                  metricSequenceGate.accept(metric: metric, sequence: sequence) else { return }
             let metricID = "\(runtimeSessionID):\(metric):\(sequence)"
-            guard acceptedMetricIDs.insert(metricID).inserted else { return }
             switch metric {
             case "first_scene_render_submit":
-                guard let ms = PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(body["ms"]) else { return }
+                guard let ms = PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(body["ms"]),
+                      firstSceneRenderSubmissionGate.accept(milliseconds: ms) else { return }
                 // This metric may be lost when a pooled WebView was already
                 // warmed before the Coordinator attached. The backend also
                 // captures the milestone independently for that case.
@@ -1553,7 +1584,9 @@ private struct PlayerWebView: UIViewRepresentable {
             progressObservation?.invalidate()
             progressObservation = nil
             acceptedRunIDs.removeAll()
-            acceptedMetricIDs.removeAll()
+            metricSequenceGate.reset()
+            firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
+            firstInputGate = PlayerFirstInputGate()
             runtimeSessionID = nil
         }
 

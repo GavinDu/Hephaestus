@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import CryptoKit
 import Foundation
 import Network
 import SwiftUI
@@ -15,21 +16,54 @@ struct RecentGame: Codable, Identifiable {
     var title: String
 }
 
+/// A recent game can be a restricted-scope feed entry. A single shared
+/// UserDefaults shelf exposed previous-account titles after sign-out/switch.
+/// Partition by the signed-in subject (or a separate guest scope). The SHA-256
+/// prefix is a stable *key namespace*, NOT encryption or authorization.
 enum RecentGames {
-    private static let key = "hephaestus.recentGames"
+    static let legacyKey = "hephaestus.recentGames"
+    private static let prefix = "hephaestus.recentGames.account."
+    private static let guestKey = "hephaestus.recentGames.guest"
+
+    static func storageKey(for ownerID: String) -> String {
+        guard !ownerID.isEmpty else { return guestKey }
+        let fingerprint = SHA256.hash(data: Data(ownerID.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        return prefix + fingerprint
+    }
+
+    private static var currentKey: String {
+        storageKey(for: BackendConfig.currentUserID)
+    }
+
+    /// The old key was device-global. Never migrate its potentially private
+    /// game names into an arbitrary signed-in or guest shelf.
+    static func discardUnscopedLegacyHistory(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: legacyKey)
+    }
+
+    /// An anonymous shelf has no durable account owner. A sign-in or sign-out
+    /// boundary retires its history so a later guest does not inherit it.
+    static func clearGuestHistory(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: guestKey)
+    }
 
     static func record(gameID: String, title: String) {
         var list = load()
         list.removeAll { $0.gameID == gameID }
         list.insert(RecentGame(gameID: gameID, title: title), at: 0)
-        list = Array(list.prefix(20))
-        if let data = try? JSONEncoder().encode(list) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
+        persist(Array(list.prefix(20)))
     }
 
     static func load() -> [RecentGame] {
-        guard let data = UserDefaults.standard.data(forKey: key),
+        load(for: BackendConfig.currentUserID, defaults: .standard)
+    }
+
+    /// Explicit scope and defaults enable real isolation tests without
+    /// changing the production API or constructing fake authenticated users.
+    static func load(for ownerID: String, defaults: UserDefaults) -> [RecentGame] {
+        discardUnscopedLegacyHistory(defaults: defaults)
+        guard let data = defaults.data(forKey: storageKey(for: ownerID)),
               let list = try? JSONDecoder().decode([RecentGame].self, from: data)
         else { return [] }
         return list
@@ -40,12 +74,13 @@ enum RecentGames {
     }
 
     static func clear() {
-        UserDefaults.standard.removeObject(forKey: key)
+        discardUnscopedLegacyHistory()
+        UserDefaults.standard.removeObject(forKey: currentKey)
     }
 
     private static func persist(_ games: [RecentGame]) {
         guard let data = try? JSONEncoder().encode(games) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        UserDefaults.standard.set(data, forKey: currentKey)
     }
 }
 

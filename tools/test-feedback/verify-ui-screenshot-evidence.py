@@ -30,6 +30,12 @@ PORTRAIT_PRIMARY = (
     "feed-ui-evaluator-before-swipe-portrait",
     "feed-ui-evaluator-after-swipe-portrait",
 )
+# These captures are produced by a real iPad navigation/UI test, not by
+# concept mockups. The iPhone smoke runner must not require iPad-only media.
+IPAD_LIBRARY_PORTRAIT = "arcade-pulse-library-ipad-portrait"
+IPAD_LIBRARY_LANDSCAPE = "arcade-pulse-library-ipad-landscape"
+
+
 # Only mandatory for the adaptive iPad XXL Spotlight integration PR.
 # Both frames are full-screen, raw XCTest captures of a genuine live feed.
 IPAD_XXL_LANDSCAPE = (
@@ -192,25 +198,25 @@ def exported_attachment(attachments, logical_name):
     return name
 
 
-def verify_and_copy(attachments_dir, output_dir, require_ipad_xxl=False):
+def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False, require_ipad_xxl=False):
     manifest = json.loads((attachments_dir / "manifest.json").read_text())
     attachments = [x for entry in manifest for x in entry.get("attachments", [])]
     validated = {}
     output_dir.mkdir(parents=True, exist_ok=True)
-    expected = LANDSCAPE_PRIMARY + LANDSCAPE_DIAGNOSTIC + PORTRAIT_PRIMARY
-    if require_ipad_xxl:
-        expected += IPAD_XXL_LANDSCAPE
-    for logical in expected:
+    library_names = ((IPAD_LIBRARY_PORTRAIT, IPAD_LIBRARY_LANDSCAPE)
+                     if require_ipad_library else ())
+    xxl_names = IPAD_XXL_LANDSCAPE if require_ipad_xxl else ()
+    for logical in LANDSCAPE_PRIMARY + LANDSCAPE_DIAGNOSTIC + PORTRAIT_PRIMARY + library_names + xxl_names:
         src = attachments_dir / exported_attachment(attachments, logical)
         if not src.is_file():
             raise ValueError(f"{logical}: missing raw screenshot PNG")
         info = read_png_metadata(src)
         display_landscape = info["display_width"] > info["display_height"]
-        if logical in LANDSCAPE_PRIMARY + IPAD_XXL_LANDSCAPE and not display_landscape:
+        if logical in LANDSCAPE_PRIMARY + (IPAD_LIBRARY_LANDSCAPE,) + IPAD_XXL_LANDSCAPE and not display_landscape:
             raise ValueError(f"{logical}: full-screen capture does not display in landscape")
-        if logical in PORTRAIT_PRIMARY and display_landscape:
+        if logical in PORTRAIT_PRIMARY + (IPAD_LIBRARY_PORTRAIT,) and display_landscape:
             raise ValueError(f"{logical}: portrait evidence displays in landscape")
-        preferred = logical in LANDSCAPE_PRIMARY + PORTRAIT_PRIMARY + IPAD_XXL_LANDSCAPE
+        preferred = logical in LANDSCAPE_PRIMARY + PORTRAIT_PRIMARY + library_names + xxl_names
         target = output_dir / (logical + ".raw.png")
         shutil.copyfile(src, target)
         validated[logical] = {**info, "file": target.name,
@@ -229,6 +235,18 @@ def verify_and_copy(attachments_dir, output_dir, require_ipad_xxl=False):
         last = validated[after]["raster_scanlines_sha256"]
         if first is not None and first == last:
             raise ValueError(f"{before} and {after}: duplicate decoded screenshot pixels")
+    if require_ipad_library:
+        # A test can rotate the simulator but accidentally export the same
+        # raster twice, with EXIF metadata changed to claim two orientations.
+        # The distinct full-screen UI layout must also have distinct pixels.
+        portrait = validated[IPAD_LIBRARY_PORTRAIT]
+        landscape = validated[IPAD_LIBRARY_LANDSCAPE]
+        if portrait["sha256"] == landscape["sha256"]:
+            raise ValueError("iPad Library portrait/landscape: duplicate raw screenshot bytes")
+        first = portrait["raster_scanlines_sha256"]
+        last = landscape["raster_scanlines_sha256"]
+        if first is not None and first == last:
+            raise ValueError("iPad Library portrait/landscape: duplicate decoded screenshot pixels")
     if require_ipad_xxl:
         # A screenshot of the stage cannot double as proof that the native
         # Actions menu opened. Reject exact and recompressed pixel reuse.
@@ -246,8 +264,9 @@ def verify_and_copy(attachments_dir, output_dir, require_ipad_xxl=False):
         "landscape_preferred": list(LANDSCAPE_PRIMARY),
         "app_window_landscape_diagnostic_only": list(LANDSCAPE_DIAGNOSTIC),
         "verified": validated,
-        "media_ready": False,
+        "ipad_library_required": require_ipad_library,
         "ipad_xxl_evidence_required": require_ipad_xxl,
+        "media_ready": False,
         "note": "A correct screenshot orientation cannot establish an approved gameplay clip or poster.",
     }
     (output_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
@@ -258,10 +277,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--require-ipad-library", action="store_true",
+                        help="Fail if real iPad Library portrait/landscape screenshots are missing")
     parser.add_argument("--require-ipad-xxlarge", action="store_true")
     args = parser.parse_args()
     try:
         report = verify_and_copy(args.input, args.out,
+                                 require_ipad_library=args.require_ipad_library,
                                  require_ipad_xxl=args.require_ipad_xxlarge)
         print(json.dumps({"status": report["status"], "verified_count": len(report["verified"])}))
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
