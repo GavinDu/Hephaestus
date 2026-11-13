@@ -1972,14 +1972,15 @@ private struct CreatorDiscoverySheet: View {
                             "Couldn't load creators",
                             systemImage: "wifi.exclamationmark",
                             description: Text(errorMessage)
-                                // Identifier is nonspoken XCTest metadata. Do NOT
-                                // put internal failure codes in an accessibilityValue
-                                // read aloud by VoiceOver to real users.
-                                .accessibilityIdentifier(
-                                    "creator.discovery.error." + (errorDiagnosticCategory ?? "unavailable")
-                                )
                         )
-                        .accessibilityIdentifier("creator.discovery.loadError")
+                        // ContentUnavailableView's description argument MUST
+                        // remain Text. Modifier-wrapped Text fails Swift type
+                        // checking on Xcode 26.6. Keep fixed-category CI
+                        // diagnostics in the *nonspoken* parent identifier,
+                        // not the VoiceOver accessibilityValue or user copy.
+                        .accessibilityIdentifier(
+                            "creator.discovery.loadError." +
+                            (errorDiagnosticCategory ?? "unavailable"))
                         Button {
                             Task { await load(reset: true) }
                         } label: {
