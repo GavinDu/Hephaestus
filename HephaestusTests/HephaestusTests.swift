@@ -1375,3 +1375,196 @@ struct HephaestusTests {
     #expect(!unexpected.localizedCaseInsensitiveContains("NSError"))
 }
 
+@Test func productionHostLifecycleTransitionsKeepMilestonesDistinct() {
+    var lifecycle = PlayerHostLaunchReducer()
+    #expect(lifecycle.phase == .navigating)
+    #expect(lifecycle.isAttached)
+    #expect(!lifecycle.observedTerminalNavigation)
+
+    let htmlLoaded = lifecycle.navigationFinished()
+    #expect(htmlLoaded)
+    #expect(lifecycle.phase == .documentLoaded)
+    #expect(lifecycle.observedTerminalNavigation)
+    // Navigation finish is NOT proof of a rendered frame or interaction.
+    let sceneSubmitted = lifecycle.sceneSubmitted()
+    #expect(sceneSubmitted)
+    #expect(lifecycle.phase == .sceneSubmitted)
+    let inputAccepted = lifecycle.firstInput(milliseconds: 120)
+    #expect(inputAccepted)
+    #expect(lifecycle.phase == .interactive)
+    let duplicateFinish = lifecycle.navigationFinished()
+    let duplicateScene = lifecycle.sceneSubmitted()
+    let duplicateInput = lifecycle.firstInput(milliseconds: 200)
+    #expect(!duplicateFinish)
+    #expect(!duplicateScene)
+    #expect(!duplicateInput)
+    #expect(lifecycle.phase == .interactive)
+    lifecycle.detach()
+    #expect(lifecycle.phase == .detached)
+    #expect(!lifecycle.permitsRuntimeEvents)
+    let staleFinish = lifecycle.navigationFinished()
+    let staleInput = lifecycle.firstInput(milliseconds: 5)
+    let staleScene = lifecycle.sceneSubmitted()
+    let staleCrash = lifecycle.webProcessTerminated()
+    #expect(!staleFinish)
+    #expect(!staleInput)
+    #expect(!staleScene)
+    #expect(!staleCrash)
+}
+
+@Test func productionHostLifecyclePrewarmAndMetricsMayArriveOutOfOrder() {
+    var lifecycle = PlayerHostLaunchReducer()
+    // A prewarmed page may begin sending events before the new
+    // Coordinator receives didFinish. Do not lie about HTML readiness.
+    let firstInput = lifecycle.firstInput(milliseconds: 10)
+    #expect(firstInput)
+    #expect(lifecycle.phase == .interactive)
+    let lateScene = lifecycle.sceneSubmitted()
+    #expect(lateScene)
+    #expect(lifecycle.phase == .interactive)
+    let lateFinish = lifecycle.navigationFinished()
+    #expect(lateFinish)
+    #expect(lifecycle.phase == .interactive)
+    #expect(lifecycle.observedTerminalNavigation)
+    let duplicateScene = lifecycle.sceneSubmitted()
+    #expect(!duplicateScene)
+}
+
+@Test func productionHostLifecycleFailedAndTerminatedSessionsStayTerminal() {
+    var failed = PlayerHostLaunchReducer()
+    let failure = failed.navigationFailed()
+    #expect(failure)
+    #expect(failed.phase == .navigationFailed)
+    #expect(failed.observedTerminalNavigation)
+    failed.navigationStarted()
+    #expect(failed.phase == .navigationFailed)
+    let lateFinish = failed.navigationFinished()
+    let lateScene = failed.sceneSubmitted()
+    let lateInput = failed.firstInput(milliseconds: 3)
+    let repeatedFailure = failed.navigationFailed()
+    #expect(!lateFinish)
+    #expect(!lateScene)
+    #expect(!lateInput)
+    #expect(!repeatedFailure)
+    let failCannotCrashAgain = failed.webProcessTerminated()
+    #expect(!failCannotCrashAgain)
+    #expect(failed.phase == .navigationFailed)
+
+    var terminated = PlayerHostLaunchReducer()
+    let ready = terminated.sceneSubmitted()
+    #expect(ready)
+    let processDied = terminated.webProcessTerminated()
+    #expect(processDied)
+    #expect(terminated.phase == .webProcessTerminated)
+    terminated.navigationStarted()
+    #expect(terminated.phase == .webProcessTerminated)
+    let postMortemInput = terminated.firstInput(milliseconds: 5)
+    let repeatedCrash = terminated.webProcessTerminated()
+    #expect(!postMortemInput)
+    #expect(!repeatedCrash)
+}
+
+@Test func productionHostLifecycleNavigationRestartResetsMilestonesOnlyWhileActive() {
+    var lifecycle = PlayerHostLaunchReducer()
+    let start = lifecycle.navigationFinished()
+    let input = lifecycle.firstInput(milliseconds: 20)
+    #expect(start && input)
+    lifecycle.navigationStarted()
+    #expect(lifecycle.phase == .navigating)
+    #expect(!lifecycle.observedTerminalNavigation)
+    let badInput = lifecycle.firstInput(milliseconds: -1)
+    let freshScene = lifecycle.sceneSubmitted()
+    let freshInput = lifecycle.firstInput(milliseconds: 50)
+    #expect(!badInput)
+    #expect(freshScene)
+    #expect(freshInput)
+    #expect(lifecycle.phase == .interactive)
+}
+
+
+@Test func hostRuntimeSessionBindingRejectsStaleWebKitMessagesAfterReload() {
+    var gate = PlayerRuntimeSessionBindingGate()
+    #expect(PlayerRuntimeSessionBindingGate.maximumRetiredSessions == 8)
+    let empty = gate.bind("")
+    let oversized = gate.bind(String(repeating: "x", count: 129))
+    let first = gate.bind("old-session")
+    let repeatedFirst = gate.bind("old-session")
+    let conflictingLive = gate.bind("unexpected-live")
+    #expect(!empty)
+    #expect(!oversized)
+    #expect(first)
+    #expect(repeatedFirst)
+    #expect(!conflictingLive)
+    #expect(gate.activeSessionID == "old-session")
+
+    gate.beginNavigation()
+    #expect(gate.activeSessionID == nil)
+    #expect(gate.retiredCount == 1)
+    let oldCallback = gate.bind("old-session")
+    let newDocument = gate.bind("new-session")
+    let oldAfterNew = gate.bind("old-session")
+    let conflictingNew = gate.bind("third-session")
+    #expect(!oldCallback)
+    #expect(newDocument)
+    #expect(!oldAfterNew)
+    #expect(!conflictingNew)
+    #expect(gate.activeSessionID == "new-session")
+    gate.clear()
+    #expect(gate.retiredCount == 0)
+    #expect(gate.activeSessionID == nil)
+    let freshCoordinator = gate.bind("old-session")
+    #expect(freshCoordinator)
+}
+
+@Test func hostRuntimeSessionBindingRetainsOnlyEightMostRecentDocuments() {
+    var gate = PlayerRuntimeSessionBindingGate()
+    var accepted = [Bool]()
+    for i in 0..<16 {
+        accepted.append(gate.bind("session-\(i)"))
+        gate.beginNavigation()
+        #expect(gate.retiredCount <= 8)
+    }
+    #expect(accepted.allSatisfy { $0 })
+    #expect(gate.retiredCount == 8)
+    for i in 8..<16 {
+        let rejected = gate.bind("session-\(i)")
+        #expect(!rejected)
+    }
+    let current = gate.bind("session-16")
+    #expect(current)
+    #expect(gate.activeSessionID == "session-16")
+}
+
+@Test func hostNavigationRestartsMetricEpochWithoutLyingAboutReadiness() {
+    var lifecycle = PlayerHostLaunchReducer()
+    var sequence = PlayerRuntimeMetricSequenceGate()
+    var scene = PlayerFirstSceneRenderSubmissionGate()
+    // Capture all mutating transition outcomes before Swift Testing macros:
+    // #expect expands closure expressions with an immutable capture context.
+    let firstSequence = sequence.accept(metric: "first_scene_render_submit", sequence: 1)
+    let firstScene = scene.accept(milliseconds: 30)
+    let firstSubmitted = lifecycle.sceneSubmitted()
+    let firstInputSequence = sequence.accept(metric: "first_input", sequence: 2)
+    let firstInput = lifecycle.firstInput(milliseconds: 70)
+    let firstInteractive = lifecycle.phase == .interactive
+    #expect(firstSequence && firstScene && firstSubmitted && firstInputSequence && firstInput)
+    #expect(firstInteractive)
+
+    // New WK document rotates session + metric gates on navigation start.
+    lifecycle.navigationStarted()
+    sequence.reset()
+    scene = PlayerFirstSceneRenderSubmissionGate()
+    let isNavigating = lifecycle.phase == .navigating
+    let nextSequence = sequence.accept(metric: "first_scene_render_submit", sequence: 1)
+    let nextScene = scene.accept(milliseconds: 20)
+    let nextSubmitted = lifecycle.sceneSubmitted()
+    let nextInputSequence = sequence.accept(metric: "first_input", sequence: 2)
+    let nextInput = lifecycle.firstInput(milliseconds: 60)
+    let nextInteractive = lifecycle.phase == .interactive
+    let duplicateSequence = sequence.accept(metric: "first_input", sequence: 2)
+    let duplicateScene = scene.accept(milliseconds: 50)
+    #expect(isNavigating)
+    #expect(nextSequence && nextScene && nextSubmitted && nextInputSequence && nextInput)
+    #expect(nextInteractive)
+    #expect(!duplicateSequence && !duplicateScene)
+}

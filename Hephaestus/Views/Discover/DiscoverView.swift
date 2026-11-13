@@ -1042,15 +1042,17 @@ struct DiscoverView: View {
                   feedRequestCoordinator.isCurrent(generation) else { return }
             isSlowLoading = true
         }
-        // Allow native simulator screenshot/VoiceOver inspection of the
-        // intermediate slow state before the test watchdog expires.
+        // The UI-test stall lasts 35 seconds so native XCTest startup and
+        // accessibility snapshots cannot overtake the loading-hint phase.
+        // Production keeps its independent 45-second fail-closed watchdog.
+        // No response or game is synthesized, and an actual timeout still occurs.
         // Production still uses the original 45-second fail-closed budget.
         // A stalled production connection must not leave the Discover screen
         // behind an endless skeleton. The fallback uses real Retry/Library,
         // not a synthetic game or local cached public post. Only the active
         // generation may expire, so overlapping retries cannot be revoked.
         let loadingWatchdog = Task { @MainActor in
-            do { try await Task.sleep(for: verifyStalledFeed ? .seconds(8) : .seconds(45)) }
+            do { try await Task.sleep(for: verifyStalledFeed ? .seconds(35) : .seconds(45)) }
             catch { return }
             guard isLoading, games.isEmpty,
                   feedRequestCoordinator.expireIfCurrent(generation) else { return }
