@@ -1201,8 +1201,13 @@ private struct ForYouGamePage: View {
         }
     }
 
-    private func detailsOverlay(bottomInset: CGFloat, compactLandscapeTitleWidth: CGFloat? = nil) -> some View {
-        let isCompact = verticalSizeClass == .compact || dynamicTypeSize.isAccessibilitySize
+    private func detailsOverlay(bottomInset: CGFloat, shortViewport: Bool,
+                                compactLandscapeTitleWidth: CGFloat? = nil) -> some View {
+        // The actual Stage Manager window can be short while UIKit still
+        // reports regular vertical size. Collapse long metadata and place
+        // exactly one action row above Play, not an overflowing second rail.
+        let isCompact = shortViewport || verticalSizeClass == .compact ||
+            dynamicTypeSize >= .xxLarge
         return VStack(alignment: .leading, spacing: isCompact ? 6 : 14) {
             Spacer(minLength: isCompact ? 0 : 100)
             HStack(spacing: 8) {
@@ -1393,7 +1398,8 @@ private struct ForYouGamePage: View {
             let isLandscape = proxy.size.width > proxy.size.height
             let showsContext = ForYouPageLayout.showsIPadContextPanel(
                 width: proxy.size.width, height: proxy.size.height,
-                isRegular: isRegular, isAccessibilityText: dynamicTypeSize.isAccessibilitySize)
+                isRegular: isRegular, isAccessibilityText: dynamicTypeSize.isAccessibilitySize,
+                isLargeText: dynamicTypeSize >= .xxLarge)
             let pageWidth = showsContext
                 ? ForYouPageLayout.adaptiveLandscapeStageWidth(containerWidth: proxy.size.width)
                 : ForYouPageLayout.stageWidth(containerWidth: proxy.size.width, containerHeight: proxy.size.height, isRegular: isRegular, isLandscape: isLandscape)
@@ -1463,10 +1469,17 @@ private struct ForYouGamePage: View {
                         HStack(alignment: .bottom, spacing: 0) {
                             detailsOverlay(
                                 bottomInset: proxy.safeAreaInsets.bottom,
+                                shortViewport: ForYouPageLayout.usesShortIPadViewport(
+                                    height: proxy.size.height,
+                                    isIPad: UIDevice.current.userInterfaceIdiom == .pad),
                                 compactLandscapeTitleWidth: UIDevice.current.userInterfaceIdiom == .phone &&
                                     verticalSizeClass == .compact
                                     ? pageWidth * 0.36 : nil)
-                            if verticalSizeClass != .compact && !dynamicTypeSize.isAccessibilitySize {
+                            if verticalSizeClass != .compact &&
+                               dynamicTypeSize < .xxLarge &&
+                               !ForYouPageLayout.usesShortIPadViewport(
+                                   height: proxy.size.height,
+                                   isIPad: UIDevice.current.userInterfaceIdiom == .pad) {
                                 socialActions(vertical: true)
                                     .padding(.trailing, 12)
                                     .padding(.bottom, max(24, proxy.safeAreaInsets.bottom + 12))
