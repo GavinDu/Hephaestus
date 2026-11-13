@@ -22,9 +22,12 @@ on:
 permissions:
   contents: read
 
+# Keep only the latest verification for one pull request. Do not cancel
+# in-progress main/push or manually dispatched runs: those are distinct
+# mandatory validation events and must preserve their own result.
 concurrency:
-  group: player-presentation-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: player-presentation-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   XCODE_PROJECT: Hephaestus.xcodeproj
