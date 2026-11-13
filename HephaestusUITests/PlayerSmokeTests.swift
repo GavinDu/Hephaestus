@@ -381,6 +381,44 @@ final class PlayerSmokeTests: XCTestCase {
                       "Returning from Library must restore the Discover navigation stack.")
     }
 
+    /// The final privacy notice must remain readable in the native iPhone
+    /// Library list, not disappear under the translucent bottom tab bar.
+    /// This exercises real guest/session UI; it injects no saved games.
+    @MainActor
+    func testArcadePulseLibraryPrivacyNoticeCanScrollAboveTabs() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("iPhone tab bar overlap regression.")
+        }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+        let libraryTab = app.tabBars.buttons["Library"].firstMatch
+        XCTAssertTrue(libraryTab.waitForExistence(timeout: 15))
+        libraryTab.tap()
+        let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 10))
+        let footer = app.descendants(matching: .any)["library.privacyFooter"].firstMatch
+        XCTAssertTrue(footer.waitForExistence(timeout: 10),
+                      "The Library must show truthful account/session privacy guidance.")
+        let tabs = app.tabBars.firstMatch
+        for _ in 0..<5 {
+            if footer.isHittable && (!tabs.exists ||
+               footer.frame.maxY <= tabs.frame.minY + 2) { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(footer.isHittable,
+                      "The privacy footer must be reachable by scrolling.")
+        if tabs.exists {
+            XCTAssertLessThanOrEqual(footer.frame.maxY, tabs.frame.minY + 2,
+                                     "Privacy notice text must not hide beneath the bottom tabs.")
+        }
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "arcade-pulse-library-privacy-footer-iphone"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+    }
+
     /// Open the actual saved/recent Library stage in iPad portrait and landscape.
     /// No account, mock saved items or successful API response is injected.
     @MainActor
