@@ -1847,7 +1847,8 @@ private struct ArcadePulseGameDetailsSheet: View {
         )
         if twoColumn {
             HStack(alignment: .top, spacing: 24) {
-                preview(height: min(size.height * 0.64, 520))
+                preview(height: ForYouPageLayout.gameDetailsPreviewHeight(
+                    containerHeight: size.height))
                     .frame(width: ForYouPageLayout.gameDetailsPreviewWidth(
                         containerWidth: size.width))
                 metadataAndActions
