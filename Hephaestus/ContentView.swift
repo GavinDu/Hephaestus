@@ -3,6 +3,7 @@
 //  Hephaestus
 //
 
+import Combine
 import SwiftUI
 
 /// A destination shared by compact tabs and the expanded iPad sidebar.
@@ -44,7 +45,8 @@ struct ContentView: View {
     // No fake projects, media or backend responses are injected.
     @State private var selection: AppSection? =
         ProcessInfo.processInfo.arguments.contains("--ui-test-studio") ? .studio :
-        (ProcessInfo.processInfo.arguments.contains("--ui-test-create-entry") ? .create : .discover)
+        (ProcessInfo.processInfo.arguments.contains("--ui-test-create-entry") ? .create :
+         (ProcessInfo.processInfo.arguments.contains("--ui-test-library-entry") ? .library : .discover))
     // On regular-width iPads, enter the full-screen playable feed first.
     // The system sidebar button still lets people reveal navigation.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .detailOnly
@@ -56,6 +58,18 @@ struct ContentView: View {
             } else {
                 compactLayout
             }
+        }
+        .onAppear {
+            // Purge the old account-agnostic Recent list immediately at app
+            // entry, even when the user never opens Library.
+            RecentGames.discardUnscopedLegacyHistory()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .hephaestusBackendSessionDidChange
+        )) { _ in
+            // A previous signed-out user's local game titles should not
+            // survive a login/logout boundary into the next guest shelf.
+            RecentGames.clearGuestHistory()
         }
     }
 
@@ -123,7 +137,7 @@ struct ContentView: View {
         case .studio:
             CreatorStudioView(onOpenProfile: { selection = .profile })
         case .library:
-            LibraryView()
+            LibraryView(onOpenProfile: { selection = .profile })
         case .profile:
             ProfileView()
         }
