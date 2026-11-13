@@ -1,6 +1,7 @@
 import AuthenticationServices
 import AVFoundation
 import Combine
+import CryptoKit
 import Network
 import PhotosUI
 import SwiftUI
@@ -12,11 +13,35 @@ import UIKit
 
 /// Recently played games.
 struct LibraryView: View {
+    let onOpenProfile: () -> Void
     @State private var recent: [RecentGame] = []
+    @State private var recentScopeKey: String?
     @State private var saved: [FeedGame] = []
+    @State private var savedOwnerID: String?
+    // Keep a fingerprint, not a second copy of the bearer credential.
+    @State private var savedSessionDigest: Data?
     @State private var errorMessage: String?
     @State private var playerRequest: PixiPlayerRequest?
     @State private var showClearRecentConfirmation = false
+    @State private var savedRequestRevision = 0
+    @State private var isLoadingSaved = true
+
+    // Identity changes must hide previous-account local titles even if a
+    // retained view has not yet handled the session notification.
+    private var visibleRecent: [RecentGame] {
+        recentScopeKey == RecentGames.storageKey(for: BackendConfig.currentUserID)
+            ? recent : []
+    }
+
+    private var visibleSaved: [FeedGame] {
+        LibrarySavedRequestPolicy.canDisplay(
+            loadedOwner: savedOwnerID, currentOwner: BackendConfig.currentUserID,
+            loadedSessionDigest: savedSessionDigest,
+            currentSessionDigest: LibrarySavedRequestPolicy.digest(
+                BackendConfig.loadSessionToken()
+            )
+        ) ? saved : []
+    }
 
     var body: some View {
         NavigationStack {
@@ -39,7 +64,9 @@ struct LibraryView: View {
                     .padding(.vertical, 8)
                     .listRowBackground(ArcadePulseTheme.surface)
                 }
-                if let errorMessage {
+                // The empty-state recovery already explains fetch errors;
+                // reserve this banner for failures while cards are visible.
+                if let errorMessage, !visibleSaved.isEmpty {
                     Section {
                         Label(errorMessage, systemImage: "wifi.exclamationmark")
                             .font(.footnote)
@@ -47,16 +74,59 @@ struct LibraryView: View {
                     }
                 }
                 Section {
-                    if saved.isEmpty {
+                    if BackendConfig.currentUserID.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Sign in to see saved games", systemImage: "lock.fill")
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                            Text("Saved games belong to your account. Sign in from Profile to see and manage them here.")
+                                .font(.subheadline)
+                                .foregroundStyle(ArcadePulseTheme.textSecondary)
+                            Button(action: onOpenProfile) {
+                                Label("Go to Profile to sign in", systemImage: "person.crop.circle")
+                                    .font(.headline)
+                                    // White on electric violet is only ~4.08:1;
+                                    // black exceeds 5:1 for this body-sized CTA.
+                                    .foregroundStyle(.black)
+                                    .frame(maxWidth: .infinity, minHeight: 48)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(ArcadePulseTheme.electricViolet)
+                            .accessibilityIdentifier("library.signIn")
+                        }
+                        .padding(.vertical, 8)
+                        .listRowBackground(ArcadePulseTheme.surface)
+                    } else if isLoadingSaved && visibleSaved.isEmpty {
+                        ProgressView("Loading saved games")
+                            .frame(maxWidth: .infinity, minHeight: 80)
+                            .listRowBackground(ArcadePulseTheme.surface)
+                    } else if errorMessage != nil && visibleSaved.isEmpty {
+                        VStack(spacing: 12) {
+                            ContentUnavailableView(
+                                "Saved games unavailable",
+                                systemImage: "wifi.exclamationmark",
+                                description: Text("Couldn't load your saved games. Check your connection and try again.")
+                            )
+                            Button {
+                                Task { await load() }
+                            } label: {
+                                Label("Retry saved games", systemImage: "arrow.clockwise")
+                                    .frame(maxWidth: .infinity, minHeight: 48)
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("library.retrySaved")
+                        }
+                        .listRowBackground(ArcadePulseTheme.surface)
+                    } else if visibleSaved.isEmpty {
                         ContentUnavailableView(
                             "No saved games yet",
                             systemImage: "bookmark",
                             description: Text("Save a game from Discover and it will be ready to play here.")
                         )
                     }
-                    ForEach(saved) { game in
+                    ForEach(visibleSaved) { game in
                         Button {
-                            playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
+                            openGame(gameID: game.id, title: game.title)
                         } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "gamecontroller.fill")
@@ -94,21 +164,21 @@ struct LibraryView: View {
                     HStack {
                         Text("Saved games")
                         Spacer()
-                        Text("\(saved.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        Text("\(visibleSaved.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     }
                 }
 
                 Section {
-                    if recent.isEmpty {
+                    if visibleRecent.isEmpty {
                         ContentUnavailableView(
                             "No recent games",
                             systemImage: "clock.arrow.circlepath",
                             description: Text("Games you play will appear here so you can jump back in.")
                         )
                     }
-                    ForEach(recent) { game in
+                    ForEach(visibleRecent) { game in
                         Button {
-                            playerRequest = PixiPlayerRequest(gameID: game.gameID, title: game.title)
+                            openGame(gameID: game.gameID, title: game.title)
                         } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "clock.arrow.circlepath")
@@ -145,8 +215,12 @@ struct LibraryView: View {
                     HStack {
                         Text("Recently played")
                         Spacer()
-                        Text("\(recent.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        Text("\(visibleRecent.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     }
+                } footer: {
+                    Text(BackendConfig.currentUserID.isEmpty
+                         ? "Signed-out activity on this device. Cleared when you change accounts."
+                         : "Recent activity for this account on this device.")
                 }
             }
             .listStyle(.insetGrouped)
@@ -159,7 +233,7 @@ struct LibraryView: View {
                     Button("Clear recent", systemImage: "trash") {
                         showClearRecentConfirmation = true
                     }
-                    .disabled(recent.isEmpty)
+                    .disabled(visibleRecent.isEmpty)
                     .accessibilityHint("Removes recent games from this device")
                 }
             }
@@ -173,30 +247,147 @@ struct LibraryView: View {
                 Text("This only clears your local recent-games list. Saved games are not affected.")
             }
             .refreshable { await load() }
-            .task { await load() }
+            // Tabs may retain their child view while Discover saves/unsaves
+            // another game. Refresh on each Library re-entry, not just mount.
+            .onAppear { Task { await load() } }
+            .onReceive(NotificationCenter.default.publisher(
+                for: .hephaestusBackendSessionDidChange
+            )) { _ in
+                // Clear server-owned cards immediately, before scheduling
+                // any asynchronous reload. Never display a prior account's
+                // saved titles while the new session is being established.
+                // Retire guest history before reading it regardless of
+                // notification subscriber order with the root app view.
+                RecentGames.clearGuestHistory()
+                // Update the local Recent shelf synchronously as well.
+                recent = RecentGames.load()
+                recentScopeKey = RecentGames.storageKey(for: BackendConfig.currentUserID)
+                savedRequestRevision += 1
+                saved = []
+                savedOwnerID = nil
+                savedSessionDigest = nil
+                errorMessage = nil
+                isLoadingSaved = !BackendConfig.currentUserID.isEmpty
+                playerRequest = nil
+                Task { await load() }
+            }
             .fullScreenCover(item: $playerRequest) { request in
                 PixiPlayerSheet(gameID: request.gameID, title: request.title)
             }
         }
     }
 
+    private func openGame(gameID: String, title: String) {
+        // Library is another real Play entry. Record the actual requested
+        // game in the current user's local shelf, never the global legacy key.
+        RecentGames.record(gameID: gameID, title: title)
+        recent = RecentGames.load()
+        recentScopeKey = RecentGames.storageKey(for: BackendConfig.currentUserID)
+        playerRequest = PixiPlayerRequest(gameID: gameID, title: title)
+    }
+
     private func load() async {
         recent = RecentGames.load()
+        recentScopeKey = RecentGames.storageKey(for: BackendConfig.currentUserID)
+        savedRequestRevision += 1
+        let revision = savedRequestRevision
+        let owner = BackendConfig.currentUserID
+        let credential = BackendConfig.loadSessionToken()
+
+        guard !owner.isEmpty else {
+            saved = []
+            savedOwnerID = nil
+            savedSessionDigest = nil
+            errorMessage = nil
+            isLoadingSaved = false
+            return
+        }
+
+        isLoadingSaved = true
+        defer {
+            if LibrarySavedRequestPolicy.canApply(
+                startedRevision: revision, currentRevision: savedRequestRevision,
+                startedOwner: owner, currentOwner: BackendConfig.currentUserID,
+                startedToken: credential, currentToken: BackendConfig.loadSessionToken()
+            ) {
+                isLoadingSaved = false
+            }
+        }
         do {
-            saved = try await BackendAPI.shared.fetchSavedGames()
+            let response = try await BackendAPI.shared.fetchSavedGames()
+            guard !Task.isCancelled, LibrarySavedRequestPolicy.canApply(
+                startedRevision: revision, currentRevision: savedRequestRevision,
+                startedOwner: owner, currentOwner: BackendConfig.currentUserID,
+                startedToken: credential, currentToken: BackendConfig.loadSessionToken()
+            ) else { return }
+            saved = response
+            savedOwnerID = owner
+            savedSessionDigest = LibrarySavedRequestPolicy.digest(credential)
             errorMessage = nil
         } catch {
-            errorMessage = "Couldn't load saved games: \(error.localizedDescription)"
+            guard !Task.isCancelled, LibrarySavedRequestPolicy.canApply(
+                startedRevision: revision, currentRevision: savedRequestRevision,
+                startedOwner: owner, currentOwner: BackendConfig.currentUserID,
+                startedToken: credential, currentToken: BackendConfig.loadSessionToken()
+            ) else { return }
+            saved = []
+            savedOwnerID = owner
+            savedSessionDigest = LibrarySavedRequestPolicy.digest(credential)
+            errorMessage = "Couldn't load saved games. Check your connection and try again."
         }
     }
 
     private func removeSaved(_ game: FeedGame) async {
+        let revision = savedRequestRevision
+        let owner = BackendConfig.currentUserID
+        let credential = BackendConfig.loadSessionToken()
+        guard !owner.isEmpty else { return }
         do {
             try await BackendAPI.shared.setSaved(game.id, saved: false)
+            guard LibrarySavedRequestPolicy.canApply(
+                startedRevision: revision, currentRevision: savedRequestRevision,
+                startedOwner: owner, currentOwner: BackendConfig.currentUserID,
+                startedToken: credential, currentToken: BackendConfig.loadSessionToken()
+            ) else { return }
             saved.removeAll { $0.id == game.id }
         } catch {
-            errorMessage = "Couldn't remove saved game: \(error.localizedDescription)"
+            guard LibrarySavedRequestPolicy.canApply(
+                startedRevision: revision, currentRevision: savedRequestRevision,
+                startedOwner: owner, currentOwner: BackendConfig.currentUserID,
+                startedToken: credential, currentToken: BackendConfig.loadSessionToken()
+            ) else { return }
+            errorMessage = "Couldn't remove saved game. Please try again."
         }
+    }
+}
+
+/// An account's saved titles are private UI data. A completion from the
+/// previous account, credential rotation or superseded refresh must never
+/// change the currently visible Library. Do not log credential snapshots.
+enum LibrarySavedRequestPolicy {
+    static func digest(_ token: String?) -> Data? {
+        guard let token, !token.isEmpty else { return nil }
+        return Data(SHA256.hash(data: Data(token.utf8)))
+    }
+
+    static func canDisplay(
+        loadedOwner: String?, currentOwner: String,
+        loadedSessionDigest: Data?, currentSessionDigest: Data?
+    ) -> Bool {
+        guard let loadedOwner, !loadedOwner.isEmpty,
+              let loadedSessionDigest, let currentSessionDigest else { return false }
+        return loadedOwner == currentOwner &&
+            loadedSessionDigest == currentSessionDigest
+    }
+
+    static func canApply(
+        startedRevision: Int, currentRevision: Int,
+        startedOwner: String, currentOwner: String,
+        startedToken: String?, currentToken: String?
+    ) -> Bool {
+        startedRevision == currentRevision &&
+        !startedOwner.isEmpty && startedOwner == currentOwner &&
+        startedToken != nil && startedToken == currentToken
     }
 }
 

@@ -213,6 +213,7 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutAccessibilityTextSize \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateEntryConsentAndControls \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedUnavailableRecoveryToLibrary \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/ipad-feed-ui.log || {
               grep -E "error:|XCTAssert" /tmp/ipad-feed-ui.log | sort -u | head -30 | while read -r l; do
@@ -244,11 +245,12 @@ jobs:
       # Native app-window landscape attachments can export with a misleading
       # portrait crop and black bands. Keep originals; validate and separately
       # publish orientation-correct *full-screen* evidence for review.
-      - name: Validate native iPad screenshot orientation and review evidence
+      - name: Validate native iPad feed and Library screenshot evidence
         run: |
           python3 tools/test-feedback/verify-ui-screenshot-evidence.py \
             --input /tmp/ipad-feed-ui-screenshots \
-            --out /tmp/ipad-feed-ui-review
+            --out /tmp/ipad-feed-ui-review \
+            --require-ipad-library
       - name: Upload iPad UI evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4

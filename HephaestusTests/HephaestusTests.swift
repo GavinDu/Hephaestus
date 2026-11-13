@@ -1123,6 +1123,98 @@ struct HephaestusTests {
     #expect(!mayEvict(true, false))
 }
 
+
+// Saved games are owner-private even when the UI also has on-device recent
+// entries. No response from the old user or an old retry may restore titles.
+@Test func arcadePulseLibrarySavedResponsesAreAccountBound() {
+    func accepted(_ startedOwner: String, _ currentOwner: String,
+                  _ startedToken: String?, _ currentToken: String?,
+                  _ startedRevision: Int = 9, _ currentRevision: Int = 9) -> Bool {
+        LibrarySavedRequestPolicy.canApply(
+            startedRevision: startedRevision, currentRevision: currentRevision,
+            startedOwner: startedOwner, currentOwner: currentOwner,
+            startedToken: startedToken, currentToken: currentToken)
+    }
+    #expect(accepted("A", "A", "credential-A", "credential-A"))
+    #expect(!accepted("A", "B", "credential-A", "credential-B"))
+    #expect(!accepted("A", "", "credential-A", nil))
+    #expect(!accepted("A", "A", "credential-A", "credential-new"))
+    #expect(!accepted("A", "A", "credential-A", "credential-A", 9, 10))
+    #expect(!accepted("", "", nil, nil))
+    #expect(!accepted("A", "A", nil, nil))
+    #expect(!accepted("A", "A", nil, "credential-A"))
+
+    // Defensive render gate also protects views that were offscreen when
+    // the account-switch notification was sent.
+    let firstCredential = LibrarySavedRequestPolicy.digest("bearer-A")
+    let rotatedCredential = LibrarySavedRequestPolicy.digest("bearer-rotated")
+    let sameCredential = LibrarySavedRequestPolicy.digest("bearer-A")
+    func visible(_ storedOwner: String?, _ currentOwner: String,
+                 _ storedDigest: Data?, _ currentDigest: Data?) -> Bool {
+        LibrarySavedRequestPolicy.canDisplay(
+            loadedOwner: storedOwner, currentOwner: currentOwner,
+            loadedSessionDigest: storedDigest, currentSessionDigest: currentDigest
+        )
+    }
+    #expect(visible("A", "A", firstCredential, sameCredential))
+    #expect(!visible("A", "B", firstCredential, sameCredential))
+    #expect(!visible("A", "", firstCredential, sameCredential))
+    #expect(!visible(nil, "A", firstCredential, sameCredential))
+    #expect(!visible("A", "A", firstCredential, rotatedCredential))
+    #expect(!visible("A", "A", nil, sameCredential))
+    #expect(!visible("A", "A", firstCredential, nil))
+    #expect(LibrarySavedRequestPolicy.digest(nil) == nil)
+}
+
+
+// Previously a single UserDefaults key persisted published and possibly
+// restricted-scope feed titles across every account on the device. New
+// storage keys are deterministic per subject, and the old unscoped list is
+// discarded rather than migrated to whichever account logs in first.
+@Test func arcadePulseRecentHistoryNeverLeaksAcrossAccounts() {
+    let guest = RecentGames.storageKey(for: "")
+    let ownerA = RecentGames.storageKey(for: "private-owner-A")
+    let ownerB = RecentGames.storageKey(for: "private-owner-B")
+    #expect(guest != ownerA)
+    #expect(guest != ownerB)
+    #expect(ownerA != ownerB)
+    #expect(ownerA == RecentGames.storageKey(for: "private-owner-A"))
+    #expect(!ownerA.contains("private-owner-A"))
+    #expect(!ownerB.contains("private-owner-B"))
+    #expect(ownerA != RecentGames.legacyKey)
+    #expect(guest != RecentGames.legacyKey)
+
+    let suite = "hephaestus.recent-history-privacy-tests"
+    guard let defaults = UserDefaults(suiteName: suite) else {
+        Issue.record("Could not create an isolated UserDefaults test suite")
+        return
+    }
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let legacy = Data("previous account's private game title".utf8)
+    defaults.set(legacy, forKey: RecentGames.legacyKey)
+    let ownerAHistory = [RecentGame(gameID: "private-game-A", title: "Owner A's private title")]
+    let ownerBHistory = [RecentGame(gameID: "public-game-B", title: "Owner B's recent game")]
+    defaults.set(try? JSONEncoder().encode(ownerAHistory), forKey: ownerA)
+    defaults.set(try? JSONEncoder().encode(ownerBHistory), forKey: ownerB)
+    #expect(RecentGames.load(for: "private-owner-A", defaults: defaults).map(\.gameID) == ["private-game-A"])
+    #expect(RecentGames.load(for: "private-owner-B", defaults: defaults).map(\.gameID) == ["public-game-B"])
+    #expect(RecentGames.load(for: "", defaults: defaults).isEmpty)
+    // The actual load path purges old unscoped history instead of gifting
+    // its game title to the first account that opens Library after update.
+    #expect(defaults.data(forKey: RecentGames.legacyKey) == nil)
+    #expect(defaults.data(forKey: ownerA) != nil)
+    #expect(defaults.data(forKey: ownerB) != nil)
+
+    // A login/logout boundary also retires anonymous history, preserving
+    // authenticated account shelves.
+    defaults.set(try? JSONEncoder().encode(ownerBHistory), forKey: guest)
+    #expect(RecentGames.load(for: "", defaults: defaults).count == 1)
+    RecentGames.clearGuestHistory(defaults: defaults)
+    #expect(RecentGames.load(for: "", defaults: defaults).isEmpty)
+    #expect(RecentGames.load(for: "private-owner-A", defaults: defaults).count == 1)
+    #expect(RecentGames.load(for: "private-owner-B", defaults: defaults).count == 1)
+}
+
 // A live HTTPS outage is a real error; it must produce a legible recovery
 // explanation rather than raw TLS/certificate jargon or fabricated feed cards.
 @Test func arcadePulseFeedFailureCopyIsActionableAndTruthful() {
