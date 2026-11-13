@@ -143,9 +143,50 @@ struct ArcadePulseCreatorIdentity: View {
     }
 }
 
-/// The same 48×44pt minimum icon anatomy is used by the portrait action
-/// rail and compact landscape action row. Captions never replace truthful
-/// accessibility labels or add fabricated engagement counts.
+/// One shared native action anatomy for Button, Menu and ShareLink in the
+/// Arcade Pulse social rail. Fixed 10pt text failed Dynamic Type and three
+/// copies of this layout drifted independently. Compact visual captions are
+/// supplementary; the parent control always supplies its complete, truthful
+/// VoiceOver label.
+struct ArcadePulseActionGlyph: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let symbol: String
+    let caption: String?
+
+    /// When captions become too large for a narrow one-post social rail,
+    /// preserve the full 48pt icon target and let the parent's accessibility
+    /// label carry the name. Never shrink accessibility text to 8pt.
+    static func showsCaption(_ caption: String?, for size: DynamicTypeSize) -> Bool {
+        guard let caption, !caption.isEmpty else { return false }
+        return !usesAccessibleMenu(for: size)
+    }
+
+    /// A single visibly labeled Actions menu keeps social actions discoverable
+    /// to large-text users *without* requiring VoiceOver or squeezing Play.
+    static func usesAccessibleMenu(for size: DynamicTypeSize) -> Bool {
+        size >= .xxLarge
+    }
+
+    var body: some View {
+        let showCaption = Self.showsCaption(caption, for: dynamicTypeSize)
+        VStack(spacing: 1) {
+            Image(systemName: symbol)
+                .font(.system(size: dynamicTypeSize.isAccessibilitySize ? 22 : 18,
+                              weight: .semibold))
+                .frame(width: 44, height: 44)
+            if showCaption, let caption {
+                Text(caption)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+            }
+        }
+        .frame(minWidth: 48, minHeight: showCaption ? 60 : 48)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Identical action targets in portrait rail and compact landscape row.
+/// Captions never imply invented engagement counts or override VoiceOver.
 struct ArcadePulseAction: View {
     let symbol: String
     let accessibilityLabel: String
@@ -154,19 +195,7 @@ struct ArcadePulseAction: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 1) {
-                Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                if let caption {
-                    Text(caption)
-                        .font(.system(size: 10, weight: .semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-            }
-            .frame(minWidth: 48, minHeight: caption == nil ? 44 : 58)
-            .contentShape(Rectangle())
+            ArcadePulseActionGlyph(symbol: symbol, caption: caption)
         }
         .buttonStyle(.plain)
         .foregroundStyle(ArcadePulseTheme.textPrimary)

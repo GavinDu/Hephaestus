@@ -11,6 +11,25 @@ import Testing
 // App-level tests will regrow around the WebView player and the
 // creation flow.
 struct HephaestusTests {
+    @Test func arcadePulseActionGlyphHonorsLargeTextWithoutShrinkingCaptions() {
+        // Ordinary compact rails retain the visual caption, but at a large
+        // size the 48pt icon-only target avoids clipped words or a blocked
+        // Play CTA. Buttons, menus, and ShareLink keep full VoiceOver labels.
+        #expect(ArcadePulseActionGlyph.showsCaption("Like", for: .large))
+        #expect(ArcadePulseActionGlyph.showsCaption("More", for: .xLarge))
+        #expect(!ArcadePulseActionGlyph.showsCaption("Comment", for: .xxLarge))
+        #expect(!ArcadePulseActionGlyph.showsCaption("Share", for: .xxxLarge))
+        #expect(!ArcadePulseActionGlyph.showsCaption("Save", for: .accessibility3))
+        #expect(!ArcadePulseActionGlyph.showsCaption(nil, for: .large))
+        #expect(!ArcadePulseActionGlyph.showsCaption("", for: .large))
+        #expect(!ArcadePulseActionGlyph.usesAccessibleMenu(for: .large))
+        #expect(!ArcadePulseActionGlyph.usesAccessibleMenu(for: .xLarge))
+        #expect(ArcadePulseActionGlyph.usesAccessibleMenu(for: .xxLarge))
+        #expect(ArcadePulseActionGlyph.usesAccessibleMenu(for: .xxxLarge))
+        #expect(ArcadePulseActionGlyph.usesAccessibleMenu(for: .accessibility1))
+        #expect(ArcadePulseActionGlyph.usesAccessibleMenu(for: .accessibility5))
+    }
+
     @Test func arcadePulseFoundationUsesSinglePaletteAndAccessibleTargetSizes() {
         #expect(ArcadePulseTheme.fallbackPalettes.count == 5)
         #expect(ArcadePulseTheme.minimumTarget >= 44)

@@ -1075,12 +1075,11 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(play.exists,
                       "The feed should remain playable at accessibility text size after bounded live retry. UI: \(app.debugDescription)")
 
-        let targets: [(String, XCUIElement)] = [
-            ("Play", play),
-            ("Save", app.buttons["Save game"].firstMatch),
-            ("Like", app.buttons["Like game"].firstMatch),
-            ("Comments", app.buttons["View comments"].firstMatch)
-        ]
+        // At XXXL the full five-action rail would crowd the preview and
+        // become icon-only. Require a *visibly labeled* native Actions menu,
+        // not five microscopic captions or hidden functionality.
+        let actions = app.descendants(matching: .any)["feed.actions.accessible"].firstMatch
+        let targets: [(String, XCUIElement)] = [("Play", play), ("Actions", actions)]
         for (name, target) in targets {
             XCTAssertTrue(target.exists, "\(name) should remain present at accessibility text size.")
             guard target.exists else { continue }
@@ -1091,6 +1090,29 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertTrue(target.isHittable,
                           "\(name) should remain reachable at accessibility text size.")
         }
+        XCTAssertLessThanOrEqual(actions.frame.maxY, play.frame.minY + 1,
+                                 "Large-text Actions must not overlap the real Play CTA.")
+        actions.tap()
+        // This menu reflects the *real* backend viewer state: previously
+        // saved/liked games correctly show the inverse action, not a mock.
+        for (name, allowed) in [
+            ("Save", ["Save game", "Remove from library"]),
+            ("Like", ["Like game", "Unlike game"]),
+            ("Comments", ["View comments"]),
+            ("Share", ["Share game"]),
+            ("Details", ["Game details"]),
+            ("Report", ["Report game"])
+        ] {
+            let options = allowed.map { label in
+                app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label == %@", label)).firstMatch
+            }
+            let available = options.contains { $0.waitForExistence(timeout: 5) }
+            XCTAssertTrue(available, "Large-text Actions menu must expose \(name).")
+        }
+        // Dismiss the real native menu without mutating a remote Like/Save
+        // state or starting gameplay; preserve the settled feed screenshot.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.15)).tap()
 
         // The previous screenshot had a Play button that remained tappable
         // while oversized decorative hints, title, and the bottom tab bar
@@ -1112,6 +1134,31 @@ final class PlayerSmokeTests: XCTestCase {
         shot.name = "feed-accessibility-dynamic-type-xxxl"
         shot.lifetime = .keepAlways
         add(shot)
-        print("UI_EVALUATOR_ACCESSIBILITY dynamic_type=accessibility-xxxl primary_targets=4")
+
+        // Inspect original evidence from the *real* system sharing journey.
+        // A ShareLink mounted inside a disappearing Menu may never display
+        // its sheet. Do not fake a system share screenshot or silently treat
+        // the mere presence of the menu item as functional acceptance.
+        actions.tap()
+        let shareEntry = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Share game")).firstMatch
+        XCTAssertTrue(shareEntry.waitForExistence(timeout: 5))
+        shareEntry.tap()
+        // An item visible inside the Menu does not prove the share UI works.
+        // Require an actual system sheet, iPad popover or activity-list view.
+        let systemSheet = app.sheets.firstMatch
+        let systemPopover = app.popovers.firstMatch
+        let activityList = app.otherElements["ActivityListView"].firstMatch
+        XCTAssertTrue(
+            systemSheet.waitForExistence(timeout: 8) ||
+                systemPopover.waitForExistence(timeout: 3) ||
+                activityList.waitForExistence(timeout: 3),
+            "Share game must present a genuine system activity sheet after the menu dismisses."
+        )
+        let shareEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shareEvidence.name = "feed-accessibility-xxxl-native-share-sheet"
+        shareEvidence.lifetime = .keepAlways
+        add(shareEvidence)
+        print("UI_EVALUATOR_ACCESSIBILITY dynamic_type=accessibility-xxxl visible_primary_targets=2 menu_actions=6 native_share_attempt=true")
     }
 }

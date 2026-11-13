@@ -932,6 +932,19 @@ private struct SocialFeedUnavailableView: View {
     }
 }
 
+/// Keep system sharing anchored to a mounted feed view. Embedding ShareLink
+/// directly inside a SwiftUI Menu can dismiss its presenter before the
+/// UIActivityViewController appears on some iOS releases.
+private struct ArcadePulseGameShareSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
 private struct ForYouGamePage: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -939,6 +952,7 @@ private struct ForYouGamePage: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsExpressionDetails = false
+    @State private var showsAccessibleShareSheet = false
     // A URL in the feed does not establish that its image decoded successfully.
     // Keep accessibility/media audits tied to the exact poster that rendered.
     @State private var loadedPosterURL: String?
@@ -1108,33 +1122,14 @@ private struct ForYouGamePage: View {
                 Button("Block creator", role: .destructive, action: onBlockCreator)
             }
         } label: {
-            VStack(spacing: 1) {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                if vertical {
-                    Text("More")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-            }
-            .frame(minWidth: 48, minHeight: vertical ? 58 : 44)
-            .contentShape(Rectangle())
+            ArcadePulseActionGlyph(symbol: "ellipsis", caption: vertical ? "More" : nil)
         }
         .foregroundStyle(.white)
         .accessibilityLabel("More game actions")
         .accessibilitySortPriority(70)
         ShareLink(item: shareURL) {
-            VStack(spacing: 1) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                if vertical {
-                    Text("Share")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-            }
-            .frame(minWidth: 48, minHeight: vertical ? 58 : 44)
-            .contentShape(Rectangle())
+            ArcadePulseActionGlyph(symbol: "square.and.arrow.up",
+                                   caption: vertical ? "Share" : nil)
         }
         .simultaneousGesture(TapGesture().onEnded {
             Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
@@ -1143,8 +1138,60 @@ private struct ForYouGamePage: View {
         .accessibilityLabel("Share \(game.title)")
     }
 
+    /// A labeled menu is critical for low-vision users who enlarge text but
+    /// do not use VoiceOver. Do not force them to interpret five unlabeled
+    /// symbols or let a tall rail obscure the one-post preview/Play target.
+    private func accessibleSocialMenu(vertical: Bool) -> some View {
+        Menu {
+            Button(isSaved ? "Remove from library" : "Save game",
+                   systemImage: isSaved ? "bookmark.fill" : "bookmark",
+                   action: onToggleSaved)
+            Button(isLiked ? "Unlike game" : "Like game",
+                   systemImage: isLiked ? "heart.fill" : "heart",
+                   action: onToggleLike)
+            Button("View comments", systemImage: "bubble.right",
+                   action: onOpenComments)
+            Button("Share game", systemImage: "square.and.arrow.up") {
+                // Let the Menu dismiss before the *mounted page* presents the
+                // native share UI. Never present a ShareLink from the menu VC.
+                showsAccessibleShareSheet = true
+                Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
+            }
+            Divider()
+            Button("Game details", systemImage: "info.circle", action: onOpenDetails)
+            Button("Report game", role: .destructive, action: onReport)
+            Button("Not interested", action: onNotInterested)
+            if game.ownerID != nil {
+                Button("Block creator", role: .destructive, action: onBlockCreator)
+            }
+        } label: {
+            Group {
+                if vertical {
+                    VStack(spacing: 3) {
+                        Image(systemName: "ellipsis.circle.fill")
+                            .font(.title2)
+                        Text("Actions").font(.caption.weight(.bold))
+                    }
+                    .frame(minWidth: 88, minHeight: 68)
+                } else {
+                    Label("Actions", systemImage: "ellipsis.circle.fill")
+                        .font(.headline)
+                        .frame(minWidth: 112, minHeight: 48)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .background(.black.opacity(0.52), in: Capsule())
+        .accessibilityLabel("Game actions")
+        .accessibilityIdentifier("feed.actions.accessible")
+    }
+
     @ViewBuilder private func socialActions(vertical: Bool) -> some View {
-        if vertical {
+        if ArcadePulseActionGlyph.usesAccessibleMenu(for: dynamicTypeSize) {
+            accessibleSocialMenu(vertical: vertical)
+        } else if vertical {
             VStack(spacing: 5) { socialActionButtons(vertical: true) }
                 .padding(4)
                 .background(.black.opacity(0.3), in: Capsule())
@@ -1438,6 +1485,9 @@ private struct ForYouGamePage: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .sheet(isPresented: $showsAccessibleShareSheet) {
+            ArcadePulseGameShareSheet(url: shareURL)
         }
         .sheet(isPresented: $showsExpressionDetails) {
             NavigationStack {
