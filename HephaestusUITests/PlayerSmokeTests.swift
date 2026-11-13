@@ -259,6 +259,90 @@ final class PlayerSmokeTests: XCTestCase {
         }
     }
 
+    /// The preferences modal may not claim a successful write until the
+    /// backend confirms. Simulate a failed write without changing any user
+    /// settings or generating fictitious game/creator data.
+    @MainActor
+    func testArcadePulseFeedPreferencesFailureStaysEditable() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-feed-preferences-failure-state")
+        app.launch()
+        let open = app.buttons["Tune feed recommendations"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 15) && open.isHittable)
+        open.tap()
+        let title = app.navigationBars["Tune your feed"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        let save = app.descendants(matching: .any)["feed.preferences.save"].firstMatch
+        let reset = app.descendants(matching: .any)["feed.preferences.reset"].firstMatch
+        XCTAssertTrue(save.exists && save.isHittable)
+        XCTAssertGreaterThanOrEqual(save.frame.height, 44)
+        save.tap()
+        let error = app.descendants(matching: .any)["feed.preferences.error"].firstMatch
+        XCTAssertTrue(error.waitForExistence(timeout: 10),
+                      "Failed preferences update must be visible inside the still-open sheet.")
+        XCTAssertTrue(title.exists && save.isEnabled,
+                      "Failure must preserve selections and permit a real retry.")
+        let saveShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        saveShot.name = "arcade-pulse-feed-preferences-save-failed"
+        saveShot.lifetime = .keepAlways
+        add(saveShot)
+        XCTAssertTrue(reset.exists && reset.isHittable)
+        reset.tap()
+        XCTAssertTrue(error.waitForExistence(timeout: 10))
+        XCTAssertTrue(title.exists,
+                      "Reset failure cannot close the sheet or pretend preferences were cleared.")
+        let resetShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        resetShot.name = "arcade-pulse-feed-preferences-reset-failed"
+        resetShot.lifetime = .keepAlways
+        add(resetShot)
+        let done = app.buttons["Done"].firstMatch
+        XCTAssertTrue(done.exists && done.isHittable)
+        done.tap()
+        XCTAssertFalse(title.waitForExistence(timeout: 2),
+                       "Done must still dismiss the editable preferences sheet.")
+    }
+
+    /// The social write failure is display-only and deliberately injected
+    /// AFTER a genuine backend feed appears. There is no fake post, no API
+    /// mutation and no invented engagement count. Even on an available
+    /// media stage the failed social action must be audible and dismissible.
+    @MainActor
+    func testArcadePulseSocialWriteFailureDoesNotHideLiveGame() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-social-action-error-state")
+        app.launch()
+        let alert = app.alerts["Couldn't update this action"].firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 150),
+                      "Only a real loaded feed may trigger social error-state evaluation.")
+        let signedOutGuidance = alert.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS %@", "Sign in from Profile")
+        ).firstMatch
+        let uncertainNetworkFailure = alert.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS %@", "couldn't be confirmed")
+        ).firstMatch
+        XCTAssertTrue(signedOutGuidance.exists || uncertainNetworkFailure.exists,
+                      "Show actionable guest authentication guidance or an honest unconfirmed-write status; never claim the server changed nothing.")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "arcade-pulse-live-feed-social-action-error"
+        shot.lifetime = .keepAlways
+        add(shot)
+        let dismiss = alert.buttons["OK"].firstMatch
+        XCTAssertTrue(dismiss.exists && dismiss.isHittable)
+        dismiss.tap()
+        let play = app.buttons["game.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 10) && play.isHittable,
+                      "Dismissed social error must retain the same live playable feed.")
+        XCTAssertGreaterThanOrEqual(play.frame.height, 44)
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "arcade-pulse-live-feed-after-social-error"
+        after.lifetime = .keepAlways
+        add(after)
+    }
+
     /// This isolated error-state screenshot exercises real navigation without
     /// pretending the production feed returned a playable game. The separate
     /// testDiscoverLaunchesPlayer still requires the live backend to work.
