@@ -1122,6 +1122,10 @@ private struct ForYouGamePage: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsExpressionDetails = false
     @State private var showsAccessibleShareSheet = false
+    @State private var showsAccessibleActionsSheet = false
+    @State private var shareAfterActionsDismiss = false
+    @State private var queuedAccessibleShareURL: URL?
+    @State private var queuedAccessibleShareGameID: String?
     // A URL in the feed does not establish that its image decoded successfully.
     // Keep accessibility/media audits tied to the exact poster that rendered.
     @State private var loadedPosterURL: String?
@@ -1355,29 +1359,76 @@ private struct ForYouGamePage: View {
     /// A labeled menu is critical for low-vision users who enlarge text but
     /// do not use VoiceOver. Do not force them to interpret five unlabeled
     /// symbols or let a tall rail obscure the one-post preview/Play target.
+    // At Accessibility XXXL, an anchored SwiftUI Menu can disappear or fail
+    // to reopen while its native menu controller is dismissing. A real,
+    // explicitly dismissible native sheet keeps the same social actions
+    // reachable across repeated openings, rotation and Dynamic Type.
+    private var accessibleSocialActionsSheet: some View {
+        NavigationStack {
+            List {
+                Section("Social actions") {
+                    Button(isSaved ? "Remove from library" : "Save game",
+                           systemImage: isSaved ? "bookmark.fill" : "bookmark") {
+                        showsAccessibleActionsSheet = false
+                        onToggleSaved()
+                    }
+                    Button(isLiked ? "Unlike game" : "Like game",
+                           systemImage: isLiked ? "heart.fill" : "heart") {
+                        showsAccessibleActionsSheet = false
+                        onToggleLike()
+                    }
+                    Button("View comments", systemImage: "bubble.right") {
+                        showsAccessibleActionsSheet = false
+                        onOpenComments()
+                    }
+                    Button("Share game", systemImage: "square.and.arrow.up") {
+                        // The *mounted page* presents the real system UI only
+                        // after this native actions sheet has fully dismissed.
+                        // No ShareLink is embedded in a disappearing Menu.
+                        queuedAccessibleShareURL = shareURL
+                        queuedAccessibleShareGameID = game.id
+                        shareAfterActionsDismiss = true
+                        showsAccessibleActionsSheet = false
+                    }
+                    Button("Game details", systemImage: "info.circle") {
+                        showsAccessibleActionsSheet = false
+                        onOpenDetails()
+                    }
+                    Button("Report game", role: .destructive) {
+                        showsAccessibleActionsSheet = false
+                        onReport()
+                    }
+                }
+                Section("Feed preferences") {
+                    Button("Not interested", systemImage: "eye.slash") {
+                        showsAccessibleActionsSheet = false
+                        onNotInterested()
+                    }
+                    if game.ownerID != nil {
+                        Button("Block creator", role: .destructive) {
+                            showsAccessibleActionsSheet = false
+                            onBlockCreator()
+                        }
+                    }
+                }
+            }
+            .environment(\.defaultMinListRowHeight, 44)
+            .navigationTitle("Game actions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { showsAccessibleActionsSheet = false }
+                        .accessibilityIdentifier("feed.actions.dismiss")
+                }
+            }
+        }
+        .presentationDragIndicator(.visible)
+        .accessibilityIdentifier("feed.actions.sheet")
+    }
+
     private func accessibleSocialMenu(vertical: Bool) -> some View {
-        Menu {
-            Button(isSaved ? "Remove from library" : "Save game",
-                   systemImage: isSaved ? "bookmark.fill" : "bookmark",
-                   action: onToggleSaved)
-            Button(isLiked ? "Unlike game" : "Like game",
-                   systemImage: isLiked ? "heart.fill" : "heart",
-                   action: onToggleLike)
-            Button("View comments", systemImage: "bubble.right",
-                   action: onOpenComments)
-            Button("Share game", systemImage: "square.and.arrow.up") {
-                // Let the Menu dismiss before the *mounted page* presents the
-                // native share UI. Never present a ShareLink from the menu VC.
-                showsAccessibleShareSheet = true
-                Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
-            }
-            Divider()
-            Button("Game details", systemImage: "info.circle", action: onOpenDetails)
-            Button("Report game", role: .destructive, action: onReport)
-            Button("Not interested", action: onNotInterested)
-            if game.ownerID != nil {
-                Button("Block creator", role: .destructive, action: onBlockCreator)
-            }
+        Button {
+            showsAccessibleActionsSheet = true
         } label: {
             Group {
                 if vertical {
@@ -1726,8 +1777,22 @@ private struct ForYouGamePage: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .sheet(isPresented: $showsAccessibleShareSheet) {
-            ArcadePulseGameShareSheet(url: shareURL)
+        .sheet(isPresented: $showsAccessibleActionsSheet, onDismiss: {
+            if shareAfterActionsDismiss {
+                shareAfterActionsDismiss = false
+                showsAccessibleShareSheet = true
+                if let sharedGameID = queuedAccessibleShareGameID {
+                    Task { await BackendAPI.shared.trackSocialEvent(gameID: sharedGameID, kind: "share") }
+                }
+            }
+        }) {
+            accessibleSocialActionsSheet
+        }
+        .sheet(isPresented: $showsAccessibleShareSheet, onDismiss: {
+            queuedAccessibleShareURL = nil
+            queuedAccessibleShareGameID = nil
+        }) {
+            ArcadePulseGameShareSheet(url: queuedAccessibleShareURL ?? shareURL)
         }
         .sheet(isPresented: $showsExpressionDetails) {
             NavigationStack {
