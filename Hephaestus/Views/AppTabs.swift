@@ -85,9 +85,9 @@ struct LibraryView: View {
                             Button(action: onOpenProfile) {
                                 Label("Go to Profile to sign in", systemImage: "person.crop.circle")
                                     .font(.headline)
-                                    // White on electric violet is only ~4.08:1;
-                                    // black exceeds 5:1 for this body-sized CTA.
-                                    .foregroundStyle(.black)
+                                    // Shared normal-text contrast-safe color
+                                    // for the same violet used by Studio.
+                                    .foregroundStyle(ArcadePulseTheme.onElectricViolet)
                                     .frame(maxWidth: .infinity, minHeight: 48)
                             }
                             .buttonStyle(.borderedProminent)

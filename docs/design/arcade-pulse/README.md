@@ -24,6 +24,20 @@ These are **compressed preview copies** of approved design concepts generated in
 - The two CI contact sheets are **historical screenshot summaries**, provided solely as comparison references and not a substitute for current exact-head evidence.
 - The authoritative platform runtime remains bridgeless WKWebView with server-owned Game IR; do not add fake controls or metrics from concept art.
 
+## Native accessibility action contracts (#173 / #179)
+
+- The Arcade Pulse Play CTA uses semantic SwiftUI `.headline` typography that grows with Dynamic Type, instead of a fixed 20pt font at accessibility sizes. Its visual hit target remains at least 48pt and it never attaches a gesture that steals feed paging.
+- A playable `FeedGame` with no nonblank backend `ownerID` must **not** present an actionable creator/profile or Follow control. A generic `Mini game` label must not impersonate a navigable creator profile. Games remain playable independently of creator attribution.
+- Real creator identity and profile navigation remain backed by the server; no test-only creator or fabricated follower count is inserted. Validate these semantics alongside real iPhone/iPad screenshots, VoiceOver labels/order, and oversized Dynamic Type at the exact PR head.
+
+## Signed-out iPad Studio / Library contrast contract (#173 / #181)
+
+The real Go to Profile to sign in CTA uses the shared `ArcadePulseTheme.electricViolet` solid fill and `onElectricViolet` **black** foreground. For the token's original sRGB components (0.57, 0.36, 0.99), calculated WCAG relative-luminance contrast is approximately **5.15:1 with black**, while white is approximately **4.08:1** and fails normal-text AA 4.5:1. The native iPad Studio and signed-out Library now share the same readable foreground token; pure Swift tests recompute the ratio from the source RGB token. Do not lighten the button text to follow a concept screenshot; real device high-contrast, VoiceOver and Dynamic Type screenshot acceptance remains required.
+
+## iPad Creator Studio privacy and action contract (#181)
+
+A Creator Studio sign-in CTA **must** receive the real Profile navigation callback from its caller; the view no longer accepts a default no-op button. Private projects require a viewer-bound authenticated backend response and no fabricated drafts or analytics. User-facing fetch failures are fixed, actionable phrases for 401/403/404/429, TLS, offline and timeout; raw `Error.localizedDescription` is never displayed because transport errors may contain internal URLs/account information. Pure Swift regression tests verify both secret-safe messages and common error classifications. No fake account, project, status or API response is used to make native CI pass.
+
 ## Comments native Send icon contrast (#178)
 
 The original iPhone simulator screenshot from GitHub iOS run `43538047311` (artifact `player-smoke` `14092009874`; test `testArcadePulseCommentsSheetAndSafeAreaComposer`) shows an authentic zero-comment backend state, keyboard-safe composer with typed unsent text, and a **white paper-plane icon** on `playOrangeDeep` sRGB (1.0,0.48,0.30). White-on-orange is approximately **2.57:1**, below WCAG AA **3:1 for meaningful non-text controls**. The icon now uses black-on-orange (~**8.16:1**), retaining its real enabled/disabled semantics, >=44pt tap size and explicit VoiceOver label. This screenshot does **not** prove comment POST success or server-error recovery; both require actual backend validation on the updated PR head.
