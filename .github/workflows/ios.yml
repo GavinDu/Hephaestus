@@ -223,14 +223,13 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadGameDetailsAdaptiveLayout \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
-            CODE_SIGNING_ALLOWED=NO
-            2>&1 | tee /tmp/ipad-feed-ui.log
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/ipad-feed-ui.log
           }
           if run_evaluator; then
             exit 0
           fi
           if grep -Eq 'Failed to launch .*Timed out while launching application via Xcode' /tmp/ipad-feed-ui.log && \
-             ! grep -Eq 'XCTAssert[^\r\n]*failed|UI screenshot evidence failed' /tmp/ipad-feed-ui.log; then
+             ! grep -Eq 'XCTAssert.*failed|UI screenshot evidence failed' /tmp/ipad-feed-ui.log; then
             echo "::warning title=iPad simulator launch::Xcode app-launch timeout; cold-boot and rerun full native suite once"
             mv /tmp/ipad-feed-ui.log /tmp/ipad-feed-ui-initial.log
             if [[ -d /tmp/ipad-feed-ui.xcresult ]]; then
