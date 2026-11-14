@@ -316,8 +316,43 @@ final class PlayerSmokeTests: XCTestCase {
         app.launchArguments.append("--ui-test-social-action-error-state")
         app.launch()
         let alert = app.alerts["Couldn't update this action"].firstMatch
-        XCTAssertTrue(alert.waitForExistence(timeout: 150),
-                      "Only a real loaded feed may trigger social error-state evaluation.")
+        // The fixture emits the alert ONLY after actual backend games arrive.
+        // A previous run stayed on the legitimate "Couldn't load the feed"
+        // screen for 150 seconds despite its actionable Retry button. Do not
+        // weaken the live-data gate or synthesize a creator/game: use the
+        // same real recovery route a person would, and still fail at a
+        // bounded deadline if the deployment cannot return a playable feed.
+        let failureRetry = app.buttons["Try again"].firstMatch
+        let pendingRetry = app.buttons["feed.retryLoading"].firstMatch
+        let deadline = Date().addingTimeInterval(150)
+        let started = Date()
+        var lastRetry = Date.distantPast
+        while !alert.exists && Date() < deadline {
+            let failed = failureRetry.exists && failureRetry.isEnabled
+            let stalled = Date().timeIntervalSince(started) >= 65 &&
+                pendingRetry.exists && pendingRetry.isEnabled
+            if (failed || stalled), Date().timeIntervalSince(lastRetry) >= 20 {
+                let retry = failed ? failureRetry : pendingRetry
+                let frame = retry.frame
+                if !frame.isNull, !frame.isEmpty,
+                   frame.midX.isFinite, frame.midY.isFinite,
+                   frame.width >= 44, frame.height >= 44,
+                   app.frame.intersects(frame) {
+                    print("UI_EVALUATOR_SOCIAL_LIVE_RETRY using real " + retry.label)
+                    retry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                    lastRetry = Date()
+                }
+            }
+            if alert.waitForExistence(timeout: 4) { break }
+        }
+        if !alert.exists {
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "arcade-pulse-social-alert-missing-real-feed"
+            failure.lifetime = .keepAlways
+            add(failure)
+        }
+        XCTAssertTrue(alert.exists,
+                      "Only a real loaded feed may trigger social error-state evaluation, even after bounded genuine Retry. Never use a mock game.")
         let signedOutGuidance = alert.staticTexts.containing(
             NSPredicate(format: "label CONTAINS %@", "Sign in from Profile")
         ).firstMatch
