@@ -70,6 +70,8 @@ struct CreatorStudioView: View {
                                     description: Text(loadError))
                                 Button("Retry") { Task { await load(reset: true) } }
                                     .buttonStyle(.borderedProminent)
+                                    .frame(minHeight: ArcadePulseTheme.minimumTarget)
+                                    .accessibilityIdentifier("studio.projects.retry")
                             }
                             .frame(maxWidth: .infinity, minHeight: 240)
                         } else if projects.isEmpty {
@@ -440,6 +442,14 @@ struct CreatorStudioView: View {
             // Raw localizedDescription may contain internal API hostnames,
             // request URLs or unauthorized account metadata. Keep diagnostics
             // separate from fixed, user-actionable native error copy.
+            if CreatorStudioErrorPresentation.mustRevokeVisibleProjects(for: error) {
+                // A real 401/403 response revokes authorization to display
+                // even projects loaded in a previous successful page. Merely
+                // showing an error beneath those private cards would leak
+                // unauthorized owner-only titles until sign-out.
+                projects.removeAll()
+                nextCursor = nil
+            }
             loadError = CreatorStudioErrorPresentation.message(for: error)
         }
     }
@@ -448,6 +458,12 @@ struct CreatorStudioView: View {
 /// Privacy-safe, actionable source for native Studio project-fetch errors.
 /// Project models, permissions and statuses always remain server-authoritative.
 enum CreatorStudioErrorPresentation {
+    static func mustRevokeVisibleProjects(for error: Error) -> Bool {
+        guard let apiError = error as? APIError,
+              case let .badStatus(status) = apiError else { return false }
+        return status == 401 || status == 403
+    }
+
     static func message(for error: Error) -> String {
         if let apiError = error as? APIError,
            case let .badStatus(status) = apiError {

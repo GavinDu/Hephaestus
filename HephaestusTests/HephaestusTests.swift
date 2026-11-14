@@ -109,6 +109,14 @@ struct HephaestusTests {
             #expect(!shown.contains("Bearer"))
             #expect(!shown.contains("500"))
         }
+        #expect(CreatorStudioErrorPresentation.mustRevokeVisibleProjects(
+            for: APIError.badStatus(401)))
+        #expect(CreatorStudioErrorPresentation.mustRevokeVisibleProjects(
+            for: APIError.badStatus(403)))
+        #expect(!CreatorStudioErrorPresentation.mustRevokeVisibleProjects(
+            for: APIError.badStatus(404)))
+        #expect(!CreatorStudioErrorPresentation.mustRevokeVisibleProjects(
+            for: URLError(.notConnectedToInternet)))
         #expect(CreatorStudioErrorPresentation.message(
             for: APIError.badStatus(401)).contains("expired"))
         #expect(CreatorStudioErrorPresentation.message(
