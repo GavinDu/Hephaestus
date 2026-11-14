@@ -271,6 +271,28 @@ def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False,
         if first is not None and first == last:
             raise ValueError("iPad Library portrait/landscape: duplicate decoded screenshot pixels")
     if require_ipad_arcade_features:
+        # Compare each feature attachment to an original full-screen capture
+        # from this *same native test run*. An app-window crop can have a valid
+        # PNG CRC, genuine app pixels and correct EXIF orientation while still
+        # hiding clipped buttons or an absent sidebar. The Library reference
+        # is the actual XCUIScreen capture when required; otherwise use the
+        # already-required feed full-screen landscape/portrait references.
+        references = {
+            "portrait": (IPAD_LIBRARY_PORTRAIT if require_ipad_library
+                         else PORTRAIT_PRIMARY[0]),
+            "landscape": (IPAD_LIBRARY_LANDSCAPE if require_ipad_library
+                          else LANDSCAPE_PRIMARY[0]),
+        }
+        for feature_name, expected_orientation in IPAD_ARCADE_FEATURES.items():
+            reference = validated[references[expected_orientation]]
+            feature = validated[feature_name]
+            dims = (feature["display_width"], feature["display_height"])
+            full_screen = (reference["display_width"], reference["display_height"])
+            if dims != full_screen:
+                raise ValueError(
+                    f"{feature_name}: feature screenshot dimensions {dims} "
+                    f"do not match real {expected_orientation} full-screen "
+                    f"reference {full_screen}")
         # EXIF changes or recompression cannot make a reused portrait frame
         # count as proof of the landscape UI. Do not assume that distinct
         # pixels prove visual quality; a reviewer must inspect originals.
