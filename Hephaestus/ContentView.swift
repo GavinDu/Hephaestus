@@ -159,7 +159,8 @@ struct ContentView: View {
     private func destination(for section: AppSection) -> some View {
         switch section {
         case .discover:
-            DiscoverView(onOpenLibrary: { navigate(to: .library) })
+            DiscoverView(onOpenLibrary: { navigate(to: .library) },
+                         onOpenProfile: { navigate(to: .profile) })
         case .create:
             CreateView(onOpenProfile: { navigate(to: .profile) })
         case .studio:
