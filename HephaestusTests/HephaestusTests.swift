@@ -1729,3 +1729,44 @@ struct HephaestusTests {
     unexpected["debug"] = "unexpected"
     #expect(PlayerNativeMetricPayload.parse(unexpected) == nil)
 }
+
+
+@Test func nativeMetricRejectsBooleanNSNumberFields() {
+    // WebKit's NSNumber bridge can cast a CFBoolean(true) to Int(1).
+    // Schema, sequence and millisecond fields must reject Boolean payloads
+    // before a malformed high-sequence event advances any native metric gate.
+    #expect(PlayerNativeMetricPayload.strictInt(NSNumber(value: true)) == nil)
+    #expect(PlayerNativeMetricPayload.strictInt(NSNumber(value: false)) == nil)
+    #expect(PlayerNativeMetricPayload.strictInt(NSNumber(value: 1)) == 1)
+    #expect(PlayerNativeMetricPayload.strictInt(NSNumber(value: 1.0)) == 1)
+
+    let scene: [String: Any] = [
+        "schema": 1, "type": "player_metric",
+        "sessionId": "test-session", "gameId": "game-1",
+        "metric": "first_scene_render_submit", "sequence": 5, "ms": 12
+    ]
+    #expect(PlayerNativeMetricPayload.parse(scene) != nil)
+    for field in ["schema", "sequence", "ms"] {
+        var invalid = scene
+        invalid[field] = NSNumber(value: true)
+        #expect(PlayerNativeMetricPayload.parse(invalid) == nil)
+    }
+
+    var input = scene
+    input["metric"] = "first_input"
+    input["ms"] = NSNumber(value: true)
+    #expect(PlayerNativeMetricPayload.parse(input) == nil)
+
+    var perf = scene
+    perf.removeValue(forKey: "ms")
+    perf["metric"] = "perf_window"
+    perf["frameTimeP95Ms"] = 16
+    perf["frameTimeAvgMs"] = 10
+    perf["frameCount"] = 60
+    #expect(PlayerNativeMetricPayload.parse(perf) != nil)
+    for field in ["frameTimeP95Ms", "frameTimeAvgMs", "frameCount"] {
+        var invalid = perf
+        invalid[field] = NSNumber(value: true)
+        #expect(PlayerNativeMetricPayload.parse(invalid) == nil)
+    }
+}
