@@ -12,6 +12,24 @@ import Testing
 // App-level tests will regrow around the WebView player and the
 // creation flow.
 struct HephaestusTests {
+    @Test func arcadePulseEarlyLibraryHintRequiresCurrentEmptyTransport() {
+        #expect(FeedSlowLoadingPolicy.canShowLibrary(
+            isLoading: true, hasGames: false,
+            ownsRequest: true, matchesScope: true))
+        #expect(!FeedSlowLoadingPolicy.canShowLibrary(
+            isLoading: false, hasGames: false,
+            ownsRequest: true, matchesScope: true))
+        #expect(!FeedSlowLoadingPolicy.canShowLibrary(
+            isLoading: true, hasGames: true,
+            ownsRequest: true, matchesScope: true))
+        #expect(!FeedSlowLoadingPolicy.canShowLibrary(
+            isLoading: true, hasGames: false,
+            ownsRequest: false, matchesScope: true))
+        #expect(!FeedSlowLoadingPolicy.canShowLibrary(
+            isLoading: true, hasGames: false,
+            ownsRequest: true, matchesScope: false))
+    }
+
     @Test func arcadePulseLibrarySavedCountNeverInventsZeroBeforeConfirmedGet() {
         // Current-user/current-credential and successful GET are required:
         // an empty fail-closed array must not be announced as zero saves.
