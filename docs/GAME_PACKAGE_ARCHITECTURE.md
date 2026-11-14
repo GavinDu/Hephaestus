@@ -6,7 +6,7 @@ Hephaestus is the social app; Game Inventory is the creation and publishing syst
 
 - Inventory service: creator inputs, AI pipeline, asset provenance, GameSpec, Game IR, validation, immutable versions, moderation, visibility and package delivery.
 - Hephaestus: capture/import UI, creator flow, feed, profiles, play, share, remix, reporting/blocking, permissions and native application lifecycle.
-- Runtime: the current PixiJS + Rapier interpreter/renderer served by the backend and hosted in a bridgeless iOS `WKWebView`. It exposes no native API bridge to game content.
+- Runtime: the installed PixiJS + Rapier interpreter/renderer served by the trusted backend and hosted in a scoped iOS `WKWebView`. Its narrow result/telemetry `WKScriptMessageHandler` is not a general-purpose native command API and must never accept arbitrary creator-executable code.
 
 Backend: https://github.com/GavinDu/html5-game-generator  
 Contract: [Game Package / Game IR v1](https://github.com/GavinDu/html5-game-generator/blob/main/docs/game-package-ir-v1.md).  
