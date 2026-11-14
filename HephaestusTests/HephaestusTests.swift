@@ -550,6 +550,23 @@ struct HephaestusTests {
         activeGameID: "a", displayedGameID: "a", expectedGameID: "b"))
     #expect(FeedPreviewPolicy.hasDisplayReadyClip(
         activeGameID: "a", displayedGameID: "a", expectedGameID: "a"))
+    // Even if a new asset belongs to the same title/game, stale first-frame
+    // callbacks from a prior version or detached AVPlayerLayer must not win.
+    #expect(FeedPreviewPolicy.acceptsFrameCallback(
+        activeGameID: "a", generation: 7,
+        callbackGameID: "a", callbackGeneration: 7))
+    #expect(!FeedPreviewPolicy.acceptsFrameCallback(
+        activeGameID: "a", generation: 8,
+        callbackGameID: "a", callbackGeneration: 7))
+    #expect(!FeedPreviewPolicy.acceptsFrameCallback(
+        activeGameID: "b", generation: 8,
+        callbackGameID: "a", callbackGeneration: 8))
+    #expect(!FeedPreviewPolicy.acceptsFrameCallback(
+        activeGameID: nil, generation: 8,
+        callbackGameID: "a", callbackGeneration: 8))
+    #expect(!FeedPreviewPolicy.acceptsFrameCallback(
+        activeGameID: "", generation: 8,
+        callbackGameID: "", callbackGeneration: 8))
 }
 
 @Test func settledFeedPreviewReusesOnlyTheExactVersionedClip() {
