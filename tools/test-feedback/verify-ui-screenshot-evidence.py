@@ -35,6 +35,27 @@ PORTRAIT_PRIMARY = (
 IPAD_LIBRARY_PORTRAIT = "arcade-pulse-library-ipad-portrait"
 IPAD_LIBRARY_LANDSCAPE = "arcade-pulse-library-ipad-landscape"
 
+# The iPad evaluator already exercises these real native interaction states.
+# Opt in only on that workflow: the iPhone player smoke and limited fixture
+# suites must not pretend to capture an iPad Create or Studio screen.
+# Every named capture must come from XCUIScreen, not a design concept image.
+IPAD_ARCADE_FEATURES = {
+    "arcade-pulse-create-entry-ipad": "portrait",
+    "arcade-pulse-ipad-creator-studio-signed-out-portrait": "portrait",
+    "arcade-pulse-ipad-creator-studio-signed-out-landscape": "landscape",
+    "arcade-pulse-ipad-studio-accessibility-large-text-landscape": "landscape",
+    "arcade-pulse-feed-preferences-save-failed": "portrait",
+    "arcade-pulse-feed-preferences-reset-failed": "portrait",
+    "arcade-pulse-feed-unavailable-recovery-portrait": "portrait",
+    "arcade-pulse-feed-unavailable-recovery-ipad-landscape": "landscape",
+}
+IPAD_ARCADE_ORIENTATION_PAIRS = (
+    ("arcade-pulse-ipad-creator-studio-signed-out-portrait",
+     "arcade-pulse-ipad-creator-studio-signed-out-landscape"),
+    ("arcade-pulse-feed-unavailable-recovery-portrait",
+     "arcade-pulse-feed-unavailable-recovery-ipad-landscape"),
+)
+
 
 def tiff_orientation(data):
     """Return TIFF orientation from a PNG eXIf chunk; 1 if unspecified."""
@@ -190,14 +211,18 @@ def exported_attachment(attachments, logical_name):
     return name
 
 
-def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False):
+def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False,
+                    require_ipad_arcade_features=False):
     manifest = json.loads((attachments_dir / "manifest.json").read_text())
     attachments = [x for entry in manifest for x in entry.get("attachments", [])]
     validated = {}
     output_dir.mkdir(parents=True, exist_ok=True)
     library_names = ((IPAD_LIBRARY_PORTRAIT, IPAD_LIBRARY_LANDSCAPE)
                      if require_ipad_library else ())
-    for logical in LANDSCAPE_PRIMARY + LANDSCAPE_DIAGNOSTIC + PORTRAIT_PRIMARY + library_names:
+    feature_names = (tuple(IPAD_ARCADE_FEATURES)
+                     if require_ipad_arcade_features else ())
+    for logical in (LANDSCAPE_PRIMARY + LANDSCAPE_DIAGNOSTIC +
+                    PORTRAIT_PRIMARY + library_names + feature_names):
         src = attachments_dir / exported_attachment(attachments, logical)
         if not src.is_file():
             raise ValueError(f"{logical}: missing raw screenshot PNG")
@@ -207,7 +232,14 @@ def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False):
             raise ValueError(f"{logical}: full-screen capture does not display in landscape")
         if logical in PORTRAIT_PRIMARY + (IPAD_LIBRARY_PORTRAIT,) and display_landscape:
             raise ValueError(f"{logical}: portrait evidence displays in landscape")
-        preferred = logical in LANDSCAPE_PRIMARY + PORTRAIT_PRIMARY + library_names
+        if logical in IPAD_ARCADE_FEATURES:
+            expected = IPAD_ARCADE_FEATURES[logical]
+            if expected == "landscape" and not display_landscape:
+                raise ValueError(f"{logical}: full-screen capture does not display in landscape")
+            if expected == "portrait" and display_landscape:
+                raise ValueError(f"{logical}: full-screen capture does not display in portrait")
+        preferred = logical in (LANDSCAPE_PRIMARY + PORTRAIT_PRIMARY +
+                                library_names + feature_names)
         target = output_dir / (logical + ".raw.png")
         shutil.copyfile(src, target)
         validated[logical] = {**info, "file": target.name,
@@ -238,6 +270,21 @@ def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False):
         last = landscape["raster_scanlines_sha256"]
         if first is not None and first == last:
             raise ValueError("iPad Library portrait/landscape: duplicate decoded screenshot pixels")
+    if require_ipad_arcade_features:
+        # EXIF changes or recompression cannot make a reused portrait frame
+        # count as proof of the landscape UI. Do not assume that distinct
+        # pixels prove visual quality; a reviewer must inspect originals.
+        for portrait_name, landscape_name in IPAD_ARCADE_ORIENTATION_PAIRS:
+            portrait = validated[portrait_name]
+            landscape = validated[landscape_name]
+            if portrait["sha256"] == landscape["sha256"]:
+                raise ValueError(
+                    f"{portrait_name} and {landscape_name}: duplicate raw screenshot bytes")
+            first = portrait["raster_scanlines_sha256"]
+            last = landscape["raster_scanlines_sha256"]
+            if first is not None and first == last:
+                raise ValueError(
+                    f"{portrait_name} and {landscape_name}: duplicate decoded screenshot pixels")
     report = {
         "status": "screen-orientation-verified",
         "capture_source": "native XCTest xcresulttool export attachments",
@@ -246,6 +293,8 @@ def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False):
         "app_window_landscape_diagnostic_only": list(LANDSCAPE_DIAGNOSTIC),
         "verified": validated,
         "ipad_library_required": require_ipad_library,
+        "ipad_arcade_features_required": require_ipad_arcade_features,
+        "ipad_arcade_feature_names": list(feature_names),
         "media_ready": False,
         "note": "A correct screenshot orientation cannot establish an approved gameplay clip or poster.",
     }
@@ -259,10 +308,14 @@ def main():
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--require-ipad-library", action="store_true",
                         help="Fail if real iPad Library portrait/landscape screenshots are missing")
+    parser.add_argument("--require-ipad-arcade-features", action="store_true",
+                        help="Require real iPad Create, Studio, Preferences and recovery screenshot captures")
     args = parser.parse_args()
     try:
-        report = verify_and_copy(args.input, args.out,
-                                 require_ipad_library=args.require_ipad_library)
+        report = verify_and_copy(
+            args.input, args.out,
+            require_ipad_library=args.require_ipad_library,
+            require_ipad_arcade_features=args.require_ipad_arcade_features)
         print(json.dumps({"status": report["status"], "verified_count": len(report["verified"])}))
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
         parser.exit(1, f"UI screenshot evidence failed: {error}\n")
