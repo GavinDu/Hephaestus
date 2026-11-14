@@ -21,6 +21,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Validate real-public-fixture preflight logic offline
+        run: python3 -m unittest discover -s tools/ci -p "test_*.py" -v
       - name: Test native XCTest feedback parser
         run: python3 -m unittest discover -s tools/test-feedback -p "test_*.py" -v
       - name: List Xcode schemes
@@ -108,6 +110,11 @@ jobs:
             [ "$code" = "200" ] && break
             sleep 5
           done
+          # HTTP 200 alone is not a real game fixture. Fail explicitly if no
+          # published approved owner-linked game has a retrievable IR package.
+          # Never inject a test game or make player smoke optional.
+          python3 tools/ci/public_fixture_preflight.py \
+            --feed-url https://html-5-game-generator.replit.app/v1/feed
           # Boot the device ourselves and wait for it, then forbid
           # parallel-testing clones: across four runs the failure was
           # never inside the test — xcodebuild's "Clone 1 of iPhone 17
@@ -198,6 +205,10 @@ jobs:
             [ "$code" = "200" ] && break
             sleep 5
           done
+      - name: Verify real public game fixture before iPad evaluator
+        run: |
+          python3 tools/ci/public_fixture_preflight.py \
+            --feed-url https://html-5-game-generator.replit.app/v1/feed
       - name: Boot iPad simulator
         run: |
           xcrun simctl boot "${{ steps.ipad.outputs.udid }}" || true
