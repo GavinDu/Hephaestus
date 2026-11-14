@@ -1290,7 +1290,7 @@ final class PlayerSmokeTests: XCTestCase {
                                         "Large-type creator entry must remain a real 44pt target.")
             XCTAssertLessThanOrEqual(creator.frame.maxY, play.frame.minY + 1,
                                      "Large-type creator identity must not obscure Play.")
-            print("UI_EVALUATOR_CREATOR_LARGE_TEXT source=real_creator frame=\\(creator.frame)")
+            print("UI_EVALUATOR_CREATOR_LARGE_TEXT source=real_creator frame=" + String(describing: creator.frame))
         } else {
             print("UI_EVALUATOR_CREATOR_LARGE_TEXT source=no_hittable_creator; no fake test account")
         }
