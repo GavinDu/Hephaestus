@@ -2622,6 +2622,10 @@ private struct CommentsSheet: View {
                             Task { await submit() }
                         } label: {
                             Image(systemName: "paperplane.fill")
+                                // The actual XCTest iPhone keyboard screenshot
+                                // showed a white plane on deep orange (~2.57:1).
+                                // Black increases icon contrast above 3:1.
+                                .foregroundStyle(.black)
                                 .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.borderedProminent)
