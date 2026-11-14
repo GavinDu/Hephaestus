@@ -2147,6 +2147,40 @@ private struct CreatorProfileRequest: Identifiable {
     let id: String
 }
 
+/// Display a genuine creator request failure without disclosing transport
+/// hostnames, account tokens, TLS implementation text or private creator IDs.
+/// Failure does not imply a published creator list was successfully loaded.
+enum CreatorDiscoveryErrorPresentation {
+    static func message(for error: Error, isPagination: Bool) -> String {
+        let prefix = isPagination
+            ? "Couldn't load more creators. "
+            : "Couldn't load creators. "
+        if let apiError = error as? APIError,
+           case let .badStatus(status) = apiError {
+            switch status {
+            case 401: return prefix + "Your session may have expired. Open Profile and try again."
+            case 403: return prefix + "This request isn't permitted. Try another search."
+            case 429: return prefix + "Too many requests. Try again in a little while."
+            default: break
+            }
+        }
+        if let network = error as? URLError {
+            switch network.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                return prefix + "You're offline. Reconnect and try again."
+            case .secureConnectionFailed, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .serverCertificateUntrusted,
+                 .serverCertificateHasUnknownRoot:
+                return prefix + "A secure connection couldn't be established. Check your network."
+            case .timedOut:
+                return prefix + "The creator service is taking too long. Try again."
+            default: break
+            }
+        }
+        return prefix + "The creator service isn't available right now. Try again."
+    }
+}
+
 private struct CreatorDiscoverySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
@@ -2241,6 +2275,8 @@ private struct CreatorDiscoverySheet: View {
                             .font(.footnote)
                             .foregroundStyle(.red)
                         Button("Try again") { Task { await load(reset: true) } }
+                            .frame(minWidth: 44, minHeight: 48)
+                            .accessibilityIdentifier("creator.discovery.retry")
                     }
                 }
             }
@@ -2297,7 +2333,9 @@ private struct CreatorDiscoverySheet: View {
             nextCursor = response.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
         } catch {
             guard generation == loadGeneration else { return }
-            errorMessage = "Couldn't load creators: \(error.localizedDescription)"
+            errorMessage = CreatorDiscoveryErrorPresentation.message(
+                for: error, isPagination: !reset
+            )
         }
     }
 }
