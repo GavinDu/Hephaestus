@@ -104,10 +104,23 @@ struct ArcadePulsePlayCTA: View {
 /// Real creator name/approved avatar supplied by FeedGame; no fake avatar,
 /// follower count, or invented identity is displayed.
 struct ArcadePulseCreatorIdentity: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let name: String
     let avatarURL: String?
     let foreground: Color
     let action: () -> Void
+
+    /// A fixed one-line title made real long creator identities unreadable
+    /// to sighted users of Accessibility text sizes. Preserve a bounded
+    /// amount of visible identity without growing the feed rail indefinitely.
+    static func visibleNameLineLimit(for size: DynamicTypeSize) -> Int {
+        size.isAccessibilitySize ? 2 : 1
+    }
+
+    static func avatarDimension(for size: DynamicTypeSize) -> CGFloat {
+        size.isAccessibilitySize ? 32 : 26
+    }
 
     var body: some View {
         Button(action: action) {
@@ -127,12 +140,15 @@ struct ArcadePulseCreatorIdentity: View {
                             .resizable().scaledToFit()
                     }
                 }
-                .frame(width: 26, height: 26)
+                .frame(width: Self.avatarDimension(for: dynamicTypeSize),
+                       height: Self.avatarDimension(for: dynamicTypeSize))
                 .clipShape(Circle())
                 .accessibilityHidden(true)
                 Text(name)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
+                    .lineLimit(Self.visibleNameLineLimit(for: dynamicTypeSize))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(minHeight: ArcadePulseTheme.minimumTarget)
             .contentShape(Rectangle())
