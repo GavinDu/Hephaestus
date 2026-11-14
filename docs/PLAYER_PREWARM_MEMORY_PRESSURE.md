@@ -15,3 +15,11 @@ The production player owns **one pooled WKWebView**. It prewarms only after the 
 ## Review / validation
 
 Swift unit tests exercise unattached/attached × view-present/view-absent. Native Actions must additionally pass Xcode compilation and iPhone/iPad player smoke. This policy test does not prove OS delivery order or real-world memory reclaimed: retain #205 real iPhone/iPad 50+ open/close/swipe memory, thermal and context-loss evidence gates. This slice is safe to revert without changing package semantics.
+
+## App-background eviction — independent #277 scope
+
+The pool registers one `UIApplication.didEnterBackgroundNotification` observer lazily with its existing memory-pressure/session observers. On `MainActor` after notification delivery, it rechecks **live** pool attachment state; only an unattached speculative `WKWebView` is disposed via the same `discardUnattachedPrewarm()` ownership/nonce/lease cleanup path. A real attached player remains owned by the game sheet and must never be terminated simply because the process backgrounds. The 15-second speculative TTL is unchanged.
+
+This patch has been **rebuilt after native document-epoch PR #283 was merged** into main, preserving per-document nonce invalidation and compatible v2 bridge. Do not use old unmerged #243 or original #295 CI as evidence for this new integration SHA. The native Swift truth-table covers attachment × pooled-view presence; both exact-head iOS build/player-smoke/iPad evaluator and presentation iPhone/iPad/backend contract checks must pass before this independently closable #277 slice merges.
+
+**Not proven by CI:** real-world UIApplication/UIScene race delivery on multiwindow iPad, actual GPU/audio/texture release, 50+ on-device transitions, memory/thermal baselines or private cached content revocation. These remain #205/#279/#278 and hardware release gates. Rollback restores the preexisting TTL + memory-warning behavior without touching Game IR or result attestation.
