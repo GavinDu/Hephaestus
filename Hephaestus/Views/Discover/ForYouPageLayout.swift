@@ -12,6 +12,17 @@ enum CreatorFollowStatePolicy {
         offersFollow(viewerID: viewerID, creatorID: creatorID) &&
             !isUpdating && !needsConfirmation
     }
+
+    /// A GET started during a Follow POST is not authoritative unless it is
+    /// the explicit post-write confirmation read. Pre-POST reads are revoked
+    /// by an incremented profile revision at mutation start.
+    static func mayApplyCreatorRead(
+        requestRevision: Int, currentRevision: Int, sameViewer: Bool,
+        startedWhileMutating: Bool, isPostWriteConfirmation: Bool
+    ) -> Bool {
+        requestRevision == currentRevision && sameViewer &&
+            (!startedWhileMutating || isPostWriteConfirmation)
+    }
 }
 
 /// Independently tested creator-game row layout. Keep actual published
