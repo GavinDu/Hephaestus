@@ -120,7 +120,7 @@ class PublicFixtureTests(unittest.TestCase):
         def read_json(url):
             if url == FEED:
                 return {"games": [first, second]}
-            if "game-1" in url:
+            if url == package_url(FEED, "game-1"):
                 raise FixtureUnavailable("http_503")
             return published_package()
         result = verify_fixture(FEED, read_json)
