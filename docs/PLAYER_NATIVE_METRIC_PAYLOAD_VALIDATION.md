@@ -30,26 +30,19 @@ discarded. The risk is diagnostic/observability, not semantic scoring.
 
 ## Senior game-engine architect challenger / release limits
 
-This code is in a separate *stacked draft* on #232, itself a child of
-native #228. It must not merge on either parent's historical CI:
-merge #228 after full exact-head workflows, reconstruct/reverify #232
-on merged main and merge it, then reconstruct/reverify this PR on that
-new main. Required native workflows: Xcode build/unit, iPhone WebView
-smoke, iPad player smoke, iPad feed UI evaluator and backend
-presentation contract. Audit any added producer fields before changing
-this strict v1 contract; later schema versions must explicitly negotiate
-instead of silently accepting privileged metadata.
+PR #247 reconstructs only the native metric validation, Swift tests and this
+ADR on top of the already-merged native #228 launch reducer and #232
+verified-run callback fixes. The original cumulative draft #237 must **not**
+be merged or used as a CI substitute. This direct-from-main branch must pass
+its own exact-head iOS build/unit, iPhone smoke, iPad player/feed evaluator
+and backend presentation contract before merging. Audit any added generator
+producer fields before adjusting the strict v1 parser; future schema versions
+must negotiate explicitly, not silently accept additional native metadata.
 
-## Stacked-branch validation sequence
-
-This draft temporarily targets `main` so the complete required native
-Actions workflows can exercise the source and Swift tests before parent
-merges. Its current compare-to-main view **includes** the unmerged #228
-launch reducer and #232 verified-run callback changes. That cumulative CI
-must not be mistaken for approval of an independently integrated #237.
-When #228 and #232 are merged, the #237 branch must be reconstructed as
-a minimal three-file commit atop their merged main, rerun exact-head
-checks, and receive a final adversarial review before merging.
+The 3-file production + test implementation was compared to the original
+draft's source and matched byte-for-byte before this ADR correction. Source
+parity is not proof of runtime behavior: real iPhone/iPad stress, WebKit
+navigation-race and visual-first-frame evidence remain separate gates.
 
 The eight-document retired-session-ID cap is not cryptographic WebKit
 document provenance; v2 challenge/nonce issue #203 remains open.
