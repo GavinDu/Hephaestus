@@ -1400,6 +1400,20 @@ struct HephaestusTests {
     ))
 }
 
+@Test func playerAppBackgroundCannotEvictAttachedInteractiveGame() {
+    // Delayed didEnterBackground callbacks inspect current ownership, never
+    // a state captured at notification-post time. The same policy is used
+    // for memory warnings and preserves all current document nonce leases.
+    #expect(PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: false, hasPooledView: true))
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: true, hasPooledView: true))
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: false, hasPooledView: false))
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: true, hasPooledView: false))
+}
+
 // Saved games are owner-private even when the UI also has on-device recent
 // entries. No response from the old user or an old retry may restore titles.
 @Test func arcadePulseLibrarySavedResponsesAreAccountBound() {
