@@ -137,6 +137,11 @@ jobs:
             exit 1
           fi
 
+      - name: Verify real public game fixture before iPhone player smoke
+        shell: bash
+        run: |
+          python3 tools/ci/public_fixture_preflight.py --feed-url "$BACKEND_HEALTH_URL"
+
       - name: Boot iPhone simulator
         id: iphone
         shell: bash
@@ -211,6 +216,24 @@ jobs:
     steps:
       - name: Check out iOS app
         uses: actions/checkout@v4
+
+      - name: Verify real public game fixture before iPad player smoke
+        shell: bash
+        run: |
+          # This job does not share the iPhone job's warmed backend. A few
+          # bounded live reads allow cold starts, never substitute fixture data.
+          ready=0
+          for attempt in $(seq 1 6); do
+            if python3 tools/ci/public_fixture_preflight.py --feed-url "$BACKEND_HEALTH_URL"; then
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$ready" -ne 1 ]]; then
+            echo "::error title=public-game-fixture::No approved owner-linked public game/package is available"
+            exit 1
+          fi
 
       - name: Select an available iPad simulator
         id: ipad
