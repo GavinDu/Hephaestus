@@ -1,0 +1,20 @@
+# Native real published feed/game fixture prerequisite
+
+Parent [Runtime Epic #202](https://github.com/GavinDu/Hephaestus/issues/202), persistent live creator and game fixture [#288](https://github.com/GavinDu/Hephaestus/issues/288), independently scoped smoke prerequisite [#345](https://github.com/GavinDu/Hephaestus/issues/345).
+
+## Why HTTP 200 is not gameplay readiness
+
+The mandatory `ios.yml` and `player-presentation.yml` simulator workflows previously warmed `/v1/feed` until HTTP 200, then treated the endpoint as ready. However a transport-success response may contain zero games or ownerless content. Live iPhone/iPad tests `testDiscoverLaunchesPlayer`, `testArcadePulseSocialWriteFailureDoesNotHideLiveGame`, and creator profile assertions require a **real playable owner-linked feed post**, not merely a web server answering. A fallback Library or a fabricated game cannot turn those tests green.
+
+The dependency-free `tools/test-feedback/verify-live-game-fixture.py` checks the **public deployed** feed over HTTPS using bounded response size (2 MB), timeouts, attempts and redirect-denial. It requires a real nonblank safe `game_id` and `owner_id` plus `status:ready`, `visibility:public`, non-quarantined, and moderation **not pending/rejected**. The existing backend `canDeliver` still supports older shipped inventory with an unset moderation field; full independently approved test-publisher provisioning remains #288. For up to five real eligible entries, it independently fetches the matching same-origin `/v1/games/{game_id}/package` and requires the same `gameId` and nonempty `ir`. No credentials, private player data or full feed JSON are logged.
+
+A missing/empty feed, missing owner, rejected/moderated/nonpublic game, bad JSON, cross-origin redirect, package failure or mismatched package now fails CI **before any long simulator smoke run** with `LIVE_FIXTURE_NOT_READY` and a specific `::error` annotation. This is a *new hard gate*, not a warning. Original Xcode/player-smoke/iPad evaluator and real screenshot assertions remain required. On healthy public fixtures the existing tests still run, and this preflight does not claim that the remote service remains healthy throughout the run.
+
+### Independent tests and review
+
+- Offline Python unittest covers eligible game/package success, invalid privacy/status/quarantine/owner/ID, missing/empty feed, package mismatch and legacy unset moderation. The existing `ios.yml` Xcode job already runs `python3 -m unittest discover -s tools/test-feedback -p 'test_*.py'`.
+- Both native iPhone and iPad CI workflow paths run the same preflight script. Do not silently bypass the gate on a failing request. No Replit workflow/model or synthetic game seeding is used.
+- Senior game-engine architect challenge: Does preflight match deployed `canDeliver` and the actual runtime's package? Are HTTP redirects, malformed/huge inputs and role leakage bounded? Does the real publisher have a retrievable profile and a live game throughout the test? The latter remains a **separate P0 fixture provisioning task** #288.
+- Merge #345 only after **all seven exact-head native Xcode/unit, player smoke, iPad evaluator and backend/presentation jobs pass**. The new preflight must not be treated as proof of deterministic game execution, first GPU compositor frame, WebKit memory/thermal, trust score or physical iPhone/iPad hardware. These remain open in Epic #202.
+
+Rollback reverts only the preflight module/tests, workflow prerequisite and this documentation.
