@@ -941,9 +941,13 @@ struct DiscoverView: View {
         let requestedScope = selectedFeed
         // Native tests can stall only the HTTP transport, never inject a
         // success response, game card, creator, screenshot or media asset.
+        #if DEBUG
         let testingStalledTransport = ProcessInfo.processInfo.arguments.contains(
             "--ui-test-stalled-feed"
         )
+        #else
+        let testingStalledTransport = false
+        #endif
         let (generation, request) = feedRequestCoordinator.begin {
             if testingStalledTransport {
                 try await Task.sleep(for: .seconds(120))
