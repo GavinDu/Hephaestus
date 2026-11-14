@@ -102,7 +102,7 @@ struct HephaestusTests {
         let raw = NSError(domain: "private-backend", code: 42, userInfo: [
             NSLocalizedDescriptionKey: "Bearer owner@example.test https://private.invalid/v1/comments"
         ])
-        for action: CommentsErrorPresentation.Action in [.load, .post, .delete] {
+        for action in [CommentsErrorPresentation.Action.load, .post, .delete] {
             let shown = CommentsErrorPresentation.message(
                 for: raw, action: action, signedIn: true)
             #expect(!shown.contains("owner@example.test"))
