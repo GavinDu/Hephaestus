@@ -39,6 +39,18 @@ final class FeedRequestCoordinator {
         guard isCurrent(requestGeneration) else { return }
         activeRequest = nil
     }
+
+    /// Expire only the presently owned request. Revoke its generation BEFORE
+    /// canceling the transport; a late task/cancellation callback cannot
+    /// replace a newer Retry result or re-hide the recovery actions.
+    @discardableResult
+    func expireIfCurrent(_ requestGeneration: Int) -> Bool {
+        guard isCurrent(requestGeneration) else { return false }
+        generation += 1
+        activeRequest?.cancel()
+        activeRequest = nil
+        return true
+    }
 }
 
 /// Keep the native search drawer out of compact iPhone landscape's tiny
@@ -927,17 +939,42 @@ struct DiscoverView: View {
 
     private func load() async {
         let requestedScope = selectedFeed
+        // Native tests can stall only the HTTP transport, never inject a
+        // success response, game card, creator, screenshot or media asset.
+        let testingStalledTransport = ProcessInfo.processInfo.arguments.contains(
+            "--ui-test-stalled-feed"
+        )
         let (generation, request) = feedRequestCoordinator.begin {
-            try await BackendAPI.shared.fetchFeed(scope: requestedScope)
+            if testingStalledTransport {
+                try await Task.sleep(for: .seconds(120))
+                throw URLError(.timedOut)
+            }
+            return try await BackendAPI.shared.fetchFeed(scope: requestedScope)
         }
         isLoading = true
+        errorMessage = nil
+        // Real production feeds have a 45s bounded loading budget. A
+        // deliberately stalled native UITest uses 3s to prove the identical
+        // recovery state without consuming the whole macOS test budget.
+        let watchdog = Task { @MainActor in
+            do {
+                try await Task.sleep(for:
+                    testingStalledTransport ? .seconds(3) : .seconds(45))
+            } catch { return }
+            guard isLoading, games.isEmpty,
+                  requestedScope == selectedFeed,
+                  feedRequestCoordinator.expireIfCurrent(generation) else { return }
+            isLoading = false
+            errorMessage =
+                "The game feed is taking too long to load. Try again or open Library."
+        }
         defer {
+            watchdog.cancel()
             if feedRequestCoordinator.isCurrent(generation) {
                 isLoading = false
                 feedRequestCoordinator.finishIfCurrent(generation)
             }
         }
-        errorMessage = nil
         do {
             let loadedGames = try await withTaskCancellationHandler {
                 try await request.value

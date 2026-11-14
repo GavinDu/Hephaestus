@@ -2018,3 +2018,30 @@ struct HephaestusTests {
         #expect(PlayerNativeMetricPayload.parse(invalid) == nil)
     }
 }
+
+ 
+// A genuine transport watchdog must retire its previous request before
+// callback cancellation. A later user Retry keeps ownership of the screen.
+@Test @MainActor func arcadePulseFeedWatchdogExpiresOnlyItsCurrentGeneration() {
+    let coordinator = FeedRequestCoordinator()
+    let old = coordinator.begin {
+        try await Task.sleep(for: .seconds(30))
+        throw URLError(.timedOut)
+    }
+    #expect(coordinator.isCurrent(old.generation))
+    #expect(coordinator.expireIfCurrent(old.generation))
+    #expect(!coordinator.isCurrent(old.generation))
+    #expect(!coordinator.expireIfCurrent(old.generation))
+
+    let fresh = coordinator.begin {
+        try await Task.sleep(for: .seconds(30))
+        throw URLError(.timedOut)
+    }
+    #expect(coordinator.isCurrent(fresh.generation))
+    #expect(!coordinator.expireIfCurrent(old.generation))
+    #expect(coordinator.isCurrent(fresh.generation))
+    coordinator.finishIfCurrent(old.generation)
+    #expect(coordinator.isCurrent(fresh.generation))
+    fresh.request.cancel()
+    coordinator.finishIfCurrent(fresh.generation)
+}

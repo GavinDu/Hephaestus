@@ -378,6 +378,42 @@ final class PlayerSmokeTests: XCTestCase {
         add(after)
     }
 
+    /// Stall the actual public-feed transport only; never inject or approve
+    /// a fake game. The production watchdog is 45s; this opt-in native test
+    /// uses 3s and must expose the same truthful Retry/Library recovery.
+    @MainActor
+    func testArcadePulseStalledTransportReachesHonestRecovery() throws {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-stalled-feed")
+        app.launch()
+        let title = app.staticTexts["Couldn't load the feed"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 20),
+                      "An unfinished public feed must end in the genuine bounded recovery, not a permanent skeleton.")
+        let retry = app.buttons["feed.error.retry"].firstMatch
+        let library = app.buttons["feed.error.library"].firstMatch
+        XCTAssertTrue(retry.exists && retry.isHittable)
+        XCTAssertTrue(library.exists && library.isHittable)
+        XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
+                       "A simulated timeout must never fabricate playable content.")
+        let timeout = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        timeout.name = isPad ? "arcade-pulse-stalled-feed-ipad-landscape" :
+                              "arcade-pulse-stalled-feed-iphone-portrait"
+        timeout.lifetime = .keepAlways
+        add(timeout)
+        // Retry starts a NEW genuine (in this test: deliberately stalled)
+        // transport. It must not be canceled by the old watchdog generation.
+        retry.tap()
+        XCTAssertTrue(title.waitForExistence(timeout: 20),
+                      "A new attempt must independently reach its own recovery without mock success.")
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// This isolated error-state screenshot exercises real navigation without
     /// pretending the production feed returned a playable game. The separate
     /// testDiscoverLaunchesPlayer still requires the live backend to work.
