@@ -739,6 +739,25 @@ enum PlayerSessionCachePolicy {
     }
 }
 
+/// Player-only WebKit isolation boundary. Native Keychain credentials do
+/// not imply WebKit's default persistent cookies/asset cache are safe across
+/// user changes. Warm and interactive player reuse one in-memory store only
+/// within their current native credential epoch.
+@MainActor
+enum PlayerWebKitSessionStoragePolicy {
+    static func newSessionStore() -> WKWebsiteDataStore {
+        WKWebsiteDataStore.nonPersistent()
+    }
+
+    static func configuration(processPool: WKProcessPool,
+                              dataStore: WKWebsiteDataStore) -> WKWebViewConfiguration {
+        let configuration = WKWebViewConfiguration()
+        configuration.processPool = processPool
+        configuration.websiteDataStore = dataStore
+        return configuration
+    }
+}
+
 // MARK: - Single pooled player web view
 //
 // Prewarming starts only after an explicit Play press begins. The same
@@ -747,7 +766,8 @@ enum PlayerSessionCachePolicy {
 // to an empty document to stop the game runtime while retaining the WebView.
 @MainActor
 enum PlayerWebViewPool {
-    static let processPool = WKProcessPool()
+    private static var processPool = WKProcessPool()
+    private static var playerWebsiteDataStore = PlayerWebKitSessionStoragePolicy.newSessionStore()
     private static var pooledView: WKWebView?
     private static var currentURL: URL?
     private static var loadedURL: URL?
@@ -994,6 +1014,10 @@ enum PlayerWebViewPool {
         isAttached = false
         documentEpochGate.invalidate()
         sessionFingerprint = credentialFingerprint()
+        // Never let a newly created player WebView share persistent data or
+        // a WebContent process pool with the retired Keychain identity.
+        processPool = WKProcessPool()
+        playerWebsiteDataStore = PlayerWebKitSessionStoragePolicy.newSessionStore()
         stale?.navigationDelegate = nil
         stale?.stopLoading()
         stale?.loadHTMLString("", baseURL: nil)
@@ -1017,10 +1041,11 @@ enum PlayerWebViewPool {
     }
 
     private static func makeWebView() -> WKWebView {
-        let configuration = WKWebViewConfiguration()
+        let configuration = PlayerWebKitSessionStoragePolicy.configuration(
+            processPool: processPool, dataStore: playerWebsiteDataStore
+        )
         // The only handler is attached per presentation and accepts one
         // validated run-result notification; there is no script control API.
-        configuration.processPool = processPool
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.applicationNameForUserAgent = "HephaestusPlayer/1.1"

@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import SwiftUI
+import WebKit
 import Testing
 @testable import Hephaestus
 
@@ -1373,6 +1374,31 @@ struct HephaestusTests {
     #expect(!mayEvict(true, false))
 }
 
+
+@MainActor
+@Test func playerWebKitSessionStoresAreNonPersistentAndDistinct() {
+    // A player-only cold/warm game never uses the app's default disk store.
+    // Different Keychain credential epochs allocate different data stores.
+    let first = PlayerWebKitSessionStoragePolicy.newSessionStore()
+    let second = PlayerWebKitSessionStoragePolicy.newSessionStore()
+    #expect(!first.isPersistent)
+    #expect(!second.isPersistent)
+    #expect(first !== second)
+
+    let process = WKProcessPool()
+    let configuration = PlayerWebKitSessionStoragePolicy.configuration(
+        processPool: process, dataStore: first
+    )
+    #expect(configuration.websiteDataStore === first)
+    #expect(!configuration.websiteDataStore.isPersistent)
+    #expect(configuration.processPool === process)
+    #expect(PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: "prior-user", currentFingerprint: "next-user"
+    ))
+    #expect(!PlayerSessionCachePolicy.shouldPurge(
+        cachedFingerprint: "same-user", currentFingerprint: "same-user"
+    ))
+}
 
 // Saved games are owner-private even when the UI also has on-device recent
 // entries. No response from the old user or an old retry may restore titles.
