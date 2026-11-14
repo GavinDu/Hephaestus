@@ -577,6 +577,27 @@ enum PlayerSessionCachePolicy {
     }
 }
 
+/// Isolated, in-memory WebKit data store for the *player only*. The
+/// system's default persistent store can retain cookies, cache entries and
+/// website data across native account changes even after a WKWebView is
+/// removed. Do not clear unrelated Safari or other app WebKit data.
+@MainActor
+enum PlayerWebKitSessionStoragePolicy {
+    static func newSessionStore() -> WKWebsiteDataStore {
+        WKWebsiteDataStore.nonPersistent()
+    }
+
+    // Single tested construction path: a caller cannot accidentally use
+    // WKWebViewConfiguration's default disk-persistent data store.
+    static func configuration(processPool: WKProcessPool,
+                              dataStore: WKWebsiteDataStore) -> WKWebViewConfiguration {
+        let configuration = WKWebViewConfiguration()
+        configuration.processPool = processPool
+        configuration.websiteDataStore = dataStore
+        return configuration
+    }
+}
+
 // MARK: - Single pooled player web view
 //
 // Prewarming starts only after an explicit Play press begins. The same
@@ -585,7 +606,10 @@ enum PlayerSessionCachePolicy {
 // to an empty document to stop the game runtime while retaining the WebView.
 @MainActor
 enum PlayerWebViewPool {
-    static let processPool = WKProcessPool()
+    private static var processPool = WKProcessPool()
+    // Reusable within a single Keychain credential epoch; never shared with
+    // the default disk-persistent WebKit store or a later signed-in identity.
+    private static var playerWebsiteDataStore = PlayerWebKitSessionStoragePolicy.newSessionStore()
     private static var pooledView: WKWebView?
     private static var currentURL: URL?
     private static var loadedURL: URL?
@@ -785,6 +809,12 @@ enum PlayerWebViewPool {
         loadedURL = nil
         isAttached = false
         sessionFingerprint = credentialFingerprint()
+        // Rotate both process and in-memory website storage on logout,
+        // account switch or token replacement; old pages may still be alive
+        // momentarily, but newly created player views cannot reuse their
+        // site storage, cookies or WebContent process pool.
+        processPool = WKProcessPool()
+        playerWebsiteDataStore = PlayerWebKitSessionStoragePolicy.newSessionStore()
         stale?.navigationDelegate = nil
         stale?.stopLoading()
         stale?.loadHTMLString("", baseURL: nil)
@@ -807,10 +837,11 @@ enum PlayerWebViewPool {
     }
 
     private static func makeWebView() -> WKWebView {
-        let configuration = WKWebViewConfiguration()
+        let configuration = PlayerWebKitSessionStoragePolicy.configuration(
+            processPool: processPool, dataStore: playerWebsiteDataStore
+        )
         // The only handler is attached per presentation and accepts one
         // validated run-result notification; there is no script control API.
-        configuration.processPool = processPool
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.applicationNameForUserAgent = "HephaestusPlayer/1.1"
