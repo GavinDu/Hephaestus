@@ -1407,9 +1407,17 @@ final class PlayerSmokeTests: XCTestCase {
             let available = options.contains { $0.waitForExistence(timeout: 5) }
             XCTAssertTrue(available, "Large-text Actions menu must expose \(name).")
         }
-        // Dismiss the real native menu without mutating a remote Like/Save
-        // state or starting gameplay; preserve the settled feed screenshot.
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.15)).tap()
+        // Explicitly dismiss the mounted accessible actions sheet instead
+        // of tapping an arbitrary coordinate that may hit an actual menu
+        // action at XXXL. A new opening must be independently observable.
+        let closeActions = app.buttons["feed.actions.dismiss"].firstMatch
+        XCTAssertTrue(closeActions.waitForExistence(timeout: 5),
+                      "Accessible actions must provide a real Done control.")
+        closeActions.tap()
+        let dismissedActions = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: closeActions)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissedActions], timeout: 8), .completed,
+                       "Native actions sheet must fully dismiss before reopening.")
 
         // The previous screenshot had a Play button that remained tappable
         // while oversized decorative hints, title, and the bottom tab bar
@@ -1436,11 +1444,21 @@ final class PlayerSmokeTests: XCTestCase {
         // A ShareLink mounted inside a disappearing Menu may never display
         // its sheet. Do not fake a system share screenshot or silently treat
         // the mere presence of the menu item as functional acceptance.
+        XCTAssertTrue(actions.isHittable,
+                      "Game actions must remain reachable after the first sheet dismisses.")
         actions.tap()
         let shareEntry = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label == %@", "Share game")).firstMatch
-        XCTAssertTrue(shareEntry.waitForExistence(timeout: 5))
+        XCTAssertTrue(shareEntry.waitForExistence(timeout: 8),
+                      "The second genuine native actions presentation must expose Share game.")
         shareEntry.tap()
+        // The system sheet must be attached to the mounted feed page, never
+        // to the just-dismissed actions sheet or a temporary Menu controller.
+        let shareActionsGone = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.buttons["feed.actions.dismiss"].firstMatch)
+        XCTAssertEqual(XCTWaiter.wait(for: [shareActionsGone], timeout: 8), .completed,
+                       "Actions must dismiss before presenting real system sharing.")
         // An item visible inside the Menu does not prove the share UI works.
         // Require an actual system sheet, iPad popover or activity-list view.
         let systemSheet = app.sheets.firstMatch
