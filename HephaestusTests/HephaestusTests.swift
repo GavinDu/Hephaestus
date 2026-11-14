@@ -161,6 +161,26 @@ struct HephaestusTests {
             action: .load, signedIn: true).contains("Too many"))
     }
 
+    @Test func arcadePulseOldCommentGetCannotClearUnconfirmedDelete() {
+        func permits(_ readMutation: Int, _ currentMutation: Int,
+                     _ duringDelete: Bool, _ readGeneration: Int,
+                     _ currentGeneration: Int, _ sameViewer: Bool) -> Bool {
+            CommentsDeleteReadPolicy.mayApply(
+                readViewer: 3, currentViewer: sameViewer ? 3 : 4,
+                readMutation: readMutation, currentMutation: currentMutation,
+                startedDuringDeletion: duringDelete,
+                readGeneration: readGeneration, currentGeneration: currentGeneration
+            )
+        }
+        #expect(!permits(7, 8, false, 2, 2, true))
+        #expect(!permits(8, 8, true, 2, 2, true))
+        #expect(!permits(8, 8, false, 1, 2, true))
+        #expect(!permits(8, 8, false, 2, 2, false))
+        // Only a fresh GET initiated after the destructive write completes
+        // can unlock retry of an uncertain deletion.
+        #expect(permits(8, 8, false, 2, 2, true))
+    }
+
     @Test func arcadePulseUnconfirmedCommentWritesNeverClaimSuccessOrCertainFailure() {
         let privateError = NSError(
             domain: "https://private.comments.local",
