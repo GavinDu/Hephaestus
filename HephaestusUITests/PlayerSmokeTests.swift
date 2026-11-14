@@ -804,6 +804,58 @@ final class PlayerSmokeTests: XCTestCase {
         add(arrived)
     }
 
+    /// Independent iPad navigation accessibility source gate (#336). Launch
+    /// with the actual native sidebar visible: no fake games, followers,
+    /// backend responses or replacement content is created.
+    @MainActor
+    func testArcadePulseIPadSidebarXXLDestinationsAndProfileRoute() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("The adaptive sidebar is only presented on regular-width iPad.")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "--ui-test-sidebar-open", "--ui-test-library-entry",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityM"
+        ]
+        app.launch()
+
+        let library = app.buttons["nav.sidebar.library"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 15),
+                      "Real Library must remain a native sidebar destination at large text.")
+        XCTAssertTrue(library.label.contains("Library"),
+                      "VoiceOver must announce the full destination, not a clipped abbreviation.")
+        XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "arcade-pulse-ipad-sidebar-xxl-landscape-before-profile"
+        before.lifetime = .keepAlways
+        add(before)
+
+        let profile = app.buttons["nav.sidebar.profile"].firstMatch
+        XCTAssertTrue(profile.exists && profile.isHittable,
+                      "Profile sidebar action must stay reachable at accessibility text sizes.")
+        XCTAssertTrue(profile.label.contains("Profile"))
+        XCTAssertGreaterThanOrEqual(profile.frame.height, 44)
+        profile.tap()
+        let signIn = app.buttons["Sign in with Apple"].firstMatch
+        XCTAssertTrue(signIn.waitForExistence(timeout: 15),
+                      "Sidebar Profile must navigate to the real authentication screen.")
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "arcade-pulse-ipad-sidebar-xxl-landscape-after-profile"
+        after.lifetime = .keepAlways
+        add(after)
+
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(signIn.waitForExistence(timeout: 15),
+                      "Rotation must preserve the real Profile destination.")
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-ipad-sidebar-xxl-portrait-profile"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+    }
+
     /// In accessibility text sizes the multi-column explainer is intentionally
     /// hidden, keeping the single owner sign-in route legible and reachable.
     @MainActor
