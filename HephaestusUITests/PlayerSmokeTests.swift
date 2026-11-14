@@ -378,9 +378,80 @@ final class PlayerSmokeTests: XCTestCase {
         add(after)
     }
 
+    /// Early slow-feed content is NOT a failure and must not replace the
+    /// live backend. This DEBUG-only transport stall exposes real Library
+    /// after the informational hint, with no fabricated game or response.
+    @MainActor
+    func testArcadePulseSlowLiveFeedCanOpenLibraryBeforeTimeout() throws {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-stalled-feed-early-hint")
+        app.launch()
+        let hint = app.descendants(matching: .any)["feed.loading.slow"].firstMatch
+        XCTAssertTrue(hint.waitForExistence(timeout: 14),
+                      "An active slow backend transport must expose truthful, nonterminal Library guidance.")
+        let retry = app.buttons["feed.retryLoading"].firstMatch
+        let library = app.buttons["feed.loading.library"].firstMatch
+        XCTAssertTrue(retry.exists && retry.isHittable)
+        XCTAssertTrue(library.exists && library.isHittable,
+                      "Library must be an actual visible native button before the hard timeout.")
+        XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+        XCTAssertFalse(app.staticTexts["Couldn't load the feed"].firstMatch.exists,
+                       "15s slow status must not claim a backend outage.")
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
+                       "An incomplete public feed is not a playable game.")
+        if !isPad {
+            let tabs = app.tabBars.firstMatch
+            XCTAssertTrue(tabs.exists)
+            XCTAssertLessThan(library.frame.maxY, tabs.frame.minY + 1,
+                              "The slow-load Library CTA must not hide under iPhone tabs.")
+        }
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = isPad ? "arcade-pulse-early-slow-feed-ipad-landscape" :
+                              "arcade-pulse-early-slow-feed-iphone-portrait"
+        before.lifetime = .keepAlways
+        add(before)
+
+        if !isPad {
+            // iPhone landscape is much shorter than portrait: verify the
+            // early Library action stays above real native bottom tabs.
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let window = app.windows.firstMatch
+            let rotationDeadline = Date().addingTimeInterval(10)
+            while window.frame.width <= window.frame.height &&
+                  Date() < rotationDeadline {
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+            XCTAssertGreaterThan(window.frame.width, window.frame.height)
+            XCTAssertTrue(library.waitForExistence(timeout: 5) && library.isHittable)
+            let tabs = app.tabBars.firstMatch
+            XCTAssertTrue(tabs.exists)
+            XCTAssertLessThan(library.frame.maxY, tabs.frame.minY + 1)
+            let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            landscape.name = "arcade-pulse-early-slow-feed-iphone-landscape"
+            landscape.lifetime = .keepAlways
+            add(landscape)
+        }
+
+        library.tap()
+        let destination = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(destination.waitForExistence(timeout: 10) && destination.isHittable,
+                      "Early Library must navigate to the actual saved/recent Library.")
+        let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        arrived.name = isPad ? "arcade-pulse-early-ipad-library-arrived" :
+                               "arcade-pulse-early-iphone-library-arrived"
+        arrived.lifetime = .keepAlways
+        add(arrived)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// Stall the actual public-feed transport only; never inject or approve
     /// a fake game. The production watchdog is 45s; this opt-in native test
-    /// uses 3s and must expose the same truthful Retry/Library recovery.
+    /// uses 10s so XCUITest can inspect the new loader before a second
+    /// genuine watchdog expiry; must still expose truthful Retry/Library.
     @MainActor
     func testArcadePulseStalledTransportReachesHonestRecovery() throws {
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
