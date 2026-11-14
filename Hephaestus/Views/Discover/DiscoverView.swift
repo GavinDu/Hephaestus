@@ -1412,6 +1412,7 @@ private struct ForYouGamePage: View {
                     }
                 }
             }
+            .environment(\.defaultMinListRowHeight, 44)
             .navigationTitle("Game actions")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
