@@ -16,6 +16,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  published-fixture-contract:
+    name: Public game fixture preflight unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate real feed/package preflight without a live service
+        run: python3 -m unittest discover -s tools/test-feedback -p "test_verify_live_game_fixture.py" -v
+
   xcode:
     runs-on: macos-latest
     timeout-minutes: 30
