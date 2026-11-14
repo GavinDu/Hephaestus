@@ -459,7 +459,9 @@ final class PlayerSmokeTests: XCTestCase {
                            "The old Discover recovery view must not cover the Library destination.")
         }
         let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        arrived.name = "arcade-pulse-ipad-after-feed-to-library"
+        arrived.name = UIDevice.current.userInterfaceIdiom == .pad
+            ? "arcade-pulse-ipad-after-feed-to-library"
+            : "arcade-pulse-iphone-after-feed-to-library"
         arrived.lifetime = .keepAlways
         add(arrived)
     }
