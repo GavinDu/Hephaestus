@@ -33,3 +33,7 @@ These are **compressed preview copies** of approved design concepts generated in
 ## Signed-out iPad Studio / Library contrast contract (#173 / #181)
 
 The real Go to Profile to sign in CTA uses the shared `ArcadePulseTheme.electricViolet` solid fill and `onElectricViolet` **black** foreground. For the token's original sRGB components (0.57, 0.36, 0.99), calculated WCAG relative-luminance contrast is approximately **5.15:1 with black**, while white is approximately **4.08:1** and fails normal-text AA 4.5:1. The native iPad Studio and signed-out Library now share the same readable foreground token; pure Swift tests recompute the ratio from the source RGB token. Do not lighten the button text to follow a concept screenshot; real device high-contrast, VoiceOver and Dynamic Type screenshot acceptance remains required.
+
+## iPad Creator Studio privacy and action contract (#181)
+
+A Creator Studio sign-in CTA **must** receive the real Profile navigation callback from its caller; the view no longer accepts a default no-op button. Private projects require a viewer-bound authenticated backend response and no fabricated drafts or analytics. User-facing fetch failures are fixed, actionable phrases for 401/403/404/429, TLS, offline and timeout; raw `Error.localizedDescription` is never displayed because transport errors may contain internal URLs/account information. Pure Swift regression tests verify both secret-safe messages and common error classifications. No fake account, project, status or API response is used to make native CI pass.

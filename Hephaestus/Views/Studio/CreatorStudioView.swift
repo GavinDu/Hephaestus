@@ -7,7 +7,9 @@ struct CreatorStudioView: View {
     // authentication flow. Studio never manufactures a project or session.
     let onOpenProfile: () -> Void
 
-    init(onOpenProfile: @escaping () -> Void = {}) {
+    // Never silently install a no-op for a visibly actionable sign-in
+    // button. Every real caller must supply the native Profile route.
+    init(onOpenProfile: @escaping () -> Void) {
         self.onOpenProfile = onOpenProfile
     }
 
@@ -435,8 +437,46 @@ struct CreatorStudioView: View {
                     startedOwner: ownerID, currentOwner: BackendConfig.currentUserID,
                     startedToken: sessionToken, currentToken: BackendConfig.loadSessionToken()
                   ), selectedStatus == filter else { return }
-            loadError = "Projects aren't available right now: \(error.localizedDescription)"
+            // Raw localizedDescription may contain internal API hostnames,
+            // request URLs or unauthorized account metadata. Keep diagnostics
+            // separate from fixed, user-actionable native error copy.
+            loadError = CreatorStudioErrorPresentation.message(for: error)
         }
+    }
+}
+
+/// Privacy-safe, actionable source for native Studio project-fetch errors.
+/// Project models, permissions and statuses always remain server-authoritative.
+enum CreatorStudioErrorPresentation {
+    static func message(for error: Error) -> String {
+        if let apiError = error as? APIError,
+           case let .badStatus(status) = apiError {
+            switch status {
+            case 401:
+                return "Your session has expired. Open Profile to sign in again."
+            case 403:
+                return "Your account isn't allowed to view these projects."
+            case 404:
+                return "The projects service isn't available yet. Try again later."
+            case 429:
+                return "Too many requests. Try again in a little while."
+            default:
+                break
+            }
+        }
+        if let transport = error as? URLError {
+            switch transport.code {
+            case .notConnectedToInternet:
+                return "You're offline. Reconnect, then retry your projects."
+            case .secureConnectionFailed:
+                return "A secure connection couldn't be established. Try again."
+            case .timedOut:
+                return "Your projects took too long to load. Try again."
+            default:
+                break
+            }
+        }
+        return "Couldn't load your projects. Check your connection and retry."
     }
 }
 

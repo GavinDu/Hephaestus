@@ -92,6 +92,36 @@ struct HephaestusTests {
         #expect(resumedFollow != nil)
     }
 
+    @Test func arcadePulseStudioErrorsNeverShowPrivateServerDetails() {
+        let raw = NSError(domain: "https://private.invalid", code: 42, userInfo: [
+            NSLocalizedDescriptionKey: "Bearer alice@example.test https://private.invalid/v1/projects"
+        ])
+        for error: Error in [
+            raw,
+            URLError(.cannotConnectToHost),
+            APIError.badStatus(500),
+            APIError.badStatus(404)
+        ] {
+            let shown = CreatorStudioErrorPresentation.message(for: error)
+            #expect(!shown.contains("alice@example.test"))
+            #expect(!shown.contains("private.invalid"))
+            #expect(!shown.contains("Bearer"))
+            #expect(!shown.contains("500"))
+        }
+        #expect(CreatorStudioErrorPresentation.message(
+            for: APIError.badStatus(401)).contains("expired"))
+        #expect(CreatorStudioErrorPresentation.message(
+            for: APIError.badStatus(403)).contains("isn't allowed"))
+        #expect(CreatorStudioErrorPresentation.message(
+            for: APIError.badStatus(429)).contains("Too many"))
+        #expect(CreatorStudioErrorPresentation.message(
+            for: URLError(.notConnectedToInternet)).contains("offline"))
+        #expect(CreatorStudioErrorPresentation.message(
+            for: URLError(.secureConnectionFailed)).contains("secure connection"))
+        #expect(CreatorStudioErrorPresentation.message(
+            for: URLError(.timedOut)).contains("too long"))
+    }
+
     @Test func arcadePulseElectricVioletUsesAAReadableCTAForeground() {
         // WCAG relative-sRGB luminance; the real design token is the source
         // of truth for both native Library and Studio sign-in controls.
