@@ -195,6 +195,51 @@ final class PlayerSmokeTests: XCTestCase {
                       "Closing creator profile must preserve the playable feed.")
     }
 
+    /// Route through a REAL creator loaded from the live public feed.
+    /// An active guest Follow button is not a safe substitute for sign-in.
+    @MainActor
+    func testArcadePulseCreatorGuestSignInRoutesToProfileAfterDismiss() throws {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+        let creator = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "View profile for ")).firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let deadline = Date().addingTimeInterval(120)
+        while !creator.exists && Date() < deadline {
+            if retry.exists && retry.isHittable { retry.tap() }
+            _ = creator.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(creator.exists, "A real published creator must be available; never use a fake test identity.")
+        creator.tap()
+        let header = app.descendants(matching: .any)["creator.profile.header"].firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 25))
+        let hint = app.descendants(matching: .any)["creator.profile.signInHint"].firstMatch
+        XCTAssertTrue(hint.exists, "A guest must see truthful sign-in guidance.")
+        XCTAssertFalse(app.buttons["creator.profile.follow"].firstMatch.exists,
+                       "A signed-out viewer must not submit a Follow write.")
+        let route = app.buttons["creator.profile.openProfile"].firstMatch
+        XCTAssertTrue(route.waitForExistence(timeout: 8) && route.isHittable)
+        XCTAssertGreaterThanOrEqual(route.frame.height, 44)
+        route.tap()
+        let realGuidance = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Sign in with Apple to publish")).firstMatch
+        XCTAssertTrue(realGuidance.waitForExistence(timeout: 18),
+                      "Dismiss Creator first, then show the real native Profile destination.")
+        XCTAssertFalse(header.exists, "An old creator sheet must not cover the Profile destination.")
+        let realSignIn = app.buttons["Sign in with Apple"].firstMatch
+        XCTAssertTrue(realSignIn.exists && realSignIn.isHittable,
+                      "The destination must expose functional Apple sign-in, not a fake CTA.")
+        let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        arrived.name = isPad ? "arcade-pulse-ipad-creator-guest-profile-arrived" :
+                               "arcade-pulse-iphone-creator-guest-profile-arrived"
+        arrived.lifetime = .keepAlways
+        add(arrived)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// Prove the actual Create screen, not a marketing concept, exposes
     /// a reachable photo picker and blocks upload before consent and art.
     @MainActor
