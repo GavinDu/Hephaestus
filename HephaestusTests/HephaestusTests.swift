@@ -1729,3 +1729,171 @@ struct HephaestusTests {
     unexpected["debug"] = "unexpected"
     #expect(PlayerNativeMetricPayload.parse(unexpected) == nil)
 }
+
+@Test func nativeDocumentEpochV2RejectsHistoricalCallbacksAcross160Navigations() {
+    var gate = PlayerNativeDocumentEpochGate()
+    var previous: String?
+    var seen = Set<String>()
+    for _ in 0..<160 {
+        let current = gate.prepareNavigation()
+        let wellFormed = PlayerNativeDocumentEpochGate.isWellFormed(current)
+        let beforeStart = gate.acceptsV2(current)
+        let previouslyRejected = previous.map { !gate.acceptsV2($0) } ?? true
+        let started = gate.didStartNavigation()
+        let afterStart = gate.acceptsV2(current)
+        #expect(current.utf8.count == 32)
+        #expect(wellFormed)
+        #expect(!beforeStart && started && afterStart)
+        #expect(previouslyRejected)
+        #expect(!seen.contains(current))
+        seen.insert(current)
+        previous = current
+    }
+    #expect(seen.count == 160)
+    // Only the current nonce is retained; there is no eight-document
+    // stale-ID window to overflow after repeated navigation.
+    #expect(gate.currentNonce == previous)
+    gate.invalidate()
+    let stillAccepted = gate.acceptsV2(previous)
+    #expect(!stillAccepted)
+    #expect(gate.currentNonce == nil)
+}
+
+@Test func nativeDocumentEpochV2UnexpectedNavigationAndMalformedNonceFailClosed() {
+    var gate = PlayerNativeDocumentEpochGate()
+    let first = gate.prepareNavigation()
+    let firstStarted = gate.didStartNavigation()
+    let unexpectedStart = gate.didStartNavigation()
+    let oldAccepted = gate.acceptsV2(first)
+    #expect(firstStarted)
+    #expect(!unexpectedStart)
+    #expect(!oldAccepted)
+    #expect(gate.currentNonce == nil)
+
+    let fresh = gate.prepareNavigation()
+    let nextStarted = gate.didStartNavigation()
+    let newAccepted = gate.acceptsV2(fresh)
+    let oldStillRejected = gate.acceptsV2(first)
+    #expect(nextStarted && newAccepted && !oldStillRejected)
+    for invalid in [
+        "", "not-a-nonce", String(repeating: "a", count: 31),
+        String(repeating: "a", count: 33),
+        String(repeating: "A", count: 32),
+        String(repeating: "g", count: 32)
+    ] {
+        #expect(!PlayerNativeDocumentEpochGate.isWellFormed(invalid))
+        #expect(!gate.acceptsV2(invalid))
+    }
+    #expect(!PlayerNativeDocumentEpochGate.isWellFormed(nil))
+    gate.invalidate()
+}
+
+@Test func nativeMetricV2RequiresExactVersionedDocumentNonceField() {
+    let nonce = String(repeating: "f", count: 32)
+    let base: [String: Any] = [
+        "schema": 2, "type": "player_metric",
+        "sessionId": "session", "gameId": "game", "documentNonce": nonce,
+        "metric": "first_input", "sequence": 2, "ms": 120
+    ]
+    let parsed = PlayerNativeMetricPayload.parse(base)
+    #expect(parsed?.metric == "first_input")
+    for (field, value) in [
+        ("schema", 1 as Any),
+        ("documentNonce", String(repeating: "f", count: 31) as Any),
+        ("type", "verified_run_available" as Any),
+        ("ms", -1 as Any)
+    ] {
+        var modified = base
+        modified[field] = value
+        #expect(PlayerNativeMetricPayload.parse(modified) == nil)
+    }
+    var missing = base
+    missing.removeValue(forKey: "documentNonce")
+    #expect(PlayerNativeMetricPayload.parse(missing) == nil)
+    var extra = base
+    extra["untrustedField"] = "unexpected"
+    #expect(PlayerNativeMetricPayload.parse(extra) == nil)
+
+    // Legacy runtime messaging remains valid until the host negotiates
+    // strict v2. A legacy message may not smuggle a document nonce.
+    var legacy = base
+    legacy["schema"] = 1
+    legacy.removeValue(forKey: "documentNonce")
+    #expect(PlayerNativeMetricPayload.parse(legacy)?.metric == "first_input")
+}
+
+@Test func nativeBridgeVersionV2RejectsLaterLegacyDowngradeUntilNavigationReset() {
+    var gate = PlayerNativeBridgeVersionGate()
+    #expect(gate.allows(1))
+    #expect(gate.allows(2))
+    #expect(!gate.allows(0))
+    #expect(!gate.allows(3))
+    #expect(!gate.acceptedV2)
+
+    // An old generator may be used before a coordinated v2 rollout;
+    // merely seeing schema 1 must not claim successful v2 negotiation.
+    gate.didAccept(1)
+    #expect(gate.allows(1))
+    #expect(!gate.acceptedV2)
+
+    // A validated first v2 message upgrades this document's contract.
+    gate.didAccept(2)
+    #expect(gate.acceptedV2)
+    #expect(!gate.allows(1))
+    #expect(gate.allows(2))
+
+    // A *real new navigation* resets the policy alongside the nonce,
+    // metric and session gates. A late old-document v1 callback still
+    // requires live nonce/lease/frame checks in the shipping Coordinator.
+    gate.reset()
+    #expect(!gate.acceptedV2)
+    #expect(gate.allows(1))
+}
+
+@Test func nativeDocumentBridgeStrictV2PolicyRejectsFirstAndSubsequentLegacyCallbacks() {
+    // Rollout policy must be selected by installed native code, before any
+    // JS runtime session or message has been observed. A stale v1 event must
+    // never steal the new document's first runtime-session binding slot.
+    var strict = PlayerNativeBridgeVersionGate(policy: .requireV2)
+    #expect(!strict.allows(1))
+    #expect(strict.allows(2))
+    #expect(!strict.allows(0))
+    #expect(!strict.allows(3))
+    strict.didAccept(1) // Invalid admission cannot silently choose legacy.
+    #expect(!strict.acceptedV2)
+    strict.didAccept(2)
+    #expect(strict.acceptedV2)
+    #expect(!strict.allows(1))
+    strict.reset()
+    #expect(!strict.acceptedV2)
+    #expect(!strict.allows(1)) // Strictness persists across navigation.
+
+    // Native freshness and strict schema must BOTH pass for each real
+    // document. Pure state policy table; actual WKWebView interleavings
+    // remain a separate hardware/WebKit acceptance gate.
+    var nonce = PlayerNativeDocumentEpochGate()
+    var previous: String?
+    for _ in 0..<160 {
+        let current = nonce.prepareNavigation()
+        let legacyBeforeStart = strict.allows(1)
+        let v2BeforeStart = nonce.acceptsV2(current)
+        let began = nonce.didStartNavigation()
+        let currentAccepted = strict.allows(2) && nonce.acceptsV2(current)
+        let oldNonceRejected = previous.map { !nonce.acceptsV2($0) } ?? true
+        #expect(!legacyBeforeStart)
+        #expect(!v2BeforeStart)
+        #expect(began && currentAccepted && oldNonceRejected)
+        strict.didAccept(2)
+        strict.reset()
+        previous = current
+    }
+
+    // Until trusted engine v2 is deployed, older native releases may choose
+    // compatibility explicitly; they must still reject downgrade AFTER v2.
+    var compatible = PlayerNativeBridgeVersionGate(policy: .legacyCompatible)
+    #expect(compatible.allows(1))
+    compatible.didAccept(2)
+    #expect(!compatible.allows(1))
+    compatible.reset()
+    #expect(compatible.allows(1))
+}
