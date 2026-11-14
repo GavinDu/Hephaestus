@@ -779,7 +779,7 @@ struct DiscoverView: View {
                 requestedScope: requestedScope, currentScope: selectedFeed,
                 requestedGeneration: requestedGeneration,
                 currentGeneration: feedRequestCoordinator.generation) {
-                loadMoreError = "Couldn't load more games: \(error.localizedDescription)"
+                loadMoreError = FeedErrorPresentation.paginationMessage(for: error)
             }
         }
     }
@@ -1029,6 +1029,13 @@ struct DiscoverView: View {
 /// surfacing raw TLS/transport jargon as the primary recovery explanation.
 /// The UI still exposes Retry and the actual saved-game Library route.
 enum FeedErrorPresentation {
+    /// Only the cursor request failed. Keep the settled real post on screen,
+    /// expose the existing Retry, and never surface transport descriptions
+    /// that could contain backend hostnames, paths, bearer data, or TLS jargon.
+    static func paginationMessage(for error: Error) -> String {
+        "Couldn't load more games. " + message(for: error)
+    }
+
     static func message(for error: Error) -> String {
         switch (error as? URLError)?.code {
         case .secureConnectionFailed, .serverCertificateHasBadDate,

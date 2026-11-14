@@ -1493,6 +1493,35 @@ struct HephaestusTests {
 
 // A live HTTPS outage is a real error; it must produce a legible recovery
 // explanation rather than raw TLS/certificate jargon or fabricated feed cards.
+@Test func arcadePulsePaginationErrorCopyIsTruthfulAndPrivacySafe() {
+    let internalError = NSError(
+        domain: "https://private.service.internal/player?token=hidden",
+        code: 503,
+        userInfo: [
+            NSLocalizedDescriptionKey:
+                "https://private.service.internal/player?token=hidden bearer secret"
+        ]
+    )
+    let generic = FeedErrorPresentation.paginationMessage(for: internalError)
+    #expect(generic.hasPrefix("Couldn't load more games."))
+    #expect(generic.localizedCaseInsensitiveContains("try again"))
+    #expect(!generic.contains("private.service.internal"))
+    #expect(!generic.contains("bearer"))
+    #expect(!generic.contains("hidden"))
+    #expect(!generic.contains("503"))
+
+    let offline = FeedErrorPresentation.paginationMessage(
+        for: URLError(.notConnectedToInternet))
+    #expect(offline.localizedCaseInsensitiveContains("offline"))
+    let tls = FeedErrorPresentation.paginationMessage(
+        for: URLError(.secureConnectionFailed))
+    #expect(tls.contains("secure connection"))
+    #expect(!tls.localizedCaseInsensitiveContains("certificate"))
+    let timeout = FeedErrorPresentation.paginationMessage(for: URLError(.timedOut))
+    #expect(timeout.contains("taking too long"))
+    #expect(timeout.localizedCaseInsensitiveContains("try again"))
+}
+
 @Test func arcadePulseFeedFailureCopyIsActionableAndTruthful() {
     let secure = FeedErrorPresentation.message(for: URLError(.secureConnectionFailed))
     #expect(secure.contains("secure connection"))
