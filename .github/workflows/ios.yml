@@ -176,7 +176,7 @@ jobs:
   # Real iPad UI evaluation at a regular-width size class.
   ipad-feed-ui-evaluator:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Find an available iPad simulator
@@ -203,8 +203,13 @@ jobs:
           xcrun simctl boot "${{ steps.ipad.outputs.udid }}" || true
           xcrun simctl bootstatus "${{ steps.ipad.outputs.udid }}" -b
       - name: Run iPad feed UI evaluator
+        shell: bash
         run: |
           set -o pipefail
+          # Repeat the identical native suite at most once ONLY when Xcode
+          # times out launching the app itself. Do not retry XCTAssert/UX
+          # failures or hide a production backend outage.
+          run_evaluator() {
           xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus \
             -destination "platform=iOS Simulator,id=${{ steps.ipad.outputs.udid }}" \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedUIEvaluationAndSwipe \
@@ -216,13 +221,32 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateEntryConsentAndControls \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedUnavailableRecoveryToLibrary \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadGameDetailsAdaptiveLayout \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/ipad-feed-ui.log || {
-              grep -E "error:|XCTAssert" /tmp/ipad-feed-ui.log | sort -u | head -30 | while read -r l; do
-                echo "::error title=ipad-feed-ui::$l"
-              done
-              exit 1
-            }
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/ipad-feed-ui.log
+          }
+          if run_evaluator; then
+            exit 0
+          fi
+          if grep -Eq 'Failed to launch .*Timed out while launching application via Xcode' /tmp/ipad-feed-ui.log && \
+             ! grep -Eq 'XCTAssert.*failed|UI screenshot evidence failed' /tmp/ipad-feed-ui.log; then
+            echo "::warning title=iPad simulator launch::Xcode app-launch timeout; cold-boot and rerun full native suite once"
+            mv /tmp/ipad-feed-ui.log /tmp/ipad-feed-ui-initial.log
+            if [[ -d /tmp/ipad-feed-ui.xcresult ]]; then
+              mv /tmp/ipad-feed-ui.xcresult /tmp/ipad-feed-ui-initial.xcresult
+            fi
+            xcrun simctl shutdown "${{ steps.ipad.outputs.udid }}" || true
+            xcrun simctl boot "${{ steps.ipad.outputs.udid }}" || true
+            xcrun simctl bootstatus "${{ steps.ipad.outputs.udid }}" -b
+            if run_evaluator; then
+              echo "Recovered app-launch infrastructure without disabling any native test"
+              exit 0
+            fi
+          fi
+          grep -E 'error:|XCTAssert' /tmp/ipad-feed-ui.log | sort -u | head -30 | while read -r l; do
+            echo "::error title=ipad-feed-ui::$l"
+          done
+          exit 1
       - name: Build iPad UI test-feedback artifact
         if: always()
         run: |
@@ -247,13 +271,14 @@ jobs:
       # Native app-window landscape attachments can export with a misleading
       # portrait crop and black bands. Keep originals; validate and separately
       # publish orientation-correct *full-screen* evidence for review.
-      - name: Validate native iPad feed and Library screenshot evidence
+      - name: Validate native iPad feed, Library, Game Details and feature screenshot evidence
         run: |
           python3 tools/test-feedback/verify-ui-screenshot-evidence.py \
             --input /tmp/ipad-feed-ui-screenshots \
             --out /tmp/ipad-feed-ui-review \
             --require-ipad-library \
-            --require-ipad-arcade-features
+            --require-ipad-arcade-features \
+            --require-ipad-details
       - name: Upload iPad UI evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -261,7 +286,9 @@ jobs:
           name: ipad-feed-ui-evaluator
           path: |
             /tmp/ipad-feed-ui.log
+            /tmp/ipad-feed-ui-initial.log
             /tmp/ipad-feed-ui.xcresult
+            /tmp/ipad-feed-ui-initial.xcresult
             /tmp/ipad-feed-ui-screenshots
             /tmp/ipad-feed-ui-review
             /tmp/test-feedback-ipad.json

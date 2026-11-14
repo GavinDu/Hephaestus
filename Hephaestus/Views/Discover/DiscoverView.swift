@@ -684,9 +684,7 @@ struct DiscoverView: View {
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
             }
-            .sheet(item: $detailGame) { game in
-                ArcadePulseGameDetailsSheet(game: game)
-            }
+            .modifier(ArcadePulseGameDetailsPresentation(selection: $detailGame))
             .sheet(item: $reportingGame) { game in
                 ReportGameSheet(game: game)
             }
@@ -1892,11 +1890,36 @@ private struct ForYouPagerView: View {
     }
 }
 
+/// iPad's default form-sheet is narrow even when the app's landscape window
+/// has room for two columns. Present genuine Game Details in the full iPad
+/// window; preserve the existing sheet/dismiss experience on iPhone.
+private struct ArcadePulseGameDetailsPresentation: ViewModifier {
+    @Binding var selection: FeedGame?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            content.fullScreenCover(item: $selection) { game in
+                ArcadePulseGameDetailsSheet(game: game)
+            }
+        } else {
+            content.sheet(item: $selection) { game in
+                ArcadePulseGameDetailsSheet(game: game)
+            }
+        }
+    }
+}
+
 private struct ArcadePulseGameDetailsSheet: View {
     let game: FeedGame
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
     @State private var playerRequest: PixiPlayerRequest?
+    // URL presence is not proof the actual poster loaded. Only a decoded
+    // image expands the portrait media stage; failures retain an honest,
+    // compact "Preview unavailable" card and accessible Play / Share.
+    @State private var hasDecodedPoster = false
 
     private var shareURL: URL {
         var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"),
@@ -1905,16 +1928,19 @@ private struct ArcadePulseGameDetailsSheet: View {
         return components?.url ?? BackendConfig.baseURL
     }
 
-    private var preview: some View {
+    private func preview(height: CGFloat) -> some View {
         ZStack {
+            // The gradient is merely a fallback, never a recorded preview.
             LinearGradient(colors: ArcadePulseTheme.fallbackPalette(gameID: game.id),
                            startPoint: .topLeading, endPoint: .bottomTrailing)
             if let poster = game.previewPosterURL, let url = URL(string: poster) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFit()
+                            .onAppear { hasDecodedPoster = true }
                     } else {
                         unavailablePreview
+                            .onAppear { hasDecodedPoster = false }
                     }
                 }
             } else {
@@ -1922,12 +1948,12 @@ private struct ArcadePulseGameDetailsSheet: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: horizontalSizeClass == .regular ? 335 : 240)
+        .frame(height: height)
         .clipShape(RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(game.previewPosterURL == nil
                             ? "Gameplay preview unavailable"
-                            : "Game preview image or fallback for \(game.title)")
+                            : "Game artwork or unavailable preview for \(game.title)")
         .accessibilityIdentifier("game.details.preview")
     }
 
@@ -1937,66 +1963,114 @@ private struct ArcadePulseGameDetailsSheet: View {
                 .font(.system(size: 38))
             Text("Preview unavailable")
                 .font(.headline)
-            Text("Play the actual game below")
+            Text("Use Play to launch the actual game")
                 .font(.caption)
+                .multilineTextAlignment(.center)
         }
         .foregroundStyle(.white)
     }
 
+    /// Shared actual feed metadata; no fabricated ratings, counts, game
+    /// release dates, updates or suggested games to fill empty tablet space.
+    private var metadataAndActions: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(game.title)
+                .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("game.details.title")
+            if let owner = game.ownerID, !owner.isEmpty {
+                Label(game.creatorDisplayName?.isEmpty == false
+                      ? game.creatorDisplayName! : owner,
+                      systemImage: "person.crop.circle")
+                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+            }
+            // Play and Share must be reachable before optional long
+            // creator-provided descriptions, topics or version metadata.
+            ArcadePulsePlayCTA {
+                playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
+            }
+            ShareLink(item: shareURL) {
+                Label("Share game", systemImage: "square.and.arrow.up")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+            .tint(ArcadePulseTheme.electricViolet)
+            if let caption = game.caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.body)
+                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let topics = game.topics, !topics.isEmpty {
+                Text(topics.prefix(5).map { "#\($0)" }.joined(separator: "  "))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                if let orientation = game.orientationLabel {
+                    Label(orientation, systemImage: "rotate.right")
+                }
+                if let version = game.publishedVersion {
+                    Label("Published version \(version)", systemImage: "square.stack.3d.up")
+                }
+                if let remixParent = game.remixParentID, !remixParent.isEmpty {
+                    Label("Published remix", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(ArcadePulseTheme.textSecondary)
+
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func adaptiveLayout(size: CGSize) -> some View {
+        let twoColumn = ForYouPageLayout.showsIPadGameDetailsTwoColumn(
+            width: size.width, height: size.height,
+            isRegular: horizontalSizeClass == .regular,
+            isLargeText: dynamicTypeSize >= .xxLarge
+        )
+        if twoColumn {
+            HStack(alignment: .top, spacing: 24) {
+                preview(height: ForYouPageLayout.gameDetailsPreviewHeight(
+                    containerHeight: size.height))
+                    .frame(width: ForYouPageLayout.gameDetailsPreviewWidth(
+                        containerWidth: size.width))
+                metadataAndActions
+            }
+            .frame(maxWidth: 1_200, alignment: .topLeading)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("game.details.twoColumn")
+        } else {
+            VStack(alignment: .leading, spacing: 18) {
+                preview(height: ForYouPageLayout.gameDetailsSingleColumnPreviewHeight(
+                    containerWidth: size.width,
+                    containerHeight: size.height,
+                    isIPad: UIDevice.current.userInterfaceIdiom == .pad,
+                    isRegularWidth: horizontalSizeClass == .regular,
+                    hasDecodedPoster: hasDecodedPoster,
+                    isLargeText: dynamicTypeSize >= .xxLarge
+                ))
+                metadataAndActions
+            }
+            .frame(maxWidth: 800)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("game.details.singleColumn")
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    preview
-                    Text(game.title)
-                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                        .foregroundStyle(.white)
-                        .accessibilityIdentifier("game.details.title")
-                    if let owner = game.ownerID, !owner.isEmpty {
-                        Label(game.creatorDisplayName?.isEmpty == false
-                              ? game.creatorDisplayName! : owner,
-                              systemImage: "person.crop.circle")
-                            .foregroundStyle(ArcadePulseTheme.textSecondary)
-                    }
-                    if let caption = game.caption, !caption.isEmpty {
-                        Text(caption)
-                            .font(.body)
-                            .foregroundStyle(ArcadePulseTheme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let topics = game.topics, !topics.isEmpty {
-                        Text(topics.prefix(5).map { "#\($0)" }.joined(separator: "  "))
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(ArcadePulseTheme.neonMagenta)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    VStack(alignment: .leading, spacing: 10) {
-                        if let orientation = game.orientationLabel {
-                            Label(orientation, systemImage: "rotate.right")
-                        }
-                        if let version = game.publishedVersion {
-                            Label("Published version \(version)", systemImage: "square.stack.3d.up")
-                        }
-                        if let remixParent = game.remixParentID, !remixParent.isEmpty {
-                            Label("Published remix", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                    }
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(ArcadePulseTheme.textSecondary)
-                    ArcadePulsePlayCTA {
-                        playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
-                    }
-                    ShareLink(item: shareURL) {
-                        Label("Share game", systemImage: "square.and.arrow.up")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(ArcadePulseTheme.electricViolet)
+            GeometryReader { geometry in
+                ScrollView {
+                    adaptiveLayout(size: geometry.size)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                        .padding(18)
                 }
-                .frame(maxWidth: horizontalSizeClass == .regular ? 800 : 560)
-                .frame(maxWidth: .infinity)
-                .padding(18)
             }
             .background(ArcadePulseTheme.canvas)
             .preferredColorScheme(.dark)
