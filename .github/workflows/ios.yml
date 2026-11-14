@@ -108,6 +108,44 @@ jobs:
             [ "$code" = "200" ] && break
             sleep 5
           done
+          # A real Creator Discovery navigation test currently receives a
+          # backend JSON-decoding error even while the live feed works.
+          # Record only a typed CONTRACT outline, never creator IDs or body.
+          creator_body=$(mktemp)
+          creator_code=$(curl -sSL -o "$creator_body" -w '%{http_code}' --max-time 15             'https://html-5-game-generator.replit.app/v1/creators?limit=20' || true)
+          echo "deployed-creator-discovery HTTP $creator_code"
+          python3 - "$creator_body" <<'PY'
+          import json, sys
+          from pathlib import Path
+          raw = Path(sys.argv[1]).read_bytes()
+          try:
+              response = json.loads(raw)
+          except (ValueError, UnicodeDecodeError):
+              print("::warning title=creator-contract::Live creators response is not JSON; no content printed")
+              sys.exit(0)
+          def datatype(v):
+              if v is None: return "null"
+              if isinstance(v, bool): return "boolean"
+              if isinstance(v, str): return "string"
+              if isinstance(v, int): return "integer"
+              if isinstance(v, float): return "number"
+              if isinstance(v, list): return "array"
+              if isinstance(v, dict): return "object"
+              return "other"
+          if not isinstance(response, dict):
+              print(f"::warning title=creator-contract::Top-level JSON type={datatype(response)}")
+              sys.exit(0)
+          print("deployed-creator-discovery keys=" + ",".join(sorted(response.keys())))
+          print("deployed-creator-discovery types=" +
+                ",".join(f"{k}:{datatype(v)}" for k,v in sorted(response.items())))
+          entries = response.get("creators")
+          if isinstance(entries, list):
+              print(f"deployed-creator-discovery count={len(entries)}")
+              if entries and isinstance(entries[0], dict):
+                  print("deployed-creator-entry types=" +
+                        ",".join(f"{k}:{datatype(v)}" for k,v in sorted(entries[0].items())))
+          PY
+          rm -f "$creator_body"
           # Boot the device ourselves and wait for it, then forbid
           # parallel-testing clones: across four runs the failure was
           # never inside the test — xcodebuild's "Clone 1 of iPhone 17
