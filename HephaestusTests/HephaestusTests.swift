@@ -11,6 +11,18 @@ import Testing
 // App-level tests will regrow around the WebView player and the
 // creation flow.
 struct HephaestusTests {
+    @Test func arcadePulseCreatorIdentityKeepsLongNamesReadableAtLargeText() {
+        // This is a pure layout policy test, not screenshot evidence that
+        // actual creator / Follow / Play controls fit on a narrow device.
+        #expect(ArcadePulseCreatorIdentity.visibleNameLineLimit(for: .large) == 1)
+        #expect(ArcadePulseCreatorIdentity.visibleNameLineLimit(for: .xxxLarge) == 1)
+        #expect(ArcadePulseCreatorIdentity.visibleNameLineLimit(for: .accessibility1) == 2)
+        #expect(ArcadePulseCreatorIdentity.visibleNameLineLimit(for: .accessibility5) == 2)
+        #expect(ArcadePulseCreatorIdentity.avatarDimension(for: .large) == 26)
+        #expect(ArcadePulseCreatorIdentity.avatarDimension(for: .accessibility3) == 32)
+        #expect(ArcadePulseTheme.minimumTarget >= 44)
+    }
+
     @Test func arcadePulseActionGlyphHonorsLargeTextWithoutShrinkingCaptions() {
         // Ordinary compact rails retain the visual caption, but at a large
         // size the 48pt icon-only target avoids clipped words or a blocked
