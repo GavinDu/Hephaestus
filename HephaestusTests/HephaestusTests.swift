@@ -28,6 +28,24 @@ struct HephaestusTests {
             isUpdating: false, needsConfirmation: true))
     }
 
+    @Test func arcadePulseCreatorGetCannotClearAmbiguousFollowFromStaleRead() {
+        #expect(CreatorFollowStatePolicy.mayApplyCreatorRead(
+            requestRevision: 7, currentRevision: 7, sameViewer: true,
+            startedWhileMutating: false, isPostWriteConfirmation: false))
+        #expect(!CreatorFollowStatePolicy.mayApplyCreatorRead(
+            requestRevision: 6, currentRevision: 7, sameViewer: true,
+            startedWhileMutating: false, isPostWriteConfirmation: false))
+        #expect(!CreatorFollowStatePolicy.mayApplyCreatorRead(
+            requestRevision: 7, currentRevision: 7, sameViewer: false,
+            startedWhileMutating: false, isPostWriteConfirmation: true))
+        #expect(!CreatorFollowStatePolicy.mayApplyCreatorRead(
+            requestRevision: 7, currentRevision: 7, sameViewer: true,
+            startedWhileMutating: true, isPostWriteConfirmation: false))
+        #expect(CreatorFollowStatePolicy.mayApplyCreatorRead(
+            requestRevision: 7, currentRevision: 7, sameViewer: true,
+            startedWhileMutating: true, isPostWriteConfirmation: true))
+    }
+
     @Test func arcadePulseCreatorProfileErrorsArePrivacySafe() {
         let sensitive = NSError(
             domain: "https://private.creator.local/owner",
