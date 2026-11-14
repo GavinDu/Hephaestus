@@ -75,8 +75,8 @@ struct FeedPreviewSurface: UIViewRepresentable {
             playerLayer.player = nil
         }
 
-        deinit {
-            observation?.invalidate()
-        }
+        // The observation token invalidates on release; dismantleUIView
+        // explicitly revokes the attachment, so no nonisolated deinit access
+        // to a main-actor UIKit property is necessary.
     }
 }
