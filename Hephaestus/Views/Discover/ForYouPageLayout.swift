@@ -1,5 +1,34 @@
 import SwiftUI
 
+/// Creator game-card layout policy. A stacked card in enlarged text keeps
+/// real backend titles and Play controls readable on iPhones and narrow iPads.
+enum CreatorGameRowLayout {
+    static func prefersStacked(
+        isIPad: Bool, isRegularWidth: Bool, isEnlargedText: Bool
+    ) -> Bool {
+        // Large iPhones can report regular horizontal size class in landscape.
+        // Only genuinely wide iPad layouts may retain the side-by-side card.
+        isEnlargedText && (!isIPad || !isRegularWidth)
+    }
+}
+
+/// Viewer-state gate for native creator follow buttons.
+/// Public creator counts remain backend-authoritative while a mutation or
+/// follow-status refresh is unresolved.
+enum CreatorFollowPresentationPolicy {
+    static func offersFollowAction(viewerID: String, creatorID: String) -> Bool {
+        !viewerID.isEmpty && !creatorID.isEmpty && viewerID != creatorID
+    }
+
+    static func canSubmit(
+        viewerID: String, creatorID: String,
+        isUpdating: Bool, needsConfirmation: Bool
+    ) -> Bool {
+        offersFollowAction(viewerID: viewerID, creatorID: creatorID) &&
+            !isUpdating && !needsConfirmation
+    }
+}
+
 /// A viewer-scoped mutation gate for real social API calls. A second tap on
 /// the same entity does not issue a contradictory request before the first
 /// network write finishes. UUID leases prevent an old-account callback from

@@ -52,19 +52,25 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             self.assertEqual(module.read_png_metadata(p)["display_width"], 20)
 
     def fixture(self, folder, corrupt_fullscreen=False, omit=None,
-                include_ipad_library=False):
+                include_ipad_library=False, include_creator=False):
         attachments = []
         library = ((module.IPAD_LIBRARY_PORTRAIT, module.IPAD_LIBRARY_LANDSCAPE)
                    if include_ipad_library else ())
+        creator = (module.CREATOR_PORTRAIT + module.CREATOR_LANDSCAPE
+                   if include_creator else ())
         for name in (module.LANDSCAPE_PRIMARY +
-                     module.LANDSCAPE_DIAGNOSTIC + module.PORTRAIT_PRIMARY + library):
+                     module.LANDSCAPE_DIAGNOSTIC + module.PORTRAIT_PRIMARY + library + creator):
             if name == omit:
                 continue
             file = name + ".png"
             # Full screen raw portrait + EXIF 8 -> landscape displayed.
             # App-window raw landscape + EXIF 8 -> incorrect portrait displayed.
             rgb = b"\x50\x40\x20" if "after-swipe" in name else b"\x20\x50\x80"
-            if name == module.IPAD_LIBRARY_PORTRAIT:
+            if name in module.CREATOR_PORTRAIT:
+                payload = png(10, 20, 1, rgb=b"\x22\x44\x66")
+            elif name in module.CREATOR_LANDSCAPE:
+                payload = png(10, 20, 8, rgb=b"\x33\x55\x77")
+            elif name == module.IPAD_LIBRARY_PORTRAIT:
                 payload = png(10, 20, 1, rgb=b"\x20\x50\x80")
             elif name == module.IPAD_LIBRARY_LANDSCAPE:
                 payload = png(10, 20, 8, rgb=b"\x50\x40\x20")
@@ -94,6 +100,52 @@ class ScreenshotEvidenceTests(unittest.TestCase):
                                  (source / (name + ".png")).read_bytes())
             for name in module.LANDSCAPE_DIAGNOSTIC:
                 self.assertFalse(report["verified"][name]["preferred_for_visual_review"])
+
+    def test_creator_profile_two_native_orientations_preserved_and_verified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            out = Path(directory) / "review"
+            source.mkdir()
+            self.fixture(source, include_creator=True)
+            report = module.verify_and_copy(
+                source, out, require_creator_profile=True)
+            self.assertTrue(report["creator_profile_required"])
+            for name in module.CREATOR_PORTRAIT + module.CREATOR_LANDSCAPE:
+                self.assertTrue(report["verified"][name]["preferred_for_visual_review"])
+                self.assertEqual((out / (name + ".raw.png")).read_bytes(),
+                                 (source / (name + ".png")).read_bytes())
+            self.assertGreater(
+                report["verified"][module.CREATOR_LANDSCAPE[0]]["display_width"],
+                report["verified"][module.CREATOR_LANDSCAPE[0]]["display_height"])
+
+    def test_creator_profile_missing_and_false_landscape_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            self.fixture(source)
+            with self.assertRaisesRegex(ValueError, "arcade-pulse-creator-profile: expected exactly one"):
+                module.verify_and_copy(source, Path(directory) / "out",
+                                       require_creator_profile=True)
+            self.fixture(source, include_creator=True)
+            name = module.CREATOR_LANDSCAPE[0]
+            (source / (name + ".png")).write_bytes(
+                png(10, 20, 1, rgb=b"\x33\x55\x77"))
+            with self.assertRaisesRegex(ValueError, "full-screen capture does not display in landscape"):
+                module.verify_and_copy(source, Path(directory) / "out2",
+                                       require_creator_profile=True)
+
+    def test_creator_profile_exif_rotation_cannot_replay_same_raster(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            self.fixture(source, include_creator=True)
+            # Same image data re-encoded with EXIF rotation must not pass
+            # for two genuinely different native view orientations.
+            (source / (module.CREATOR_LANDSCAPE[0] + ".png")).write_bytes(
+                png(10, 20, 8, rgb=b"\x22\x44\x66", level=9, filter_type=1))
+            with self.assertRaisesRegex(ValueError, "creator portrait/landscape: duplicate decoded screenshot pixels"):
+                module.verify_and_copy(source, Path(directory) / "out",
+                                       require_creator_profile=True)
 
     def test_exact_duplicate_swipe_capture_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

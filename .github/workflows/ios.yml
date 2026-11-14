@@ -209,6 +209,8 @@ jobs:
             -destination "platform=iOS Simulator,id=${{ steps.ipad.outputs.udid }}" \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedUIEvaluationAndSwipe \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedSupportsAccessibilityDynamicType \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorProfileRendersLiveData \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorDiscoveryGuestSignInNavigation \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSocialWriteFailureDoesNotHideLiveGame \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedPreferencesFailureStaysEditable \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutState \
@@ -247,12 +249,13 @@ jobs:
       # Native app-window landscape attachments can export with a misleading
       # portrait crop and black bands. Keep originals; validate and separately
       # publish orientation-correct *full-screen* evidence for review.
-      - name: Validate native iPad feed and Library screenshot evidence
+      - name: Validate native iPad feed, Library and Creator Profile screenshot evidence
         run: |
           python3 tools/test-feedback/verify-ui-screenshot-evidence.py \
             --input /tmp/ipad-feed-ui-screenshots \
             --out /tmp/ipad-feed-ui-review \
-            --require-ipad-library
+            --require-ipad-library \
+            --require-creator-profile
       - name: Upload iPad UI evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
