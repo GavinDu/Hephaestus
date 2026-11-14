@@ -405,17 +405,21 @@ final class PlayerSmokeTests: XCTestCase {
                               "arcade-pulse-stalled-feed-iphone-portrait"
         timeout.lifetime = .keepAlways
         add(timeout)
-        // Retry starts a NEW genuine (in this test: deliberately stalled)
-        // transport. It must not be canceled by the old watchdog generation.
+        // A new network attempt increments the same production counter
+        // regardless of its 3-second test-only watchdog. An ephemeral
+        // Loading label can vanish between XCUITest query snapshots; observe
+        // the next real recovery with its advanced request-attempt value.
+        let priorAttempt = retry.value as? String ?? ""
+        XCTAssertTrue(priorAttempt.hasPrefix("Request attempt "),
+                      "Initial honest recovery must expose its transport attempt.")
         retry.tap()
-        // The loader HStack is intentionally one accessibility element
-        // labelled "Loading games", not a separately exposed static text.
-        let loading = app.descendants(matching: .any)["Loading games"].firstMatch
-        XCTAssertTrue(loading.waitForExistence(timeout: 6),
-                      "Retry must leave the prior error and start a new actual transport attempt.")
-        XCTAssertFalse(title.exists, "The old recovery must clear during a new request.")
-        XCTAssertTrue(title.waitForExistence(timeout: 20),
-                      "A new attempt must independently reach its own recovery without mock success.")
+        let newRetry = app.buttons["feed.error.retry"].firstMatch
+        let advanced = NSPredicate(format: "exists == true AND value != %@", priorAttempt)
+        let secondAttempt = XCTNSPredicateExpectation(predicate: advanced, object: newRetry)
+        XCTAssertEqual(XCTWaiter.wait(for: [secondAttempt], timeout: 20), .completed,
+                       "Retry must start a NEW real transport and independently reach bounded recovery.")
+        XCTAssertTrue(title.exists,
+                      "The new request must independently end in honest recovery without mock success.")
         XCTAssertFalse(app.buttons["game.play"].firstMatch.exists)
         XCUIDevice.shared.orientation = .portrait
     }
