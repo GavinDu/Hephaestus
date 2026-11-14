@@ -43,6 +43,24 @@ struct LibraryView: View {
         ) ? saved : []
     }
 
+    /// Zero is a real fact only after the current account's request succeeds.
+    /// The deliberately empty fail-closed list is not evidence of zero saves.
+    private var confirmedSavedCount: Int? {
+        LibrarySavedCountPolicy.confirmedCount(
+            visibleCount: visibleSaved.count,
+            isSignedIn: !BackendConfig.currentUserID.isEmpty,
+            isLoading: isLoadingSaved,
+            hasError: errorMessage != nil,
+            currentSessionData: LibrarySavedRequestPolicy.canDisplay(
+                loadedOwner: savedOwnerID, currentOwner: BackendConfig.currentUserID,
+                loadedSessionDigest: savedSessionDigest,
+                currentSessionDigest: LibrarySavedRequestPolicy.digest(
+                    BackendConfig.loadSessionToken()
+                )
+            )
+        )
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -164,7 +182,17 @@ struct LibraryView: View {
                     HStack {
                         Text("Saved games")
                         Spacer()
-                        Text("\(visibleSaved.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        if let count = confirmedSavedCount {
+                            Text("\(count)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel("\(count) saved games")
+                        } else {
+                            Text("—")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel("Saved games count unavailable")
+                        }
                     }
                 }
 
@@ -365,6 +393,18 @@ struct LibraryView: View {
             ) else { return }
             errorMessage = "Couldn't remove saved game. Please try again."
         }
+    }
+}
+
+/// A nil total means the backend has NOT confirmed a count for the current
+/// account/session. In particular, a fail-closed empty shelf is not a zero.
+enum LibrarySavedCountPolicy {
+    static func confirmedCount(
+        visibleCount: Int, isSignedIn: Bool, isLoading: Bool,
+        hasError: Bool, currentSessionData: Bool
+    ) -> Int? {
+        guard isSignedIn, !isLoading, !hasError, currentSessionData else { return nil }
+        return visibleCount
     }
 }
 
