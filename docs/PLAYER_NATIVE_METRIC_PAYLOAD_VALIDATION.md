@@ -27,6 +27,12 @@ discarded. The risk is diagnostic/observability, not semantic scoring.
   lower sequence for every kind, duplicate/out-of-order events, schema
   mismatch, conflicting cross-kind fields, unknown kind, impossible values
   and document-epoch reset.
+- Adversarial follow-up: the Foundation bridge accepts `NSNumber(true)`
+  as `Int(1)`. Before consuming schema/sequence/timing/count values,
+  `strictInt` now explicitly rejects CFBoolean while retaining valid
+  integral NSNumber payloads. The native message handler also applies
+  this to run-result schema admission. Swift tests cover each numeric
+  event field; these pure tests do not replace real WebKit injection checks.
 
 ## Senior game-engine architect challenger / release limits
 
