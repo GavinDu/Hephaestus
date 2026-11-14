@@ -1,11 +1,14 @@
 """Offline unit tests for the actual native-smoke public fixture prerequisite."""
 import unittest
+from email.message import Message
+from unittest.mock import patch
 
 from public_fixture_preflight import (
     FixtureUnavailable,
     eligible_games,
     package_is_playable,
     package_url,
+    network_read_json,
     verify_fixture,
 )
 
@@ -140,6 +143,36 @@ class PublicFixtureTests(unittest.TestCase):
             with self.subTest(url=url):
                 with self.assertRaises(FixtureUnavailable):
                     package_url(url, "game")
+
+    def test_malformed_network_json_and_html_200_fail_closed(self):
+        class FakeResponse:
+            status = 200
+
+            def __init__(self, payload, content_type):
+                self._payload = payload
+                self.headers = Message()
+                self.headers.add_header("Content-Type", content_type)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size):
+                return self._payload[:size]
+
+        for payload, content_type, expected in (
+            (b"{invalid-json", "application/json", "invalid_json"),
+            (b"<html>not a creator/game</html>", "text/html",
+             "content_type_not_json"),
+        ):
+            with self.subTest(expected=expected):
+                with patch("public_fixture_preflight.request.build_opener") as opener:
+                    opener.return_value.open.return_value = FakeResponse(
+                        payload, content_type)
+                    with self.assertRaisesRegex(FixtureUnavailable, expected):
+                        network_read_json(FEED)
 
     def test_nonobject_entries_are_ignored_not_promoted(self):
         total, candidates = eligible_games({
