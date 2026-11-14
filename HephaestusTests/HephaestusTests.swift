@@ -93,6 +93,12 @@ struct HephaestusTests {
     }
 
     @Test func arcadePulseCommentFailureMessagesDoNotLeakRawTransportData() {
+        #expect(!CommentsErrorPresentation.showsConfirmedCount(
+            isLoading: true, loadFailed: false))
+        #expect(!CommentsErrorPresentation.showsConfirmedCount(
+            isLoading: false, loadFailed: true))
+        #expect(CommentsErrorPresentation.showsConfirmedCount(
+            isLoading: false, loadFailed: false))
         let raw = NSError(domain: "private-backend", code: 42, userInfo: [
             NSLocalizedDescriptionKey: "Bearer owner@example.test https://private.invalid/v1/comments"
         ])

@@ -2445,6 +2445,11 @@ private struct ReportGameSheet: View {
 enum CommentsErrorPresentation {
     enum Action: Equatable { case load, post, delete }
 
+    /// A failed or pending fetch does not authorize a verified zero count.
+    static func showsConfirmedCount(isLoading: Bool, loadFailed: Bool) -> Bool {
+        !isLoading && !loadFailed
+    }
+
     static func message(for error: Error, action: Action, signedIn: Bool) -> String {
         if let apiError = error as? APIError,
            case let .badStatus(status) = apiError {
@@ -2507,11 +2512,16 @@ private struct CommentsSheet: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    Text("\(comments.count)")
-                        .font(.caption.weight(.bold))
-                        .monospacedDigit()
-                        .foregroundStyle(ArcadePulseTheme.textSecondary)
-                        .accessibilityLabel("\(comments.count) loaded comments")
+                    // Unknown while loading/transport failed: do not display
+                    // a misleading 0 as if the server confirmed emptiness.
+                    if CommentsErrorPresentation.showsConfirmedCount(
+                        isLoading: isLoading, loadFailed: isLoadFailure) {
+                        Text("\(comments.count)")
+                            .font(.caption.weight(.bold))
+                            .monospacedDigit()
+                            .foregroundStyle(ArcadePulseTheme.textSecondary)
+                            .accessibilityLabel("\(comments.count) loaded comments")
+                    }
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
@@ -2598,6 +2608,10 @@ private struct CommentsSheet: View {
                         .textFieldStyle(.roundedBorder)
                         .lineLimit(1...4)
                         .submitLabel(.send)
+                        // Sending owns the draft until the server confirms;
+                        // disable edits so the completion cannot erase a
+                        // second message typed during the in-flight request.
+                        .disabled(isSubmitting)
                         .accessibilityIdentifier("comments.composer")
                     if isSubmitting {
                         ProgressView()
