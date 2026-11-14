@@ -450,7 +450,8 @@ final class PlayerSmokeTests: XCTestCase {
 
     /// Stall the actual public-feed transport only; never inject or approve
     /// a fake game. The production watchdog is 45s; this opt-in native test
-    /// uses 3s and must expose the same truthful Retry/Library recovery.
+    /// uses 10s so XCUITest can inspect the new loader before a second
+    /// genuine watchdog expiry; must still expose truthful Retry/Library.
     @MainActor
     func testArcadePulseStalledTransportReachesHonestRecovery() throws {
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
