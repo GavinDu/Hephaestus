@@ -62,7 +62,7 @@ struct HephaestusTests {
             for: APIError.badStatus(429), stage: .publish)
         #expect(limited.contains("Too many requests"))
         let generic = CreateErrorPresentation.message(
-            for NSError(domain: "server", code: 500), stage: .generate)
+            for: NSError(domain: "server", code: 500), stage: .generate)
         #expect(generic.contains("Game generation"))
     }
 
