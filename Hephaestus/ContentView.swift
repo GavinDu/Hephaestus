@@ -60,7 +60,11 @@ struct ContentView: View {
          (ProcessInfo.processInfo.arguments.contains("--ui-test-library-entry") ? .library : .discover))
     // On regular-width iPads, enter the full-screen playable feed first.
     // The system sidebar button still lets people reveal navigation.
-    @State private var sidebarVisibility: NavigationSplitViewVisibility = .detailOnly
+    @State private var sidebarVisibility: NavigationSplitViewVisibility =
+        // UI-test-only entry that reveals actual system navigation for full
+        // iPad Dynamic Type screenshot and tap verification. Real routes/data.
+        ProcessInfo.processInfo.arguments.contains("--ui-test-sidebar-open")
+            ? .all : .detailOnly
 
     var body: some View {
         Group {
