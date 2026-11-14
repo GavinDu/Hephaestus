@@ -1275,6 +1275,25 @@ final class PlayerSmokeTests: XCTestCase {
         }
         XCTAssertLessThanOrEqual(actions.frame.maxY, play.frame.minY + 1,
                                  "Large-text Actions must not overlap the real Play CTA.")
+
+        // When the *real feed* has a public creator, the enlarged shared
+        // identity must still be reachable and must not occlude Play. Never
+        // inject a synthetic long name to pass a visual screenshot gate:
+        // source data and signed-out/ownerless states remain authoritative.
+        let profileActions = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "View profile for ")
+        )
+        if let creator = profileActions.allElementsBoundByIndex.first(where: { $0.isHittable }) {
+            XCTAssertGreaterThan(creator.label.count, "View profile for ".count,
+                                 "Creator actions must announce real nonempty identity.")
+            XCTAssertGreaterThanOrEqual(creator.frame.height, 44,
+                                        "Large-type creator entry must remain a real 44pt target.")
+            XCTAssertLessThanOrEqual(creator.frame.maxY, play.frame.minY + 1,
+                                     "Large-type creator identity must not obscure Play.")
+            print("UI_EVALUATOR_CREATOR_LARGE_TEXT source=real_creator frame=\\(creator.frame)")
+        } else {
+            print("UI_EVALUATOR_CREATOR_LARGE_TEXT source=no_hittable_creator; no fake test account")
+        }
         actions.tap()
         // This menu reflects the *real* backend viewer state: previously
         // saved/liked games correctly show the inverse action, not a mock.
