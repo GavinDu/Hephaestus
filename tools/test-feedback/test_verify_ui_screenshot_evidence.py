@@ -229,6 +229,21 @@ class ScreenshotEvidenceTests(unittest.TestCase):
                 self.assertEqual(is_landscape, expected_orientation == "landscape")
                 self.assertTrue(dims["preferred_for_visual_review"])
 
+    def test_ipad_arcade_correctly_rotated_but_cropped_image_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            folder.mkdir()
+            self.fixture(folder, include_ipad_library=True, include_ipad_features=True)
+            # This is a structurally valid, correctly portrait-oriented PNG,
+            # but a shorter app-window capture is not full-screen evidence.
+            feature = "arcade-pulse-create-entry-ipad"
+            (folder / (feature + ".png")).write_bytes(
+                png(9, 20, 1, rgb=b"\\x21\\x50\\x80"))
+            with self.assertRaisesRegex(ValueError, "do not match real portrait full-screen reference"):
+                module.verify_and_copy(
+                    folder, Path(directory) / "out", require_ipad_library=True,
+                    require_ipad_arcade_features=True)
+
     def test_ipad_arcade_missing_or_wrong_orientation_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory) / "source"
