@@ -582,7 +582,7 @@ struct DiscoverView: View {
                                     isSaved: savedGameIDs.contains(game.id),
                                     isLiked: likedGameIDs.contains(game.id),
                                     isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
-                                    canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.currentUserID,
+                                    canFollowCreator: ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) && game.ownerID != BackendConfig.currentUserID,
                                     onPlay: { play(game) },
                                     onToggleSaved: { toggleSaved(game) },
                                     onToggleLike: { toggleLike(game) },
@@ -1428,7 +1428,10 @@ private struct ForYouGamePage: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("feed.expression.details")
             }
-            if !isCompact {
+            // Only real, navigable creator IDs deserve a profile button.
+            // A missing owner was previously shown as "Mini game" with a
+            // dead "View profile for Mini game" VoiceOver action.
+            if !isCompact, ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
             HStack(spacing: 8) {
                 ArcadePulseCreatorIdentity(
                     name: creatorName,
@@ -1774,7 +1777,7 @@ private struct ForYouPagerView: View {
             isSaved: savedGameIDs.contains(game.id),
             isLiked: likedGameIDs.contains(game.id),
             isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
-            canFollowCreator: game.ownerID != nil && game.ownerID != BackendConfig.currentUserID,
+            canFollowCreator: ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) && game.ownerID != BackendConfig.currentUserID,
             isSavePending: pendingSocialMutations.contains(.init(kind: .save, id: game.id)),
             isLikePending: pendingSocialMutations.contains(.init(kind: .like, id: game.id)),
             isFollowPending: game.ownerID.map {
