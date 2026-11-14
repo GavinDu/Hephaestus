@@ -525,7 +525,7 @@ final class PlayerNavigationFailureGate {
 }
 
 enum PlayerLoadFailure {
-    enum Category { case network, unavailable, invalidPackage, incompatible, accessDenied, unknown }
+    enum Category: Equatable { case network, unavailable, invalidPackage, incompatible, accessDenied, unknown }
 
     static let httpErrorDomain = "Hephaestus.PlayerHTTP"
 
@@ -577,6 +577,23 @@ enum PlayerLoadFailure {
         case .unknown:
             return "The player couldn't load this game."
         }
+    }
+}
+
+/// Permanent package/authorization outcomes cannot be fixed by repeatedly
+/// reloading the same WebKit document. Only transport failures recover
+/// automatically when the app foregrounds; unknown/WebContent failures can
+/// still offer an explicit user retry instead of an unbounded automatic loop.
+enum PlayerLoadRetryPolicy {
+    static func shouldOfferManualRetry(category: PlayerLoadFailure.Category?) -> Bool {
+        switch category {
+        case .network, .unknown, nil: return true
+        case .unavailable, .invalidPackage, .incompatible, .accessDenied: return false
+        }
+    }
+
+    static func shouldRetryOnForeground(category: PlayerLoadFailure.Category?) -> Bool {
+        category == .network
     }
 }
 
@@ -1168,6 +1185,7 @@ struct PixiPlayerSheet: View {
     @State private var wasBackgrounded = false
     @State private var isLoading = true
     @State private var loadError: String?
+    @State private var loadFailureCategory: PlayerLoadFailure.Category?
     @State private var sessionRevoked = false
     @State private var attempt = 0
     @State private var progress: Double = 0
@@ -1254,6 +1272,7 @@ struct PixiPlayerSheet: View {
     private func handleLoadFinish() {
         isLoading = false
         loadError = nil
+        loadFailureCategory = nil
         showSlowHint = false
         let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
         DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
@@ -1335,6 +1354,7 @@ struct PixiPlayerSheet: View {
                             holdVisible = false
                             // Raw detail goes to DevLog/telemetry;
                             // the card shows only the mapped message.
+                            loadFailureCategory = PlayerLoadFailure.category(for: error)
                             loadError = PlayerLoadFailure.userMessage(for: error)
                             let message = error.localizedDescription
                             DevLog.error(.player, "player load failed for \(gameID): \(message)")
@@ -1362,6 +1382,7 @@ struct PixiPlayerSheet: View {
                                 attempt += 1
                             } else {
                                 isLoading = false
+                                loadFailureCategory = .unknown
                                 loadError = PlayerWebContentTerminationPolicy.repeatedTerminationMessage
                                 DevLog.error(.player, "web content process terminated repeatedly for \(gameID)")
                                 PlayerTelemetry.report(gameID: gameID, kind: "ios-webview-terminated",
@@ -1458,19 +1479,22 @@ struct PixiPlayerSheet: View {
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 32)
-                            Button("Retry") {
-                                self.loadError = nil
-                                self.autoReloads = 0
-                                isLoading = true
-                                progress = 0
-                                showSlowHint = false
-                                loadStartedAt = Date()
-                                attempt += 1
+                            if PlayerLoadRetryPolicy.shouldOfferManualRetry(category: loadFailureCategory) {
+                                Button("Retry") {
+                                    self.loadError = nil
+                                    self.loadFailureCategory = nil
+                                    self.autoReloads = 0
+                                    isLoading = true
+                                    progress = 0
+                                    showSlowHint = false
+                                    loadStartedAt = Date()
+                                    attempt += 1
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                                .accessibilityIdentifier("player.retry")
+                                .disabled(sessionRevoked)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .frame(minHeight: HephaestusDesign.minimumActionHeight)
-                            .accessibilityIdentifier("player.retry")
-                            .disabled(sessionRevoked)
                             Button("Return to feed") {
                                 finishToFeed()
                             }
@@ -1607,10 +1631,12 @@ struct PixiPlayerSheet: View {
                     // Retry only a failed load, and only when connectivity is back.
                     // A successfully loaded game stays on screen; foregrounding does
                     // not trigger a disruptive reload or reset current gameplay.
-                    if !sessionRevoked && PlayerLifecyclePolicy.shouldRetryAfterForeground(
-                        wasBackgrounded: true, isOffline: pathMonitor.isOffline, hasError: loadError != nil
-                    ) {
+                    if !sessionRevoked && PlayerLoadRetryPolicy.shouldRetryOnForeground(category: loadFailureCategory) &&
+                       PlayerLifecyclePolicy.shouldRetryAfterForeground(
+                           wasBackgrounded: true, isOffline: pathMonitor.isOffline, hasError: loadError != nil
+                       ) {
                         loadError = nil
+                        loadFailureCategory = nil
                         isLoading = true
                         progress = 0
                         showSlowHint = false
@@ -1634,6 +1660,7 @@ struct PixiPlayerSheet: View {
                 isLoading = false
                 showSlowHint = false
                 holdVisible = false
+                loadFailureCategory = .accessDenied
                 loadError = "Your account session changed. Return to the feed and reopen this game."
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
