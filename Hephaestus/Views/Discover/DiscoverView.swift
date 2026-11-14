@@ -1390,7 +1390,7 @@ private struct ForYouGamePage: View {
                         showsAccessibleActionsSheet = false
                         onOpenDetails()
                     }
-                    Button("Report game", systemImage: "flag", role: .destructive) {
+                    Button("Report game", role: .destructive) {
                         showsAccessibleActionsSheet = false
                         onReport()
                     }
@@ -1401,8 +1401,7 @@ private struct ForYouGamePage: View {
                         onNotInterested()
                     }
                     if game.ownerID != nil {
-                        Button("Block creator", systemImage: "person.crop.circle.badge.xmark",
-                               role: .destructive) {
+                        Button("Block creator", role: .destructive) {
                             showsAccessibleActionsSheet = false
                             onBlockCreator()
                         }
