@@ -452,8 +452,16 @@ final class PlayerSmokeTests: XCTestCase {
 
         library.tap()
         let destination = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
-        XCTAssertTrue(destination.waitForExistence(timeout: 10),
-                      "Open Library must navigate to native Library; no fake offline game.")
+        XCTAssertTrue(destination.waitForExistence(timeout: 10) && destination.isHittable,
+                      "Open Library must navigate to a visible, usable real Library, not a stale iPad detail.")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCTAssertFalse(app.buttons["feed.error.retry"].firstMatch.isHittable,
+                           "The old Discover recovery view must not cover the Library destination.")
+        }
+        let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        arrived.name = "arcade-pulse-ipad-after-feed-to-library"
+        arrived.lifetime = .keepAlways
+        add(arrived)
     }
 
     /// Verify the real saved/recent game library remains reachable through
@@ -740,8 +748,16 @@ final class PlayerSmokeTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(openProfile.waitForExistence(timeout: 10) && openProfile.isHittable)
         openProfile.tap()
-        XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
-                      "The Studio CTA must navigate to the actual Profile sign-in flow.")
+        let realSignIn = app.buttons["Sign in with Apple"].firstMatch
+        XCTAssertTrue(realSignIn.waitForExistence(timeout: 10) && realSignIn.isHittable,
+                      "Studio must navigate to the actual visible Profile sign-in, not stale Studio.")
+        XCTAssertGreaterThanOrEqual(realSignIn.frame.height, 44)
+        XCTAssertFalse(app.buttons["studio.openProfile"].firstMatch.isHittable,
+                       "An old hidden Studio CTA must not own the destination after navigation.")
+        let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        arrived.name = "arcade-pulse-ipad-after-studio-to-profile"
+        arrived.lifetime = .keepAlways
+        add(arrived)
     }
 
     /// In accessibility text sizes the multi-column explainer is intentionally

@@ -94,7 +94,11 @@ struct ContentView: View {
 
     private var expandedLayout: some View {
         NavigationSplitView(columnVisibility: $sidebarVisibility) {
-            List(selection: $selection) {
+            // The detail's programmatic navigation must not race a hidden
+            // two-way sidebar List(selection:) binding on regular iPad.
+            // Explicit sidebar buttons and a single section owner are reliable
+            // both when sidebar is revealed and when an in-detail CTA fires.
+            List {
                 Section("Play") {
                     navigationRow(.discover)
                     navigationRow(.create)
@@ -112,6 +116,9 @@ struct ContentView: View {
             .navigationTitle("Hephaestus")
         } detail: {
             destination(for: selection ?? .discover)
+                // Each destination has its own NavigationStack. Retire its
+                // old internal path on a genuine section transition.
+                .id(selection ?? .discover)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationSplitViewStyle(.balanced)
@@ -119,24 +126,46 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
     }
 
+    private func navigate(to section: AppSection, fromSidebar: Bool = false) {
+        selection = section
+        // Focus routes initiated in Discover/Studio/Library. A deliberately
+        // opened sidebar remains open when navigating through its own rows.
+        if !fromSidebar { sidebarVisibility = .detailOnly }
+    }
+
     private func navigationRow(_ section: AppSection) -> some View {
-        Label(section.title, systemImage: section.symbol)
-            .lineLimit(1)
-            .minimumScaleFactor(0.9)
-            .tag(Optional(section))
+        Button {
+            navigate(to: section, fromSidebar: true)
+        } label: {
+            Label(section.title, systemImage: section.symbol)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: ArcadePulseTheme.minimumTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(selection == section
+                         ? ArcadePulseTheme.textPrimary
+                         : ArcadePulseTheme.textSecondary)
+        .listRowBackground(selection == section
+                           ? ArcadePulseTheme.electricViolet.opacity(0.24)
+                           : Color.clear)
+        .accessibilityAddTraits(selection == section ? .isSelected : [])
+        .accessibilityIdentifier("nav.sidebar.\(section.rawValue)")
     }
 
     @ViewBuilder
     private func destination(for section: AppSection) -> some View {
         switch section {
         case .discover:
-            DiscoverView(onOpenLibrary: { selection = .library })
+            DiscoverView(onOpenLibrary: { navigate(to: .library) })
         case .create:
-            CreateView(onOpenProfile: { selection = .profile })
+            CreateView(onOpenProfile: { navigate(to: .profile) })
         case .studio:
-            CreatorStudioView(onOpenProfile: { selection = .profile })
+            CreatorStudioView(onOpenProfile: { navigate(to: .profile) })
         case .library:
-            LibraryView(onOpenProfile: { selection = .profile })
+            LibraryView(onOpenProfile: { navigate(to: .profile) })
         case .profile:
             ProfileView()
         }
