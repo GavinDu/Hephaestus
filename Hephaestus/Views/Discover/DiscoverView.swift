@@ -39,6 +39,18 @@ final class FeedRequestCoordinator {
         guard isCurrent(requestGeneration) else { return }
         activeRequest = nil
     }
+
+    /// An overdue response must never repopulate a feed after its fallback
+    /// becomes visible or a later retry starts. This revokes the generation
+    /// BEFORE cancelling the transport, so late completions are ignored.
+    @discardableResult
+    func expireIfCurrent(_ requestGeneration: Int) -> Bool {
+        guard isCurrent(requestGeneration) else { return false }
+        generation += 1
+        activeRequest?.cancel()
+        activeRequest = nil
+        return true
+    }
 }
 
 /// Keep the native search drawer out of compact iPhone landscape's tiny
@@ -96,6 +108,28 @@ struct DiscoverView: View {
         }
     }
 
+    private var feedLoadingRetry: some View {
+        Button {
+            Task { await load() }
+        } label: {
+            Label("Retry loading", systemImage: "arrow.clockwise")
+                .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("feed.retryLoading")
+    }
+
+    @ViewBuilder private var feedSlowLoadingLibrary: some View {
+        if let onOpenLibrary {
+            Button(action: onOpenLibrary) {
+                Label("Open Library", systemImage: "bookmark")
+                    .frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("feed.loading.library")
+        }
+    }
+
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
@@ -113,6 +147,7 @@ struct DiscoverView: View {
     @State private var socialMutationGate = FeedSocialMutationGate()
     @State private var socialMutationEpoch = 0
     @State private var isLoading = false
+    @State private var isSlowLoading = false
     @State private var searchText = ""
     @State private var savedGameIDs = Set<String>()
     @State private var followedCreatorIDs = Set<String>()
@@ -289,6 +324,8 @@ struct DiscoverView: View {
                                     Task { await loadMore() }
                                 }
                                 .font(.subheadline.weight(.semibold))
+                                .frame(minWidth: 44, minHeight: 44)
+                                .accessibilityLabel("Retry loading more games")
                             }
                             .padding(12)
                             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
@@ -297,6 +334,42 @@ struct DiscoverView: View {
                             .accessibilityIdentifier("feed.pagination.retry")
                         }
                     }
+                } else if isLoading && games.isEmpty && verticalSizeClass == .compact {
+                    // A scrolling grid of skeletons pushes the real actions out
+                    // of the tiny iPhone landscape viewport. Keep recovery at
+                    // the top of the native stage with a stable hit-test frame.
+                    // Portrait and iPad retain their full skeleton layout.
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Finding something fun…")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Loading games")
+
+                        if isSlowLoading {
+                            Text(onOpenLibrary == nil
+                                 ? "Still connecting to the live game feed. You can retry."
+                                 : "Still connecting to the live game feed. You can retry or open Library.")
+                                .font(.subheadline)
+                                .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("feed.loading.slow")
+                        }
+
+                        HStack(spacing: 12) {
+                            feedLoadingRetry
+                            if isSlowLoading {
+                                feedSlowLoadingLibrary
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
                     ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
@@ -332,17 +405,31 @@ struct DiscoverView: View {
                             }
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel("Loading games")
-                            // A slow or suspended network request must not trap the
-                            // player behind an unclickable skeleton. This retries
-                            // with a NEW request, cancelling the previous one.
-                            Button {
-                                Task { await load() }
-                            } label: {
-                                Label("Retry loading", systemImage: "arrow.clockwise")
-                                    .frame(minHeight: 44)
+                            if isSlowLoading {
+                                Text(onOpenLibrary == nil
+                                     ? "Still connecting to the live game feed. You can retry."
+                                     : "Still connecting to the live game feed. You can retry or open Library.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .accessibilityIdentifier("feed.loading.slow")
+                                // Keep both actions visible above the skeleton in
+                                // short iPhone landscape, where a vertical stack
+                                // can hide Retry beneath the tab navigation.
+                                if verticalSizeClass == .compact {
+                                    HStack(spacing: 12) {
+                                        feedLoadingRetry
+                                        feedSlowLoadingLibrary
+                                    }
+                                } else {
+                                    feedLoadingRetry
+                                    feedSlowLoadingLibrary
+                                }
+                            } else {
+                                // Retry stays usable even before the slow hint.
+                                // A NEW request revokes the previous generation.
+                                feedLoadingRetry
                             }
-                            .buttonStyle(.bordered)
-                            .accessibilityIdentifier("feed.retryLoading")
 
                             LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: HephaestusDesign.sectionSpacing) {
                                 ForEach(0..<(horizontalSizeClass == .regular ? 4 : 2), id: \.self) { _ in
@@ -373,6 +460,9 @@ struct DiscoverView: View {
                                               design: .rounded).weight(.bold))
                                 .foregroundStyle(.white)
                                 .accessibilityAddTraits(.isHeader)
+                                // Stable on the native error title, not on a
+                                // container that wraps tappable Retry/Library.
+                                .accessibilityIdentifier("feed.error.recovery")
                             Text(errorMessage)
                                 .font(.subheadline)
                                 .foregroundStyle(ArcadePulseTheme.textSecondary)
@@ -401,8 +491,8 @@ struct DiscoverView: View {
                                     in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, verticalSizeClass == .compact ? 8 : 32)
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("feed.error.recovery")
+                        // Keep the recovery Buttons independent for VoiceOver
+                        // and native taps after the loading state is replaced.
                     } else if visibleGames.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "magnifyingglass")
@@ -767,7 +857,7 @@ struct DiscoverView: View {
                 requestedScope: requestedScope, currentScope: selectedFeed,
                 requestedGeneration: requestedGeneration,
                 currentGeneration: feedRequestCoordinator.generation) {
-                loadMoreError = "Couldn't load more games: \(error.localizedDescription)"
+                loadMoreError = FeedErrorPresentation.paginationMessage(for: error)
             }
         }
     }
@@ -927,13 +1017,57 @@ struct DiscoverView: View {
 
     private func load() async {
         let requestedScope = selectedFeed
+        // A deterministic UI-only stalled transport permits full native
+        // screenshot verification of the real watchdog transition. No
+        // synthetic game, success response or production feature flag exists.
+        let verifyStalledFeed = ProcessInfo.processInfo.arguments.contains(
+            "--ui-test-stalled-feed"
+        )
         let (generation, request) = feedRequestCoordinator.begin {
-            try await BackendAPI.shared.fetchFeed(scope: requestedScope)
+            if verifyStalledFeed {
+                try await Task.sleep(for: .seconds(120))
+                throw URLError(.timedOut)
+            }
+            return try await BackendAPI.shared.fetchFeed(scope: requestedScope)
         }
         isLoading = true
+        isSlowLoading = false
+        // Report an unusually slow live request before the full watchdog
+        // deadline. This is informative only: it never calls the network,
+        // cancels a request, creates games, or supersedes a later Retry.
+        let slowLoadingHint = Task { @MainActor in
+            do {
+                try await Task.sleep(for: verifyStalledFeed
+                                     ? .milliseconds(650) : .seconds(15))
+            } catch { return }
+            guard isLoading, games.isEmpty,
+                  feedRequestCoordinator.isCurrent(generation) else { return }
+            isSlowLoading = true
+        }
+        // The UI-test stall lasts 35 seconds so native XCTest startup and
+        // accessibility snapshots cannot overtake the loading-hint phase.
+        // Production keeps its independent 45-second fail-closed watchdog.
+        // No response or game is synthesized, and an actual timeout still occurs.
+        // Production still uses the original 45-second fail-closed budget.
+        // A stalled production connection must not leave the Discover screen
+        // behind an endless skeleton. The fallback uses real Retry/Library,
+        // not a synthetic game or local cached public post. Only the active
+        // generation may expire, so overlapping retries cannot be revoked.
+        let loadingWatchdog = Task { @MainActor in
+            do { try await Task.sleep(for: verifyStalledFeed ? .seconds(35) : .seconds(45)) }
+            catch { return }
+            guard isLoading, games.isEmpty,
+                  feedRequestCoordinator.expireIfCurrent(generation) else { return }
+            isLoading = false
+            isSlowLoading = false
+            errorMessage = "The game feed is taking too long to load. Try again or open Library."
+        }
         defer {
+            loadingWatchdog.cancel()
+            slowLoadingHint.cancel()
             if feedRequestCoordinator.isCurrent(generation) {
                 isLoading = false
+                isSlowLoading = false
                 feedRequestCoordinator.finishIfCurrent(generation)
             }
         }
@@ -955,6 +1089,7 @@ struct DiscoverView: View {
             // do not keep the entire feed behind its loading skeleton while those
             // secondary endpoints respond or recover from a transient outage.
             isLoading = false
+            isSlowLoading = false
 
             let hasServerViewerState = loadedGames.games.contains {
                 $0.viewerLiked != nil || $0.viewerSaved != nil || $0.viewerFollowing != nil
@@ -988,6 +1123,12 @@ struct DiscoverView: View {
 /// surfacing raw TLS/transport jargon as the primary recovery explanation.
 /// The UI still exposes Retry and the actual saved-game Library route.
 enum FeedErrorPresentation {
+    /// The main feed and its pagination share privacy-safe transport copy.
+    /// A raw error can contain a private network URL or bearer credentials.
+    static func paginationMessage(for error: Error) -> String {
+        "Couldn't load more games. " + message(for: error)
+    }
+
     static func message(for error: Error) -> String {
         switch (error as? URLError)?.code {
         case .secureConnectionFailed, .serverCertificateHasBadDate,

@@ -1327,6 +1327,33 @@ struct HephaestusTests {
     #expect(RecentGames.load(for: "private-owner-B", defaults: defaults).count == 1)
 }
 
+// The public feed must never show a previous request's cards after a
+// timed-out skeleton has switched to the real Retry/Library recovery view.
+@Test @MainActor func arcadePulseFeedTimeoutRevokesStaleNetworkGeneration() {
+    let coordinator = FeedRequestCoordinator()
+    let first = coordinator.begin {
+        try await Task.sleep(for: .seconds(120))
+        throw CancellationError()
+    }
+    #expect(coordinator.isCurrent(first.generation))
+    #expect(coordinator.expireIfCurrent(first.generation))
+    #expect(!coordinator.isCurrent(first.generation))
+    #expect(!coordinator.expireIfCurrent(first.generation),
+            "A stale watchdog must not revoke the next request.")
+
+    let next = coordinator.begin {
+        try await Task.sleep(for: .seconds(120))
+        throw CancellationError()
+    }
+    #expect(coordinator.isCurrent(next.generation))
+    #expect(!coordinator.expireIfCurrent(first.generation),
+            "An old timeout cannot cancel a later user Retry.")
+    #expect(coordinator.isCurrent(next.generation))
+    next.request.cancel()
+    first.request.cancel()
+}
+
+
 // A live HTTPS outage is a real error; it must produce a legible recovery
 // explanation rather than raw TLS/certificate jargon or fabricated feed cards.
 @Test func arcadePulseFeedFailureCopyIsActionableAndTruthful() {
@@ -1346,6 +1373,21 @@ struct HephaestusTests {
     let unexpected = FeedErrorPresentation.message(for: NSError(domain: "other", code: 500))
     #expect(unexpected.contains("isn't available"))
     #expect(!unexpected.localizedCaseInsensitiveContains("NSError"))
+
+    let privateError = NSError(
+        domain: "https://internal.example.invalid", code: 500,
+        userInfo: [NSLocalizedDescriptionKey:
+            "Bearer secret user@example.test https://internal.example.invalid/feed?page=2"]
+    )
+    let loadMore = FeedErrorPresentation.paginationMessage(for: privateError)
+    #expect(loadMore.contains("Couldn't load more games"))
+    #expect(loadMore.contains("try again"))
+    #expect(!loadMore.contains("internal.example.invalid"))
+    #expect(!loadMore.contains("user@example.test"))
+    #expect(!loadMore.contains("Bearer"))
+    #expect(!loadMore.contains("secret"))
+    #expect(FeedErrorPresentation.paginationMessage(for: URLError(.timedOut))
+        .contains("taking too long"))
 }
 
 @Test func productionHostLifecycleTransitionsKeepMilestonesDistinct() {

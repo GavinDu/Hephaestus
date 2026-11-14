@@ -94,7 +94,12 @@ struct ContentView: View {
 
     private var expandedLayout: some View {
         NavigationSplitView(columnVisibility: $sidebarVisibility) {
-            List(selection: $selection) {
+            // Programmatic navigation originates inside the detail column
+            // (feed recovery → Library, Studio → Profile). Binding sidebar
+            // List(selection:) to the SAME state can reassert the old hidden
+            // row on iPad while detail-only, leaving users on a dead page.
+            // Use explicit real sidebar buttons with one destination owner.
+            List {
                 Section("Play") {
                     navigationRow(.discover)
                     navigationRow(.create)
@@ -112,6 +117,10 @@ struct ContentView: View {
             .navigationTitle("Hephaestus")
         } detail: {
             destination(for: selection ?? .discover)
+                // Each section embeds its own NavigationStack. Reset that
+                // stack when the destination changes so the previous
+                // Studio/Discover hierarchy cannot survive the transition.
+                .id(selection ?? .discover)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationSplitViewStyle(.balanced)
@@ -119,24 +128,47 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
     }
 
+    private func navigate(to section: AppSection, fromSidebar: Bool = false) {
+        selection = section
+        // A CTA inside the detail should focus the destination. But when a
+        // user explicitly opened the iPad sidebar to browse sections, keep
+        // it open instead of unexpectedly collapsing it after every tap.
+        if !fromSidebar { sidebarVisibility = .detailOnly }
+    }
+
     private func navigationRow(_ section: AppSection) -> some View {
-        Label(section.title, systemImage: section.symbol)
-            .lineLimit(1)
-            .minimumScaleFactor(0.9)
-            .tag(Optional(section))
+        Button {
+            navigate(to: section, fromSidebar: true)
+        } label: {
+            Label(section.title, systemImage: section.symbol)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: ArcadePulseTheme.minimumTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(selection == section
+                         ? ArcadePulseTheme.textPrimary
+                         : ArcadePulseTheme.textSecondary)
+        .listRowBackground(selection == section
+                           ? ArcadePulseTheme.electricViolet.opacity(0.24)
+                           : Color.clear)
+        .accessibilityAddTraits(selection == section ? .isSelected : [])
+        .accessibilityIdentifier("nav.sidebar.\(section.rawValue)")
     }
 
     @ViewBuilder
     private func destination(for section: AppSection) -> some View {
         switch section {
         case .discover:
-            DiscoverView(onOpenLibrary: { selection = .library })
+            DiscoverView(onOpenLibrary: { navigate(to: .library) })
         case .create:
-            CreateView(onOpenProfile: { selection = .profile })
+            CreateView(onOpenProfile: { navigate(to: .profile) })
         case .studio:
-            CreatorStudioView(onOpenProfile: { selection = .profile })
+            CreatorStudioView(onOpenProfile: { navigate(to: .profile) })
         case .library:
-            LibraryView(onOpenProfile: { selection = .profile })
+            LibraryView(onOpenProfile: { navigate(to: .profile) })
         case .profile:
             ProfileView()
         }

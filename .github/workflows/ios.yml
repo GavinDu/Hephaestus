@@ -216,6 +216,8 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateEntryConsentAndControls \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedUnavailableRecoveryToLibrary \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStalledFeedWatchdogOpensRecovery \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSlowFeedCanOpenRealLibrary \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/ipad-feed-ui.log || {
               grep -E "error:|XCTAssert" /tmp/ipad-feed-ui.log | sort -u | head -30 | while read -r l; do
@@ -252,7 +254,8 @@ jobs:
           python3 tools/test-feedback/verify-ui-screenshot-evidence.py \
             --input /tmp/ipad-feed-ui-screenshots \
             --out /tmp/ipad-feed-ui-review \
-            --require-ipad-library
+            --require-ipad-library \
+            --require-slow-feed
       - name: Upload iPad UI evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4

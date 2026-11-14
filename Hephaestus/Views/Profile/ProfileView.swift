@@ -78,6 +78,7 @@ struct ProfileView: View {
                         .signInWithAppleButtonStyle(.black)
                         .frame(height: 44)
                         .accessibilityLabel("Sign in with Apple")
+                        .accessibilityIdentifier("profile.appleSignIn")
                         Text("Sign in with Apple to publish, follow, and save. No name or email is requested; the backend only sees an opaque Apple identifier, and sessions last 30 days.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
