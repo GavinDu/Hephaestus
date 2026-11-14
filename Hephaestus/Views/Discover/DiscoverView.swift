@@ -1012,13 +1012,16 @@ struct DiscoverView: View {
             ) else { return }
             isSlowLoading = true
         }
-        // Real production feeds have a 45s bounded loading budget. A
-        // deliberately stalled native UITest uses 3s to prove the identical
-        // recovery state without consuming the whole macOS test budget.
+        // Real production feeds keep the unchanged 45s bound. The
+        // deliberately stalled native UI test needs a 10s hard watchdog:
+        // XCUITest can take ~5s to inspect the genuine new Retry loader,
+        // so a 3s fixture made the *second legitimate timeout* appear while
+        // asserting the old timeout was dismissed. This changes only DEBUG
+        // test transport timing, never real backend policy or assertions.
         let watchdog = Task { @MainActor in
             do {
                 try await Task.sleep(for: testingEarlyHint ? .seconds(35) :
-                    (testingStalledTransport ? .seconds(3) : .seconds(45)))
+                    (testingStalledTransport ? .seconds(10) : .seconds(45)))
             } catch { return }
             guard isLoading, games.isEmpty,
                   requestedScope == selectedFeed,
