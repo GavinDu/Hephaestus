@@ -2179,6 +2179,7 @@ private struct CreatorDiscoverySheet: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("View creator \(creator.creator_id), \(creator.post_count) public games")
+                            .accessibilityIdentifier("creator.discovery.row.\(creator.creator_id)")
                         }
                     }
                     if nextCursor != nil {
