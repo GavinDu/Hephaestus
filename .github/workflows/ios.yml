@@ -16,6 +16,64 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Independent Linux contract gate: diagnose the real deployed creator list
+  # without consuming a scarce macOS/Xcode runner or exposing creator IDs.
+  creator-discovery-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Validate live creator discovery response shape without values
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file=$(mktemp)
+          http=$(curl -sSL --retry 3 --retry-all-errors --retry-delay 5 \
+            --max-time 35 -o "$response_file" -w '%{http_code}' \
+            'https://html-5-game-generator.replit.app/v1/creators?limit=20' || true)
+          echo "creator-discovery contract HTTP $http"
+          if [ "$http" != "200" ]; then
+            echo "::error title=creator-contract::Live creator endpoint did not return HTTP 200"
+            exit 1
+          fi
+          python3 - "$response_file" <<'PY'
+          import json, sys
+          from pathlib import Path
+          try:
+              payload = json.loads(Path(sys.argv[1]).read_bytes())
+          except (ValueError, UnicodeDecodeError):
+              print("::error title=creator-contract::Deployed creator endpoint is not JSON")
+              sys.exit(1)
+          if not isinstance(payload, dict):
+              print("::error title=creator-contract::Deployed creator top-level JSON is not an object")
+              sys.exit(1)
+          print("creator-discovery top-level keys=" + ",".join(sorted(payload.keys())))
+          creators = payload.get("creators")
+          cursor = payload.get("next_cursor")
+          if not isinstance(creators, list) or (cursor is not None and not isinstance(cursor, str)):
+              print("::error title=creator-contract::creators array/next_cursor optional string contract differs")
+              sys.exit(1)
+          print("creator-discovery count=" + str(len(creators)))
+          for index, row in enumerate(creators):
+              if not isinstance(row, dict):
+                  print("::error title=creator-contract::Creator row is not an object")
+                  sys.exit(1)
+              if index == 0:
+                  print("creator-discovery row keys=" + ",".join(sorted(row.keys())))
+                  print("creator-discovery first-row types=" + ",".join(
+                      f"{k}:{type(v).__name__}" for k,v in sorted(row.items())))
+              if not isinstance(row.get("creator_id"), str) or not row["creator_id"]:
+                  print("::error title=creator-contract::Creator ID is not a nonempty string")
+                  sys.exit(1)
+              count = row.get("post_count")
+              if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                  print("::error title=creator-contract::Creator post count is not a valid integer")
+                  sys.exit(1)
+              topics = row.get("topics")
+              if not isinstance(topics, list) or not all(isinstance(t, str) for t in topics):
+                  print("::error title=creator-contract::Creator topics is not a string array")
+                  sys.exit(1)
+          print("Live creator discovery JSON matches native decode contract")
+          PY
   xcode:
     runs-on: macos-latest
     timeout-minutes: 30
