@@ -1304,6 +1304,20 @@ struct HephaestusTests {
 }
 
 
+@Test func playerAppBackgroundCannotEvictAttachedInteractiveGame() {
+    // App background notification is observed on MainActor; only a still
+    // speculative, unattached view is eligible for eviction. A rapid Play
+    // attach between notification and Task execution must win ownership.
+    #expect(PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: false, hasPooledView: true))
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: true, hasPooledView: true))
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: false, hasPooledView: false))
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: true, hasPooledView: false))
+}
+
 // Saved games are owner-private even when the UI also has on-device recent
 // entries. No response from the old user or an old retry may restore titles.
 @Test func arcadePulseLibrarySavedResponsesAreAccountBound() {
