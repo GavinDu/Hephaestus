@@ -121,6 +121,22 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(play.exists,
                       "Discover feed should offer at least one playable game card after bounded retries. UI: \(app.debugDescription)")
         print("SMOKE: Play button visible")
+        // Capture the real settled game identity before entering native play.
+        // The feed renders exactly one post; no synthetic fixture is injected.
+        let originPager = app.descendants(matching: .any)["feed.forYou.pager"].firstMatch
+        let originTitle = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title.")
+        ).firstMatch
+        XCTAssertTrue(originPager.exists && originPager.isHittable,
+                      "The playable card must belong to the settled feed pager.")
+        XCTAssertTrue(originTitle.exists && originTitle.isHittable,
+                      "One real game title must be visible before entering the player.")
+        let originGameTitleID = originTitle.identifier
+        XCTAssertFalse(originGameTitleID.isEmpty)
+        let originShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        originShot.name = "arcade-pulse-player-origin-before-play"
+        originShot.lifetime = .keepAlways
+        add(originShot)
         play.tap()
 
         // The player is a bridgeless WKWebView in a full-screen sheet;
@@ -158,6 +174,37 @@ final class PlayerSmokeTests: XCTestCase {
         shot.name = "player-after-boot"
         shot.lifetime = .keepAlways
         add(shot)
+
+        // Full-screen WKWebView owns gameplay input; feed gestures must not
+        // receive input through the player. Keep the actual 44pt escape.
+        XCTAssertFalse(originPager.isHittable,
+                       "The feed pager must not intercept gameplay gestures.")
+        XCTAssertTrue(done.isHittable && done.frame.height >= 44,
+                      "Done must remain a reachable native 44pt exit.")
+        done.tap()
+
+        // A server-verified completion may legitimately present a separate
+        // run result after closing play. Dismiss its genuine Done control.
+        let resultNavigation = app.navigationBars["Run complete"].firstMatch
+        if resultNavigation.waitForExistence(timeout: 3) {
+            let resultDone = resultNavigation.buttons["Done"].firstMatch
+            XCTAssertTrue(resultDone.waitForExistence(timeout: 5),
+                          "A completed run must retain a real return-to-feed control.")
+            resultDone.tap()
+        }
+
+        let returnedTitle = app.staticTexts[originGameTitleID].firstMatch
+        XCTAssertTrue(returnedTitle.waitForExistence(timeout: 15) && returnedTitle.isHittable,
+                      "Done must restore the exact source game, not another feed post.")
+        let returnedPager = app.descendants(matching: .any)["feed.forYou.pager"].firstMatch
+        XCTAssertTrue(returnedPager.exists && returnedPager.isHittable,
+                      "The native feed pager must regain input after play.")
+        XCTAssertTrue(returnedTitle.frame.intersects(returnedPager.frame),
+                      "The restored real game title must intersect the pager viewport.")
+        let restoredShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        restoredShot.name = "arcade-pulse-player-origin-after-return"
+        restoredShot.lifetime = .keepAlways
+        add(restoredShot)
     }
 
 
