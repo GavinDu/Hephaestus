@@ -12,6 +12,43 @@ import Testing
 // App-level tests will regrow around the WebView player and the
 // creation flow.
 struct HephaestusTests {
+    @Test func arcadePulseCreatorDiscoveryErrorsNeverLeakNetworkSecrets() {
+        let privateError = NSError(
+            domain: "https://internal.creator.local/api/owners",
+            code: 503,
+            userInfo: [NSLocalizedDescriptionKey:
+                "https://internal.creator.local?token=ownerSecret bearer hiddenAccount"]
+        )
+        let initial = CreatorDiscoveryErrorPresentation.message(
+            for: privateError, isPagination: false)
+        #expect(initial.hasPrefix("Couldn't load creators."))
+        #expect(initial.localizedCaseInsensitiveContains("try again"))
+        for secret in ["internal.creator.local", "ownerSecret", "hiddenAccount", "bearer", "503"] {
+            #expect(!initial.contains(secret))
+        }
+        let page = CreatorDiscoveryErrorPresentation.message(
+            for: privateError, isPagination: true)
+        #expect(page.hasPrefix("Couldn't load more creators."))
+        #expect(!page.contains("internal.creator.local"))
+        let offline = CreatorDiscoveryErrorPresentation.message(
+            for: URLError(.notConnectedToInternet), isPagination: false)
+        #expect(offline.localizedCaseInsensitiveContains("offline"))
+        let tls = CreatorDiscoveryErrorPresentation.message(
+            for: URLError(.secureConnectionFailed), isPagination: false)
+        #expect(tls.contains("secure connection"))
+        #expect(!tls.localizedCaseInsensitiveContains("certificate"))
+        let slow = CreatorDiscoveryErrorPresentation.message(
+            for: URLError(.timedOut), isPagination: true)
+        #expect(slow.contains("taking too long"))
+        let limited = CreatorDiscoveryErrorPresentation.message(
+            for: APIError.badStatus(429), isPagination: false)
+        #expect(limited.contains("Too many requests"))
+        let expired = CreatorDiscoveryErrorPresentation.message(
+            for: APIError.badStatus(401), isPagination: false)
+        #expect(expired.contains("Profile"))
+    }
+
+
     @Test func arcadePulseLibrarySavedCountNeverInventsZeroBeforeConfirmedGet() {
         // Current-user/current-credential and successful GET are required:
         // an empty fail-closed array must not be announced as zero saves.
