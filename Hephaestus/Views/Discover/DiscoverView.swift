@@ -2440,12 +2440,55 @@ private struct ReportGameSheet: View {
     }
 }
 
+/// Show fixed native copy, never raw URLSession/NSError localizedDescription
+/// that could expose backend URLs, account identifiers or tokens.
+enum CommentsErrorPresentation {
+    enum Action: Equatable { case load, post, delete }
+
+    /// A failed or pending fetch does not authorize a verified zero count.
+    static func showsConfirmedCount(isLoading: Bool, loadFailed: Bool) -> Bool {
+        !isLoading && !loadFailed
+    }
+
+    static func message(for error: Error, action: Action, signedIn: Bool) -> String {
+        if let apiError = error as? APIError,
+           case let .badStatus(status) = apiError {
+            if status == 401 { return "Your session has expired. Sign in again from Profile." }
+            if status == 403 { return "This comment action isn't allowed for this account." }
+            if status == 429 { return "Too many requests. Try again in a little while." }
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .secureConnectionFailed:
+                return "A secure connection couldn't be established. Try again."
+            case .notConnectedToInternet:
+                return "You're offline. Reconnect, then try again."
+            case .timedOut:
+                return "The connection took too long. Try again."
+            default:
+                break
+            }
+        }
+        if !signedIn && action != .load {
+            return "Sign in from Profile to manage your comments."
+        }
+        switch action {
+        case .load: return "Comments aren't available right now. Try again."
+        case .post: return "Couldn't send your comment. Your draft is saved here so you can retry."
+        case .delete: return "Couldn't delete this comment. Try again."
+        }
+    }
+}
+
 private struct CommentsSheet: View {
     let game: FeedGame
     @Environment(\.dismiss) private var dismiss
     @State private var comments: [SocialComment] = []
     @State private var draft = ""
     @State private var errorMessage: String?
+    @State private var isLoadFailure = false
+    /// Revokes UI ownership of all private comments when the viewer changes.
+    @State private var viewerEpoch = 0
     @State private var isLoading = true
     @State private var isSubmitting = false
     @State private var pendingIdempotencyKey: String?
@@ -2469,11 +2512,16 @@ private struct CommentsSheet: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    Text("\(comments.count)")
-                        .font(.caption.weight(.bold))
-                        .monospacedDigit()
-                        .foregroundStyle(ArcadePulseTheme.textSecondary)
-                        .accessibilityLabel("\(comments.count) loaded comments")
+                    // Unknown while loading/transport failed: do not display
+                    // a misleading 0 as if the server confirmed emptiness.
+                    if CommentsErrorPresentation.showsConfirmedCount(
+                        isLoading: isLoading, loadFailed: isLoadFailure) {
+                        Text("\(comments.count)")
+                            .font(.caption.weight(.bold))
+                            .monospacedDigit()
+                            .foregroundStyle(ArcadePulseTheme.textSecondary)
+                            .accessibilityLabel("\(comments.count) loaded comments")
+                    }
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
@@ -2482,6 +2530,24 @@ private struct CommentsSheet: View {
                 if isLoading {
                     ProgressView("Loading comments…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if isLoadFailure && comments.isEmpty {
+                    VStack(spacing: 14) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.system(size: HephaestusDesign.stateIconSize))
+                            .accessibilityHidden(true)
+                        Text("Couldn't load comments").font(.headline)
+                        Text(errorMessage ?? "Comments aren't available right now.")
+                            .font(.subheadline)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(ArcadePulseTheme.textSecondary)
+                            .accessibilityIdentifier("comments.error")
+                        Button("Try again") { Task { await load() } }
+                            .buttonStyle(.borderedProminent)
+                            .frame(minWidth: 120, minHeight: 44)
+                            .accessibilityIdentifier("comments.retry")
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if comments.isEmpty && errorMessage == nil {
                     ContentUnavailableView(
                         "No comments yet",
@@ -2525,7 +2591,7 @@ private struct CommentsSheet: View {
                     .accessibilityIdentifier("comments.list")
                 }
 
-                if let errorMessage {
+                if let errorMessage, !(isLoadFailure && comments.isEmpty) {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -2542,6 +2608,10 @@ private struct CommentsSheet: View {
                         .textFieldStyle(.roundedBorder)
                         .lineLimit(1...4)
                         .submitLabel(.send)
+                        // Sending owns the draft until the server confirms;
+                        // disable edits so the completion cannot erase a
+                        // second message typed during the in-flight request.
+                        .disabled(isSubmitting)
                         .accessibilityIdentifier("comments.composer")
                     if isSubmitting {
                         ProgressView()
@@ -2552,6 +2622,10 @@ private struct CommentsSheet: View {
                             Task { await submit() }
                         } label: {
                             Image(systemName: "paperplane.fill")
+                                // The actual XCTest iPhone keyboard screenshot
+                                // showed a white plane on deep orange (~2.57:1).
+                                // Black increases icon contrast above 3:1.
+                                .foregroundStyle(.black)
                                 .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.borderedProminent)
@@ -2579,23 +2653,52 @@ private struct CommentsSheet: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .preferredColorScheme(.dark)
             .task { await load() }
+            .onReceive(NotificationCenter.default.publisher(
+                for: .hephaestusBackendSessionDidChange
+            )) { _ in
+                // Account-owned comment bodies, draft, error messages,
+                // deletion state and idempotency token cannot cross viewers.
+                viewerEpoch &+= 1
+                comments.removeAll()
+                draft = ""
+                errorMessage = nil
+                isLoadFailure = false
+                isLoading = false
+                isSubmitting = false
+                pendingIdempotencyKey = nil
+                pendingBody = nil
+                deletingCommentIDs.removeAll()
+                dismiss()
+            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
     private func load() async {
+        let epoch = viewerEpoch
         isLoading = true
-        defer { isLoading = false }
-        do { comments = try await BackendAPI.shared.fetchComments(gameID: game.id); errorMessage = nil }
-        catch { errorMessage = error.localizedDescription }
+        isLoadFailure = false
+        do {
+            let loaded = try await BackendAPI.shared.fetchComments(gameID: game.id)
+            guard epoch == viewerEpoch, !Task.isCancelled else { return }
+            comments = loaded
+            errorMessage = nil
+            isLoading = false
+        } catch {
+            guard epoch == viewerEpoch, !Task.isCancelled else { return }
+            isLoading = false
+            isLoadFailure = true
+            errorMessage = CommentsErrorPresentation.message(
+                for: error, action: .load, signedIn: !BackendConfig.currentUserID.isEmpty)
+        }
     }
 
     private func submit() async {
         let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return }
+        guard !body.isEmpty, !isSubmitting else { return }
+        let epoch = viewerEpoch
         isSubmitting = true
-        defer { isSubmitting = false }
         if pendingBody != body {
             pendingIdempotencyKey = UUID().uuidString
             pendingBody = body
@@ -2603,27 +2706,47 @@ private struct CommentsSheet: View {
         let key = pendingIdempotencyKey ?? UUID().uuidString
         pendingIdempotencyKey = key
         do {
-            let comment = try await BackendAPI.shared.addComment(gameID: game.id, body: body, idempotencyKey: key)
+            let comment = try await BackendAPI.shared.addComment(
+                gameID: game.id, body: body, idempotencyKey: key)
+            guard epoch == viewerEpoch, !Task.isCancelled else { return }
             if !comments.contains(where: { $0.id == comment.id }) {
                 comments.append(comment)
             }
             draft = ""
             pendingIdempotencyKey = nil
             pendingBody = nil
-        } catch { errorMessage = error.localizedDescription }
+            errorMessage = nil
+            isLoadFailure = false
+            isSubmitting = false
+        } catch {
+            guard epoch == viewerEpoch, !Task.isCancelled else { return }
+            isSubmitting = false
+            isLoadFailure = false
+            // Uncertain delivery retains the same idempotency key and draft
+            // so retry doesn't duplicate a comment on the real server.
+            errorMessage = CommentsErrorPresentation.message(
+                for: error, action: .post, signedIn: !BackendConfig.currentUserID.isEmpty)
+        }
     }
 
     private func delete(_ comment: SocialComment) async {
-        guard comment.user_id == BackendConfig.userID,
+        guard comment.user_id == BackendConfig.currentUserID,
               !deletingCommentIDs.contains(comment.id) else { return }
+        let epoch = viewerEpoch
         deletingCommentIDs.insert(comment.id)
-        defer { deletingCommentIDs.remove(comment.id) }
         do {
             try await BackendAPI.shared.deleteComment(gameID: game.id, commentID: comment.id)
+            guard epoch == viewerEpoch, !Task.isCancelled else { return }
+            deletingCommentIDs.remove(comment.id)
             comments.removeAll { $0.id == comment.id }
             errorMessage = nil
+            isLoadFailure = false
         } catch {
-            errorMessage = "Couldn't delete comment: \(error.localizedDescription)"
+            guard epoch == viewerEpoch, !Task.isCancelled else { return }
+            deletingCommentIDs.remove(comment.id)
+            isLoadFailure = false
+            errorMessage = CommentsErrorPresentation.message(
+                for: error, action: .delete, signedIn: !BackendConfig.currentUserID.isEmpty)
         }
     }
 }

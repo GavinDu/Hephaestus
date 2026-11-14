@@ -23,3 +23,7 @@ These are **compressed preview copies** of approved design concepts generated in
 - Compare real iPhone and iPad simulator results captured as untouched, oriented full-screen files; preserve JSON metadata, test commit SHA, screenshot provenance, and before/after gestures.
 - The two CI contact sheets are **historical screenshot summaries**, provided solely as comparison references and not a substitute for current exact-head evidence.
 - The authoritative platform runtime remains bridgeless WKWebView with server-owned Game IR; do not add fake controls or metrics from concept art.
+
+## Comments native Send icon contrast (#178)
+
+The original iPhone simulator screenshot from GitHub iOS run `43538047311` (artifact `player-smoke` `14092009874`; test `testArcadePulseCommentsSheetAndSafeAreaComposer`) shows an authentic zero-comment backend state, keyboard-safe composer with typed unsent text, and a **white paper-plane icon** on `playOrangeDeep` sRGB (1.0,0.48,0.30). White-on-orange is approximately **2.57:1**, below WCAG AA **3:1 for meaningful non-text controls**. The icon now uses black-on-orange (~**8.16:1**), retaining its real enabled/disabled semantics, >=44pt tap size and explicit VoiceOver label. This screenshot does **not** prove comment POST success or server-error recovery; both require actual backend validation on the updated PR head.
