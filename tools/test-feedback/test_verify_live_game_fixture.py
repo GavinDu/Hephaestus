@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import pathlib
+from email.message import Message
 import unittest
 
 
@@ -26,10 +27,27 @@ def public_game(**overrides):
     return game
 
 
+def valid_package(game_id="sample-rainbow-bear"):
+    return {
+        "gameId": game_id,
+        "packageFormatVersion": "1.0",
+        "minRuntimeVersion": "2026.10.23.2",
+        "irVersion": "1.2",
+        "ir": {"irVersion": "1.2", "game": {"id": game_id}},
+    }
+
+
 class FakeResponse:
     def __init__(self, payload):
         self.status = 200
-        self.payload = io.BytesIO(json.dumps(payload).encode())
+        self.headers = Message()
+        if isinstance(payload, tuple):
+            raw, content_type = payload
+            self.headers["Content-Type"] = content_type
+            self.payload = io.BytesIO(raw)
+        else:
+            self.headers["Content-Type"] = "application/json; charset=utf-8"
+            self.payload = io.BytesIO(json.dumps(payload).encode())
 
     def __enter__(self):
         return self
@@ -60,7 +78,7 @@ class LiveGameFixtureTests(unittest.TestCase):
     def test_public_owner_linked_game_requires_retrievable_real_package(self):
         opener = FakeOpener({
             self.FEED: {"games": [public_game()]},
-            self.PACKAGE: {"gameId": "sample-rainbow-bear", "ir": {"game": {"id": "bobo"}}},
+            self.PACKAGE: valid_package(),
         })
         self.assertEqual(
             fixture.check_once(opener, self.FEED, 3.0),
@@ -96,10 +114,44 @@ class LiveGameFixtureTests(unittest.TestCase):
         game.pop("moderation_status")
         self.assertEqual(fixture.candidates_in_feed({"games": [game]}), [game["game_id"]])
 
+    def test_malformed_json_and_http_200_html_are_not_playable(self):
+        for payload, content_type, expected in (
+            (b"<html>stale deployment</html>", "text/html", "not JSON"),
+            (b"{not-json", "application/json", "not valid JSON"),
+        ):
+            with self.subTest(expected=expected):
+                opener = FakeOpener({
+                    self.FEED: (payload, content_type),
+                })
+                with self.assertRaisesRegex(fixture.FixtureError, expected):
+                    fixture.check_once(opener, self.FEED, 1)
+
+    def test_legacy_public_unset_moderation_does_not_trigger_false_outage(self):
+        for moderation in (None, "", "approved"):
+            with self.subTest(moderation=moderation):
+                self.assertEqual(
+                    fixture.candidates_in_feed({
+                        "games": [public_game(moderation_status=moderation)]
+                    }),
+                    ["sample-rainbow-bear"],
+                )
+
+    def test_unknown_moderation_is_rejected(self):
+        for moderation in ("pending", "rejected", "quarantined"):
+            self.assertEqual(
+                fixture.candidates_in_feed({
+                    "games": [public_game(moderation_status=moderation)]
+                }),
+                [],
+            )
+
     def test_owner_linked_feed_with_missing_or_mismatched_package_fails(self):
-        for pkg in [{}, {"gameId": "other-game", "ir": {"game": {}}},
-                    {"gameId": "sample-rainbow-bear", "ir": {}},
-                    {"gameId": "sample-rainbow-bear", "ir": "script"}]:
+        for pkg in [{}, valid_package("other-game"),
+                    {**valid_package(), "ir": {}},
+                    {**valid_package(), "ir": "script"},
+                    {**valid_package(), "irVersion": ""},
+                    {**valid_package(), "ir": {"irVersion": "1.1"}},
+                    {**valid_package(), "minRuntimeVersion": ""}]:
             with self.subTest(package=pkg):
                 opener = FakeOpener({
                     self.FEED: {"games": [public_game()]},
