@@ -11,6 +11,26 @@ import Testing
 // App-level tests will regrow around the WebView player and the
 // creation flow.
 struct HephaestusTests {
+    @Test func arcadePulseCreatorCardsPreferReadableLayoutAtLargeText() {
+        // Policy-only coverage; live real-creator pixel validation is
+        // independently required under Epic #172 / #258 / #266.
+        func stacked(_ pad: Bool, _ regular: Bool, _ large: Bool, _ accessible: Bool) -> Bool {
+            CreatorGameRowLayout.prefersStacked(
+                isIPad: pad, isRegularWidth: regular,
+                isEnlargedText: large, isAccessibilityText: accessible
+            )
+        }
+        #expect(!stacked(false, false, false, false))
+        #expect(stacked(false, false, true, false))
+        // iPhone can report regular size class in landscape.
+        #expect(stacked(false, true, true, false))
+        #expect(stacked(true, false, true, false))
+        #expect(!stacked(true, true, true, false))
+        #expect(stacked(true, true, true, true))
+        #expect(stacked(true, false, false, true))
+        #expect(ArcadePulseTheme.minimumTarget >= 44)
+    }
+
     @Test func arcadePulseCreatorIdentityKeepsLongNamesReadableAtLargeText() {
         // This is a pure layout policy test, not screenshot evidence that
         // actual creator / Follow / Play controls fit on a narrow device.
