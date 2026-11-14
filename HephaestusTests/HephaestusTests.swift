@@ -1236,6 +1236,17 @@ struct HephaestusTests {
 }
 
 
+@MainActor
+@Test func playerWebKitSessionStoresAreNonPersistentAndDistinct() {
+    // Speculative and attached views within one credential epoch reuse a
+    // single store; a later identity epoch receives a fresh isolated store.
+    let first = PlayerWebKitSessionStoragePolicy.newSessionStore()
+    let second = PlayerWebKitSessionStoragePolicy.newSessionStore()
+    #expect(!first.isPersistent)
+    #expect(!second.isPersistent)
+    #expect(first !== second)
+}
+
 // Saved games are owner-private even when the UI also has on-device recent
 // entries. No response from the old user or an old retry may restore titles.
 @Test func arcadePulseLibrarySavedResponsesAreAccountBound() {
