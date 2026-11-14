@@ -92,6 +92,36 @@ struct HephaestusTests {
         #expect(resumedFollow != nil)
     }
 
+    @Test func arcadePulseCommentFailureMessagesDoNotLeakRawTransportData() {
+        let raw = NSError(domain: "private-backend", code: 42, userInfo: [
+            NSLocalizedDescriptionKey: "Bearer owner@example.test https://private.invalid/v1/comments"
+        ])
+        for action: CommentsErrorPresentation.Action in [.load, .post, .delete] {
+            let shown = CommentsErrorPresentation.message(
+                for: raw, action: action, signedIn: true)
+            #expect(!shown.contains("owner@example.test"))
+            #expect(!shown.contains("private.invalid"))
+            #expect(!shown.contains("Bearer"))
+        }
+        #expect(CommentsErrorPresentation.message(
+            for: URLError(.notConnectedToInternet),
+            action: .load, signedIn: false).contains("offline"))
+        #expect(CommentsErrorPresentation.message(
+            for: URLError(.secureConnectionFailed),
+            action: .load, signedIn: false).contains("secure connection"))
+        #expect(CommentsErrorPresentation.message(
+            for: raw, action: .post, signedIn: false).contains("Sign in"))
+        #expect(CommentsErrorPresentation.message(
+            for: APIError.badStatus(401),
+            action: .post, signedIn: true).contains("expired"))
+        #expect(CommentsErrorPresentation.message(
+            for: APIError.badStatus(403),
+            action: .delete, signedIn: true).contains("isn't allowed"))
+        #expect(CommentsErrorPresentation.message(
+            for: APIError.badStatus(429),
+            action: .load, signedIn: true).contains("Too many"))
+    }
+
     @Test func arcadePulseFoundationUsesSinglePaletteAndAccessibleTargetSizes() {
         #expect(ArcadePulseTheme.fallbackPalettes.count == 5)
         #expect(ArcadePulseTheme.minimumTarget >= 44)
