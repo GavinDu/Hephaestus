@@ -15,3 +15,11 @@ The production player owns **one pooled WKWebView**. It prewarms only after the 
 ## Review / validation
 
 Swift unit tests exercise unattached/attached × view-present/view-absent. Native Actions must additionally pass Xcode compilation and iPhone/iPad player smoke. This policy test does not prove OS delivery order or real-world memory reclaimed: retain #205 real iPhone/iPad 50+ open/close/swipe memory, thermal and context-loss evidence gates. This slice is safe to revert without changing package semantics.
+
+## Background-only speculative teardown — scoped #277
+
+One lazy process-level `UIApplication.didEnterBackgroundNotification` observer schedules its decision on `MainActor`. It checks **current** `isAttached` and pooled-view presence, then reuses `discardUnattachedPrewarm()` only for speculative unattached work. No attached playable `WKWebView` is blanked or discarded by this observer. The preexisting 15-second speculative TTL and memory-warning observer remain intact.
+
+This integration branch was rebuilt from the newest native `main` **after merged document nonce #283 and nonpersistent WebKit credential-store #300**. It leaves the native session/store/nonce ownership path alone and never adds new message-handler capabilities. Old draft [#297](https://github.com/GavinDu/Hephaestus/pull/297) is not a safe merge gate because its unrelated live social-write iPhone smoke failed: source evidence in [workflow 43597582122](https://github.com/GavinDu/Hephaestus/actions/runs/43597582122), `PlayerSmokeTests.swift:319`, reported “Only a real loaded feed may trigger social error-state evaluation.” Tests must **not** skip this guard or invent a loaded feed; record actual feed HTTP/status, real published game identity, Retry states, screenshot/hierarchy and test-environment version.
+
+The new exact-head native Xcode, mandatory iPhone/iPad player-smoke, iPad UI evaluator and presentation/backend jobs must all complete success before closing #277. Source truth-table only cannot establish actual UIKit event delivery ordering. Hardware GPU/audio/texture release, multiwindow iPad scenes, 50+ physical cycles, thermal impact and cache revocation remain #205/#278/#279 and Epic #202 release gates.
