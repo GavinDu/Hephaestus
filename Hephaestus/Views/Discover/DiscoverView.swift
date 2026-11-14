@@ -2629,6 +2629,10 @@ private struct CreatorProfileSheet: View {
                 } label: {
                     Label("Play game", systemImage: "play.fill")
                         .font(.subheadline.weight(.bold))
+                        // Real native screenshot showed white text on deep
+                        // orange (~2.57:1). Black gives ~8.16:1 for normal
+                        // text while preserving the actual Play action.
+                        .foregroundStyle(.black)
                         .frame(minWidth: stacksForLargeText ? nil : 110,
                                maxWidth: stacksForLargeText ? .infinity : nil,
                                minHeight: 48)
