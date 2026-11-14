@@ -59,7 +59,7 @@ struct HephaestusTests {
             for: URLError(.timedOut), action: .moderationAppeal)
         #expect(slowAppeal.contains("whether your appeal was received"))
         let apple = ProfileErrorPresentation.message(
-            for NSError(domain: "ASAuthorizationErrorDomain", code: 1001),
+            for: NSError(domain: "ASAuthorizationErrorDomain", code: 1001),
             action: .appleSignIn)
         #expect(apple.contains("Apple sign-in"))
     }
