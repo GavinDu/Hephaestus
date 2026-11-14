@@ -1124,6 +1124,8 @@ private struct ForYouGamePage: View {
     @State private var showsAccessibleShareSheet = false
     @State private var showsAccessibleActionsSheet = false
     @State private var shareAfterActionsDismiss = false
+    @State private var queuedAccessibleShareURL: URL?
+    @State private var queuedAccessibleShareGameID: String?
     // A URL in the feed does not establish that its image decoded successfully.
     // Keep accessibility/media audits tied to the exact poster that rendered.
     @State private var loadedPosterURL: String?
@@ -1383,6 +1385,8 @@ private struct ForYouGamePage: View {
                         // The *mounted page* presents the real system UI only
                         // after this native actions sheet has fully dismissed.
                         // No ShareLink is embedded in a disappearing Menu.
+                        queuedAccessibleShareURL = shareURL
+                        queuedAccessibleShareGameID = game.id
                         shareAfterActionsDismiss = true
                         showsAccessibleActionsSheet = false
                     }
@@ -1776,13 +1780,18 @@ private struct ForYouGamePage: View {
             if shareAfterActionsDismiss {
                 shareAfterActionsDismiss = false
                 showsAccessibleShareSheet = true
-                Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
+                if let sharedGameID = queuedAccessibleShareGameID {
+                    Task { await BackendAPI.shared.trackSocialEvent(gameID: sharedGameID, kind: "share") }
+                }
             }
         }) {
             accessibleSocialActionsSheet
         }
-        .sheet(isPresented: $showsAccessibleShareSheet) {
-            ArcadePulseGameShareSheet(url: shareURL)
+        .sheet(isPresented: $showsAccessibleShareSheet, onDismiss: {
+            queuedAccessibleShareURL = nil
+            queuedAccessibleShareGameID = nil
+        }) {
+            ArcadePulseGameShareSheet(url: queuedAccessibleShareURL ?? shareURL)
         }
         .sheet(isPresented: $showsExpressionDetails) {
             NavigationStack {
