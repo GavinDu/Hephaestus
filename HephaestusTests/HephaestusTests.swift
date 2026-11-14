@@ -96,12 +96,13 @@ struct HephaestusTests {
         let raw = NSError(domain: "https://private.invalid", code: 42, userInfo: [
             NSLocalizedDescriptionKey: "Bearer alice@example.test https://private.invalid/v1/projects"
         ])
-        for error: Error in [
+        let failures: [Error] = [
             raw,
             URLError(.cannotConnectToHost),
             APIError.badStatus(500),
             APIError.badStatus(404)
-        ] {
+        ]
+        for error in failures {
             let shown = CreatorStudioErrorPresentation.message(for: error)
             #expect(!shown.contains("alice@example.test"))
             #expect(!shown.contains("private.invalid"))
