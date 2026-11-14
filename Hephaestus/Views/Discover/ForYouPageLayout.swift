@@ -85,6 +85,48 @@ enum ForYouPageLayout {
         isRegular && width > height && width >= 1_024 && !isAccessibilityText
     }
 
+    /// Real Game Details adapt separately from the swipe feed. An iPad
+    /// landscape needs enough width *and* height for media + readable actual
+    /// metadata; portrait, Split View and enlarged text stay one column.
+    static func showsIPadGameDetailsTwoColumn(
+        width: CGFloat, height: CGFloat, isRegular: Bool, isLargeText: Bool
+    ) -> Bool {
+        isRegular && width > height && width >= 960 && height >= 620 && !isLargeText
+    }
+
+    /// The old iPad landscape detail card used a hard 520pt ceiling and
+    /// left a large black region beneath the media and the primary Play CTA.
+    /// Use the real current window height, retaining a bounded scrollable
+    /// details screen; original artwork remains aspect-fit, never stretched
+    /// into synthetic gameplay or cropped into unsupported previews.
+    static func gameDetailsPreviewHeight(containerHeight: CGFloat) -> CGFloat {
+        min(max(0, containerHeight) * 0.74, 640)
+    }
+
+    /// A decoded, real backend poster deserves room to breathe on a portrait
+    /// iPad. Missing/failed poster data must NOT inflate an empty gradient
+    /// into a fake full-screen gameplay preview. Preserve compact iPhone and
+    /// narrow Split View priorities and keep Play reachable under XXL text.
+    static func gameDetailsSingleColumnPreviewHeight(
+        containerWidth: CGFloat, containerHeight: CGFloat,
+        isIPad: Bool, isRegularWidth: Bool,
+        hasDecodedPoster: Bool, isLargeText: Bool
+    ) -> CGFloat {
+        let fallbackHeight: CGFloat = isIPad && isRegularWidth ? 335 : 240
+        guard isIPad, hasDecodedPoster else { return fallbackHeight }
+        let viewportHeight = max(0, containerHeight)
+        let availableWidth = max(0, containerWidth - 36)
+        let viewportCap = min(isLargeText ? 360 : 720,
+                              viewportHeight * (isLargeText ? 0.34 : 0.58))
+        let widthCap = availableWidth * 0.85
+        return max(fallbackHeight, min(viewportCap, widthCap))
+    }
+
+    static func gameDetailsPreviewWidth(containerWidth: CGFloat) -> CGFloat {
+        let usable = max(0, min(containerWidth - 36, 1_200))
+        return usable * 0.55
+    }
+
     static func contextPanelWidth(containerWidth: CGFloat) -> CGFloat {
         min(300, containerWidth * 0.27)
     }
