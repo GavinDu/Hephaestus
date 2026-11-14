@@ -2589,6 +2589,23 @@ enum CommentsErrorPresentation {
     }
 }
 
+/// Only a request that started after the last destructive mutation can
+/// reconcile a lost DELETE response. An older or overlapping GET may contain
+/// a valid-but-stale list and must not unlock a duplicate DELETE.
+enum CommentsDeleteReadPolicy {
+    static func mayApply(
+        readViewer: Int, currentViewer: Int,
+        readMutation: Int, currentMutation: Int,
+        startedDuringDeletion: Bool,
+        readGeneration: Int, currentGeneration: Int
+    ) -> Bool {
+        readViewer == currentViewer &&
+        readMutation == currentMutation &&
+        !startedDuringDeletion &&
+        readGeneration == currentGeneration
+    }
+}
+
 private struct CommentsSheet: View {
     let game: FeedGame
     @Environment(\.dismiss) private var dismiss
@@ -2606,6 +2623,8 @@ private struct CommentsSheet: View {
     // A DELETE can reach the server even when its response is lost. Prevent
     // a second destructive write until a fresh real comment GET reconciles.
     @State private var unconfirmedDeletionIDs = Set<String>()
+    @State private var deletionRevision = 0
+    @State private var commentsLoadGeneration = 0
 
     var body: some View {
         NavigationStack {
@@ -2795,6 +2814,8 @@ private struct CommentsSheet: View {
                 pendingBody = nil
                 deletingCommentIDs.removeAll()
                 unconfirmedDeletionIDs.removeAll()
+                deletionRevision &+= 1
+                commentsLoadGeneration &+= 1
                 dismiss()
             }
         }
@@ -2804,19 +2825,35 @@ private struct CommentsSheet: View {
 
     private func load() async {
         let epoch = viewerEpoch
+        commentsLoadGeneration &+= 1
+        let loadGeneration = commentsLoadGeneration
+        let mutationRevision = deletionRevision
+        let beganWhileDeleting = !deletingCommentIDs.isEmpty
         isLoading = true
         isLoadFailure = false
         do {
             let loaded = try await BackendAPI.shared.fetchComments(gameID: game.id)
-            guard epoch == viewerEpoch, !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  CommentsDeleteReadPolicy.mayApply(
+                    readViewer: epoch, currentViewer: viewerEpoch,
+                    readMutation: mutationRevision, currentMutation: deletionRevision,
+                    startedDuringDeletion: beganWhileDeleting,
+                    readGeneration: loadGeneration, currentGeneration: commentsLoadGeneration
+                  ) else { return }
             comments = loaded
-            // A true GET now reflects server deletion status; only then may
+            // A new GET after the DELETE settles reflects server deletion status; only then may
             // the user decide to retry deletion of a still-existing comment.
             unconfirmedDeletionIDs.removeAll()
             errorMessage = nil
             isLoading = false
         } catch {
-            guard epoch == viewerEpoch, !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  CommentsDeleteReadPolicy.mayApply(
+                    readViewer: epoch, currentViewer: viewerEpoch,
+                    readMutation: mutationRevision, currentMutation: deletionRevision,
+                    startedDuringDeletion: beganWhileDeleting,
+                    readGeneration: loadGeneration, currentGeneration: commentsLoadGeneration
+                  ) else { return }
             isLoading = false
             isLoadFailure = true
             errorMessage = CommentsErrorPresentation.message(
@@ -2861,8 +2898,11 @@ private struct CommentsSheet: View {
 
     private func delete(_ comment: SocialComment) async {
         guard comment.user_id == BackendConfig.currentUserID,
-              !deletingCommentIDs.contains(comment.id) else { return }
+              !deletingCommentIDs.contains(comment.id),
+              !unconfirmedDeletionIDs.contains(comment.id) else { return }
         let epoch = viewerEpoch
+        // Revoke any list GET already in flight before the DELETE begins.
+        deletionRevision &+= 1
         deletingCommentIDs.insert(comment.id)
         do {
             try await BackendAPI.shared.deleteComment(gameID: game.id, commentID: comment.id)
