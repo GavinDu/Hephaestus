@@ -252,7 +252,8 @@ jobs:
           python3 tools/test-feedback/verify-ui-screenshot-evidence.py \
             --input /tmp/ipad-feed-ui-screenshots \
             --out /tmp/ipad-feed-ui-review \
-            --require-ipad-library
+            --require-ipad-library \
+            --require-ipad-arcade-features
       - name: Upload iPad UI evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
