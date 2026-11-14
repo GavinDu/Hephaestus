@@ -2532,10 +2532,11 @@ private struct CreatorProfileSheet: View {
                     in: RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius))
     }
 
-    private func load() async {
+    private func load(confirmingFollow: Bool = false) async {
         profileLoadRevision += 1
         let revision = profileLoadRevision
         let viewer = BackendConfig.currentUserID
+        let startedWhileMutating = isFollowUpdating
         // Preserve genuine published posts during an in-place GET refresh.
         if profile == nil { isLoading = true }
         defer {
@@ -2543,15 +2544,23 @@ private struct CreatorProfileSheet: View {
         }
         do {
             let fetched = try await BackendAPI.shared.fetchCreatorProfile(id: creatorID)
-            guard revision == profileLoadRevision,
-                  viewer == BackendConfig.currentUserID else { return }
+            guard CreatorFollowStatePolicy.mayApplyCreatorRead(
+                requestRevision: revision, currentRevision: profileLoadRevision,
+                sameViewer: viewer == BackendConfig.currentUserID,
+                startedWhileMutating: startedWhileMutating,
+                isPostWriteConfirmation: confirmingFollow
+            ) else { return }
             profile = fetched
             errorMessage = nil
             // Only a real creator GET confirms the follow state after POST.
             followStatusNeedsRefresh = false
         } catch {
-            guard revision == profileLoadRevision,
-                  viewer == BackendConfig.currentUserID else { return }
+            guard CreatorFollowStatePolicy.mayApplyCreatorRead(
+                requestRevision: revision, currentRevision: profileLoadRevision,
+                sameViewer: viewer == BackendConfig.currentUserID,
+                startedWhileMutating: startedWhileMutating,
+                isPostWriteConfirmation: confirmingFollow
+            ) else { return }
             errorMessage = CreatorProfileErrorPresentation.message(for: error, action: .load)
         }
     }
@@ -2562,6 +2571,9 @@ private struct CreatorProfileSheet: View {
             viewerID: viewer, creatorID: creatorID,
             isUpdating: isFollowUpdating, needsConfirmation: followStatusNeedsRefresh
         ) else { return }
+        // An already-running creator GET may contain pre-write relationship
+        // state; revoke it before starting an ambiguous POST.
+        profileLoadRevision += 1
         followMutationRevision += 1
         let revision = followMutationRevision
         isFollowUpdating = true
@@ -2575,7 +2587,7 @@ private struct CreatorProfileSheet: View {
             followStatusNeedsRefresh = true
             // No optimistic count or inverse button from only an acknowledged
             // mutation: refresh true server-owned relationship first.
-            await load()
+            await load(confirmingFollow: true)
         } catch {
             guard revision == followMutationRevision,
                   viewer == BackendConfig.currentUserID else { return }
