@@ -12,6 +12,25 @@ import Testing
 // App-level tests will regrow around the WebView player and the
 // creation flow.
 struct HephaestusTests {
+    @Test func arcadePulseLibrarySavedCountNeverInventsZeroBeforeConfirmedGet() {
+        // Current-user/current-credential and successful GET are required:
+        // an empty fail-closed array must not be announced as zero saves.
+        func count(_ value: Int, _ signedIn: Bool, _ loading: Bool,
+                   _ failed: Bool, _ current: Bool) -> Int? {
+            LibrarySavedCountPolicy.confirmedCount(
+                visibleCount: value, isSignedIn: signedIn,
+                isLoading: loading, hasError: failed, currentSessionData: current
+            )
+        }
+        #expect(count(0, true, false, false, true) == 0)
+        #expect(count(4, true, false, false, true) == 4)
+        #expect(count(0, true, true, false, true) == nil)
+        #expect(count(0, true, false, true, true) == nil)
+        #expect(count(0, false, false, false, false) == nil)
+        #expect(count(0, true, false, false, false) == nil)
+        #expect(count(9, true, true, true, false) == nil)
+    }
+
     @Test func arcadePulseCreatorCardsPreferReadableLayoutAtLargeText() {
         // Policy-only coverage; live real-creator pixel validation is
         // independently required under Epic #172 / #258 / #266.
