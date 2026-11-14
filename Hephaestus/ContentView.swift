@@ -128,16 +128,17 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
     }
 
-    private func navigate(to section: AppSection) {
+    private func navigate(to section: AppSection, fromSidebar: Bool = false) {
         selection = section
-        // A cross-destination CTA should show the requested content, not
-        // unexpectedly expand the iPad sidebar above it.
-        sidebarVisibility = .detailOnly
+        // A CTA inside the detail should focus the destination. But when a
+        // user explicitly opened the iPad sidebar to browse sections, keep
+        // it open instead of unexpectedly collapsing it after every tap.
+        if !fromSidebar { sidebarVisibility = .detailOnly }
     }
 
     private func navigationRow(_ section: AppSection) -> some View {
         Button {
-            navigate(to: section)
+            navigate(to: section, fromSidebar: true)
         } label: {
             Label(section.title, systemImage: section.symbol)
                 .lineLimit(1)
