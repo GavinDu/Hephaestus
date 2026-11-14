@@ -23,3 +23,7 @@ These are **compressed preview copies** of approved design concepts generated in
 - Compare real iPhone and iPad simulator results captured as untouched, oriented full-screen files; preserve JSON metadata, test commit SHA, screenshot provenance, and before/after gestures.
 - The two CI contact sheets are **historical screenshot summaries**, provided solely as comparison references and not a substitute for current exact-head evidence.
 - The authoritative platform runtime remains bridgeless WKWebView with server-owned Game IR; do not add fake controls or metrics from concept art.
+
+## Feed pagination failure safety and Retry accessibility (#174)
+
+The load-more banner must never display raw `error.localizedDescription`: transport and backend errors may contain internal URLs, tokens or account metadata. `FeedErrorPresentation.paginationMessage(for:)` now reuses the same safe TLS/offline/timeout/default categories as initial feed loading. The authentic paginated server rows stay on screen while the error is shown, and the native Retry remains a real continuation of the cursor request with a >=44pt touch target. Pure Swift tests use a deliberately private error and prove it is not spoken or displayed. A successful retry must still come from the live backend, not a synthesized page.

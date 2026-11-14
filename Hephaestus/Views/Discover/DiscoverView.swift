@@ -324,6 +324,8 @@ struct DiscoverView: View {
                                     Task { await loadMore() }
                                 }
                                 .font(.subheadline.weight(.semibold))
+                                .frame(minWidth: 44, minHeight: 44)
+                                .accessibilityLabel("Retry loading more games")
                             }
                             .padding(12)
                             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
@@ -855,7 +857,7 @@ struct DiscoverView: View {
                 requestedScope: requestedScope, currentScope: selectedFeed,
                 requestedGeneration: requestedGeneration,
                 currentGeneration: feedRequestCoordinator.generation) {
-                loadMoreError = "Couldn't load more games: \(error.localizedDescription)"
+                loadMoreError = FeedErrorPresentation.paginationMessage(for: error)
             }
         }
     }
@@ -1121,6 +1123,12 @@ struct DiscoverView: View {
 /// surfacing raw TLS/transport jargon as the primary recovery explanation.
 /// The UI still exposes Retry and the actual saved-game Library route.
 enum FeedErrorPresentation {
+    /// The main feed and its pagination share privacy-safe transport copy.
+    /// A raw error can contain a private network URL or bearer credentials.
+    static func paginationMessage(for error: Error) -> String {
+        "Couldn't load more games. " + message(for: error)
+    }
+
     static func message(for error: Error) -> String {
         switch (error as? URLError)?.code {
         case .secureConnectionFailed, .serverCertificateHasBadDate,

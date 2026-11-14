@@ -1373,6 +1373,21 @@ struct HephaestusTests {
     let unexpected = FeedErrorPresentation.message(for: NSError(domain: "other", code: 500))
     #expect(unexpected.contains("isn't available"))
     #expect(!unexpected.localizedCaseInsensitiveContains("NSError"))
+
+    let privateError = NSError(
+        domain: "https://internal.example.invalid", code: 500,
+        userInfo: [NSLocalizedDescriptionKey:
+            "Bearer secret user@example.test https://internal.example.invalid/feed?page=2"]
+    )
+    let loadMore = FeedErrorPresentation.paginationMessage(for: privateError)
+    #expect(loadMore.contains("Couldn't load more games"))
+    #expect(loadMore.contains("try again"))
+    #expect(!loadMore.contains("internal.example.invalid"))
+    #expect(!loadMore.contains("user@example.test"))
+    #expect(!loadMore.contains("Bearer"))
+    #expect(!loadMore.contains("secret"))
+    #expect(FeedErrorPresentation.paginationMessage(for: URLError(.timedOut))
+        .contains("taking too long"))
 }
 
 @Test func productionHostLifecycleTransitionsKeepMilestonesDistinct() {
