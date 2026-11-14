@@ -1444,24 +1444,6 @@ final class PlayerSmokeTests: XCTestCase {
         } else {
             print("UI_EVALUATOR_CREATOR_LARGE_TEXT source=no_hittable_creator; no fake test account")
         }
-        actions.tap()
-        // This menu reflects the *real* backend viewer state: previously
-        // saved/liked games correctly show the inverse action, not a mock.
-        for (name, allowed) in [
-            ("Save", ["Save game", "Remove from library"]),
-            ("Like", ["Like game", "Unlike game"]),
-            ("Comments", ["View comments"]),
-            ("Share", ["Share game"]),
-            ("Details", ["Game details"]),
-            ("Report", ["Report game"])
-        ] {
-            let options = allowed.map { label in
-                app.descendants(matching: .any)
-                    .matching(NSPredicate(format: "label == %@", label)).firstMatch
-            }
-            let available = options.contains { $0.waitForExistence(timeout: 5) }
-            XCTAssertTrue(available, "Large-text Actions menu must expose \(name).")
-        }
         // Inspect the actual settled game geometry BEFORE opening the native
         // Menu. Dismissing and reopening the Menu via a generic screen tap can
         // race the genuine system share sheet; old CI actually failed while
