@@ -3,9 +3,10 @@ import SwiftUI
 import UIKit
 
 /// Native AVPlayerLayer host for actual, server-approved preview clips.
-/// The shared layer is transparent until AVFoundation reports the current
-/// item's *first video frame ready for display*. Without that gate a black
-/// layer obscures the authentic poster during the network/decode gap.
+/// The layer is mounted with a clear background so the real poster beneath
+/// it remains visible before AVFoundation has its first video frame ready.
+/// Keep the rendering layer attached rather than hiding/alpha-zeroing it:
+/// hidden renderers may defer their own frame readiness notification.
 /// This is NOT a gameplay-renderer readiness signal for WKWebView/Game IR.
 struct FeedPreviewSurface: UIViewRepresentable {
     let player: AVPlayer
@@ -18,6 +19,10 @@ struct FeedPreviewSurface: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PlayerLayerView {
         let view = PlayerLayerView()
+        view.isOpaque = false
+        view.backgroundColor = .clear
+        view.playerLayer.isOpaque = false
+        view.playerLayer.backgroundColor = UIColor.clear.cgColor
         view.playerLayer.videoGravity = .resizeAspect
         view.onReadyForDisplay = onReadyForDisplay
         view.attach(player)
@@ -49,11 +54,13 @@ struct FeedPreviewSurface: UIViewRepresentable {
             observation = nil
             attachmentEpoch &+= 1
             let epoch = attachmentEpoch
-            alpha = 0
+            // AVPlayerLayer documents that it presents NO video content until
+            // isReadyForDisplay. Let the opaque server poster below show
+            // through instead of hiding the layer and delaying decoding.
             playerLayer.player = player
             // KVO may deliver callbacks after an attachment is dismantled.
-            // Recheck the exact layer lease on the main actor before changing
-            // the native image or sending presentation readiness.
+            // Recheck the exact layer lease on the main actor before sending
+            // presentation readiness. The video has no opaque placeholder.
             observation = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) {
                 [weak self] _, _ in
                 Task { @MainActor [weak self] in
@@ -61,7 +68,6 @@ struct FeedPreviewSurface: UIViewRepresentable {
                           self.attachmentEpoch == epoch,
                           self.playerLayer.player != nil else { return }
                     let ready = self.playerLayer.isReadyForDisplay
-                    self.alpha = ready ? 1 : 0
                     self.onReadyForDisplay?(ready)
                 }
             }
@@ -71,7 +77,6 @@ struct FeedPreviewSurface: UIViewRepresentable {
             attachmentEpoch &+= 1
             observation?.invalidate()
             observation = nil
-            alpha = 0
             playerLayer.player = nil
         }
 
