@@ -119,6 +119,16 @@ enum FeedPreviewPolicy {
     ) -> Bool {
         activeGameID == expectedGameID && displayedGameID == expectedGameID
     }
+
+    /// A frame callback belongs to exactly one clip version and settled
+    /// game. Same-game URL refreshes must not accept previous-layer frames.
+    static func acceptsFrameCallback(
+        activeGameID: String?, generation: UInt64,
+        callbackGameID: String, callbackGeneration: UInt64
+    ) -> Bool {
+        !callbackGameID.isEmpty && activeGameID == callbackGameID &&
+            generation == callbackGeneration
+    }
 }
 
 /// Measured preview dwell for Hephaestus #61. The previous code reported
@@ -267,8 +277,12 @@ final class FeedPreviewPlayback: ObservableObject {
     /// The generation guard discards asynchronous ready callbacks from a
     /// replaced URL even when the game ID remains unchanged.
     func reportDisplayReadiness(gameID: String, generation: UInt64, ready: Bool) {
-        guard activeGameID == gameID,
-              presentationGeneration == generation else { return }
+        guard FeedPreviewPolicy.acceptsFrameCallback(
+            activeGameID: activeGameID,
+            generation: presentationGeneration,
+            callbackGameID: gameID,
+            callbackGeneration: generation
+        ) else { return }
         if ready {
             if displayedGameID != gameID {
                 displayedGameID = gameID
