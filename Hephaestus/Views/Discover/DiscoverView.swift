@@ -2839,7 +2839,14 @@ private struct CommentsSheet: View {
                     readMutation: mutationRevision, currentMutation: deletionRevision,
                     startedDuringDeletion: beganWhileDeleting,
                     readGeneration: loadGeneration, currentGeneration: commentsLoadGeneration
-                  ) else { return }
+                  ) else {
+                // A stale GET must not clear uncertainty, but the most recent
+                // same-viewer request may still retire its own spinner.
+                if epoch == viewerEpoch, loadGeneration == commentsLoadGeneration {
+                    isLoading = false
+                }
+                return
+            }
             comments = loaded
             // A new GET after the DELETE settles reflects server deletion status; only then may
             // the user decide to retry deletion of a still-existing comment.
@@ -2853,7 +2860,12 @@ private struct CommentsSheet: View {
                     readMutation: mutationRevision, currentMutation: deletionRevision,
                     startedDuringDeletion: beganWhileDeleting,
                     readGeneration: loadGeneration, currentGeneration: commentsLoadGeneration
-                  ) else { return }
+                  ) else {
+                if epoch == viewerEpoch, loadGeneration == commentsLoadGeneration {
+                    isLoading = false
+                }
+                return
+            }
             isLoading = false
             isLoadFailure = true
             errorMessage = CommentsErrorPresentation.message(
