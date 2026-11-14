@@ -496,9 +496,18 @@ final class PlayerSmokeTests: XCTestCase {
             failure.name = "arcade-pulse-feed-timeout-library-tap-failure"
             failure.lifetime = .keepAlways
             add(failure)
-            let selectedLibrary = app.tabBars.buttons["Library"].firstMatch.isSelected
-            let selectedDiscover = app.tabBars.buttons["Discover"].firstMatch.isSelected
-            print("FEED_TIMEOUT_LIBRARY_TAP selected_library=\(selectedLibrary) still_discover=\(selectedDiscover)")
+            // Native iPads use a NavigationSplitView sidebar, never a
+            // TabBar. Querying app.tabBars.buttons on iPad threw XCTest's
+            // "No matches found" and buried the real failed route.
+            // Keep the strict actual Library heading assertion below.
+            let isPad = UIDevice.current.userInterfaceIdiom == .pad
+            let selectedLibrary = isPad
+                ? app.navigationBars["Library"].firstMatch.exists
+                : app.tabBars.buttons["Library"].firstMatch.isSelected
+            let selectedDiscover = isPad
+                ? app.navigationBars["Discover"].firstMatch.exists
+                : app.tabBars.buttons["Discover"].firstMatch.isSelected
+            print("FEED_TIMEOUT_LIBRARY_TAP ipad=\(isPad) selected_library=\(selectedLibrary) still_discover=\(selectedDiscover)")
         }
         XCTAssertTrue(destination.exists,
                       "Library navigation must still work after timeout.")
@@ -859,7 +868,16 @@ final class PlayerSmokeTests: XCTestCase {
         let profileHelp = app.staticTexts.containing(
             NSPredicate(format: "label CONTAINS %@", "Sign in with Apple to publish")
         ).firstMatch
-        XCTAssertTrue(profileHelp.waitForExistence(timeout: 12),
+        if !profileHelp.waitForExistence(timeout: 12) {
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "arcade-pulse-ipad-studio-profile-navigation-failure"
+            failure.lifetime = .keepAlways
+            add(failure)
+            let profileBar = app.navigationBars["Profile"].firstMatch.exists
+            let studioBar = app.navigationBars["Creator Studio"].firstMatch.exists
+            print("STUDIO_PROFILE_NAVIGATION profile_visible=\(profileBar) studio_still_visible=\(studioBar)")
+        }
+        XCTAssertTrue(profileHelp.exists,
                       "Studio must navigate to the actual signed-out Profile view.")
         let appleSignIn = app.descendants(matching: .any)["profile.appleSignIn"].firstMatch
         XCTAssertTrue(appleSignIn.waitForExistence(timeout: 10) && appleSignIn.isHittable,
