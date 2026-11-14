@@ -408,6 +408,9 @@ final class PlayerSmokeTests: XCTestCase {
         // Retry starts a NEW genuine (in this test: deliberately stalled)
         // transport. It must not be canceled by the old watchdog generation.
         retry.tap()
+        let loading = app.staticTexts["Finding something fun…"].firstMatch
+        XCTAssertTrue(loading.waitForExistence(timeout: 8),
+                      "Retry must leave the prior error and start a new actual transport attempt.")
         XCTAssertTrue(title.waitForExistence(timeout: 20),
                       "A new attempt must independently reach its own recovery without mock success.")
         XCTAssertFalse(app.buttons["game.play"].firstMatch.exists)
