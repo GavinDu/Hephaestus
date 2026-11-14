@@ -238,7 +238,7 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             # but a shorter app-window capture is not full-screen evidence.
             feature = "arcade-pulse-create-entry-ipad"
             (folder / (feature + ".png")).write_bytes(
-                png(9, 20, 1, rgb=b"\\x21\\x50\\x80"))
+                png(9, 20, 1, rgb=bytes((33, 80, 128))))
             with self.assertRaisesRegex(ValueError, "do not match real portrait full-screen reference"):
                 module.verify_and_copy(
                     folder, Path(directory) / "out", require_ipad_library=True,
