@@ -1447,10 +1447,14 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(actions.isHittable,
                       "Game actions must remain reachable after the first sheet dismisses.")
         actions.tap()
-        let shareEntry = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label == %@", "Share game")).firstMatch
+        let shareEntry = app.buttons.matching(
+            NSPredicate(format: "label == %@", "Share game")).firstMatch
         XCTAssertTrue(shareEntry.waitForExistence(timeout: 8),
                       "The second genuine native actions presentation must expose Share game.")
+        XCTAssertTrue(shareEntry.isHittable,
+                      "The real Share action must be reachable at Accessibility XXXL.")
+        XCTAssertGreaterThanOrEqual(shareEntry.frame.height, 44,
+                                   "Accessible native Share action must have a 44pt target.")
         shareEntry.tap()
         // The system sheet must be attached to the mounted feed page, never
         // to the just-dismissed actions sheet or a temporary Menu controller.
