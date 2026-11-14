@@ -12,6 +12,20 @@ import Testing
 // App-level tests will regrow around the WebView player and the
 // creation flow.
 struct HephaestusTests {
+    @Test func arcadePulseIPadSidebarKeepsReadableDestinationLabelsAtLargeText() {
+        // Pure policy check. Native portrait/landscape and resizable-window
+        // screenshots of selected, tappable destinations remain required
+        // for visual approval under Epic #172 / #269 / #336.
+        #expect(ArcadePulseSidebarLabelPolicy.visibleLineLimit(for: .large) == 1)
+        #expect(ArcadePulseSidebarLabelPolicy.visibleLineLimit(for: .xLarge) == 1)
+        #expect(ArcadePulseSidebarLabelPolicy.visibleLineLimit(for: .xxLarge) == 2)
+        #expect(ArcadePulseSidebarLabelPolicy.visibleLineLimit(for: .xxxLarge) == 2)
+        #expect(ArcadePulseSidebarLabelPolicy.visibleLineLimit(for: .accessibility1) == 2)
+        #expect(ArcadePulseSidebarLabelPolicy.visibleLineLimit(for: .accessibility5) == 2)
+        #expect(ArcadePulseSidebarLabelPolicy.minimumHitHeight >= 44)
+        #expect(ArcadePulseSidebarLabelPolicy.minimumHitHeight >= ArcadePulseTheme.minimumTarget)
+    }
+
     @Test func arcadePulseCreatorCardsPreferReadableLayoutAtLargeText() {
         // Policy-only coverage; live real-creator pixel validation is
         // independently required under Epic #172 / #258 / #266.
