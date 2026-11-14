@@ -111,6 +111,14 @@ enum FeedPreviewPolicy {
     static func shouldStopOnFailure(_ status: AVPlayerItem.Status) -> Bool {
         status == .failed
     }
+
+    /// A clip is preview evidence only once the *current* player layer's
+    /// first frame is ready. A URL or AVPlayer.play() alone is insufficient.
+    static func hasDisplayReadyClip(
+        activeGameID: String?, displayedGameID: String?, expectedGameID: String
+    ) -> Bool {
+        activeGameID == expectedGameID && displayedGameID == expectedGameID
+    }
 }
 
 /// Measured preview dwell for Hephaestus #61. The previous code reported
@@ -130,6 +138,10 @@ final class FeedPreviewPlayback: ObservableObject {
     static let shared = FeedPreviewPlayback()
 
     @Published private(set) var activeGameID: String?
+    @Published private(set) var displayedGameID: String?
+    /// Increment for each new item, including same-game refreshed clips,
+    /// so an old AVPlayerLayer and KVO callback cannot assert the new frame.
+    @Published private(set) var presentationGeneration: UInt64 = 0
     let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
     private var itemStatusObservation: NSKeyValueObservation?
@@ -223,9 +235,13 @@ final class FeedPreviewPlayback: ObservableObject {
         player.pause()
         player.removeAllItems()
         looper = nil
+        displayedGameID = nil
+        presentationGeneration &+= 1
         activeGameID = gameID
         activeClipURL = url
-        clipStartedAt = Date()
+        // Count real preview dwell only when the first video frame is
+        // actually ready for display; exclude network/decode buffering.
+        clipStartedAt = nil
         let item = AVPlayerItem(url: url)
         itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
             guard FeedPreviewPolicy.shouldStopOnFailure(observedItem.status) else { return }
@@ -245,6 +261,23 @@ final class FeedPreviewPlayback: ObservableObject {
         pendingTask = nil
         pendingGameID = nil
         pendingClipURL = nil
+    }
+
+    /// Called only by the native AVPlayerLayer for its own attachment epoch.
+    /// The generation guard discards asynchronous ready callbacks from a
+    /// replaced URL even when the game ID remains unchanged.
+    func reportDisplayReadiness(gameID: String, generation: UInt64, ready: Bool) {
+        guard activeGameID == gameID,
+              presentationGeneration == generation else { return }
+        if ready {
+            if displayedGameID != gameID {
+                displayedGameID = gameID
+                clipStartedAt = Date()
+            }
+        } else {
+            displayedGameID = nil
+            clipStartedAt = nil
+        }
     }
 
     func stop(gameID: String? = nil) {
@@ -270,6 +303,7 @@ final class FeedPreviewPlayback: ObservableObject {
         player.removeAllItems()
         looper = nil
         activeGameID = nil
+        displayedGameID = nil
         activeClipURL = nil
         clipStartedAt = nil
         if let stoppedGameID, let startedAt {

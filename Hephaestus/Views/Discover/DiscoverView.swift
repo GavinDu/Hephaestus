@@ -1182,9 +1182,18 @@ private struct ForYouGamePage: View {
                     .onAppear { loadedPosterURL = nil }
             }
             if previewPlayback.activeGameID == game.id && !reduceMotion {
-                FeedPreviewSurface(player: previewPlayback.player)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black)
+                // Do NOT place an opaque black surface over the genuine poster
+                // before the clip's first video frame exists. A new version
+                // of the same game must also create a fresh readiness lease.
+                FeedPreviewSurface(
+                    player: previewPlayback.player,
+                    onReadyForDisplay: { [generation = previewPlayback.presentationGeneration] ready in
+                        previewPlayback.reportDisplayReadiness(
+                            gameID: game.id, generation: generation, ready: ready)
+                    }
+                )
+                .id(previewPlayback.presentationGeneration)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             LinearGradient(
                 stops: [
@@ -1201,7 +1210,12 @@ private struct ForYouGamePage: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(ForYouPageLayout.mediaAccessibilityLabel(
             title: game.title,
-            hasPreviewMedia: loadedPosterURL != nil && loadedPosterURL == game.previewPosterURL
+            hasPreviewMedia: (loadedPosterURL != nil && loadedPosterURL == game.previewPosterURL) ||
+                FeedPreviewPolicy.hasDisplayReadyClip(
+                    activeGameID: previewPlayback.activeGameID,
+                    displayedGameID: previewPlayback.displayedGameID,
+                    expectedGameID: game.id
+                )
         ))
         .accessibilityIdentifier("feed.preview.media.\(game.id)")
         .accessibilityAddTraits(.isImage)

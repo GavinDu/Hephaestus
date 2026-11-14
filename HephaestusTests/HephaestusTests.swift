@@ -537,6 +537,21 @@ struct HephaestusTests {
     #expect(FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: false, constrainedNetwork: false, isOnline: true))
 }
 
+@Test func nativePreviewFirstFrameReadinessCannotLeakBetweenGamesOrVersions() {
+    // Starting AVPlayer (and receiving its URL) does NOT prove an actual
+    // video frame is ready for display. Require the layer's current lease.
+    #expect(!FeedPreviewPolicy.hasDisplayReadyClip(
+        activeGameID: "a", displayedGameID: nil, expectedGameID: "a"))
+    #expect(!FeedPreviewPolicy.hasDisplayReadyClip(
+        activeGameID: "a", displayedGameID: "b", expectedGameID: "a"))
+    #expect(!FeedPreviewPolicy.hasDisplayReadyClip(
+        activeGameID: nil, displayedGameID: "a", expectedGameID: "a"))
+    #expect(!FeedPreviewPolicy.hasDisplayReadyClip(
+        activeGameID: "a", displayedGameID: "a", expectedGameID: "b"))
+    #expect(FeedPreviewPolicy.hasDisplayReadyClip(
+        activeGameID: "a", displayedGameID: "a", expectedGameID: "a"))
+}
+
 @Test func settledFeedPreviewReusesOnlyTheExactVersionedClip() {
     let old = URL(string: "https://example.test/v1/games/a/previews/1/clip.mp4")!
     let fresh = URL(string: "https://example.test/v1/games/a/previews/2/clip.mp4")!
