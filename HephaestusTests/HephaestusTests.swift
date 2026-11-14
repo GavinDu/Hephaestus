@@ -105,6 +105,17 @@ struct HephaestusTests {
         // or a zero-distance gesture layered over the feed pager.
     }
 
+    @Test func ownerlessFeedNeverOffersDeadCreatorProfileOrFollowActions() {
+        // A real server may publish a playable game without a creator ID.
+        // Never manufacture a profile route, display a fake identity, or
+        // expose Follow on the missing/empty/whitespace-only owner.
+        for owner in [nil, "", " ", "\n\t", "  \r\n "] as [String?] {
+            #expect(!ForYouPageLayout.hasNavigableCreator(ownerID: owner))
+        }
+        #expect(ForYouPageLayout.hasNavigableCreator(ownerID: "real-creator"))
+        #expect(ForYouPageLayout.hasNavigableCreator(ownerID: "creator-without-display-name"))
+    }
+
     @Test func shippedFeedFallbackPalettesDoNotCollide() {
         // Run against the same real game IDs used by native screenshot QA.
         // The old scalar sum and an in-loop modulo five both mapped Ribbon

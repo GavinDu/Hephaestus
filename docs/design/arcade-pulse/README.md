@@ -23,3 +23,9 @@ These are **compressed preview copies** of approved design concepts generated in
 - Compare real iPhone and iPad simulator results captured as untouched, oriented full-screen files; preserve JSON metadata, test commit SHA, screenshot provenance, and before/after gestures.
 - The two CI contact sheets are **historical screenshot summaries**, provided solely as comparison references and not a substitute for current exact-head evidence.
 - The authoritative platform runtime remains bridgeless WKWebView with server-owned Game IR; do not add fake controls or metrics from concept art.
+
+## Native accessibility action contracts (#173 / #179)
+
+- The Arcade Pulse Play CTA uses semantic SwiftUI `.headline` typography that grows with Dynamic Type, instead of a fixed 20pt font at accessibility sizes. Its visual hit target remains at least 48pt and it never attaches a gesture that steals feed paging.
+- A playable `FeedGame` with no nonblank backend `ownerID` must **not** present an actionable creator/profile or Follow control. A generic `Mini game` label must not impersonate a navigable creator profile. Games remain playable independently of creator attribution.
+- Real creator identity and profile navigation remain backed by the server; no test-only creator or fabricated follower count is inserted. Validate these semantics alongside real iPhone/iPad screenshots, VoiceOver labels/order, and oversized Dynamic Type at the exact PR head.

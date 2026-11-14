@@ -74,15 +74,18 @@ enum HephaestusDesign {
 /// swipe-to-browse feed that would steal the pager's vertical contact.
 struct ArcadePulsePlayCTA: View {
     @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Label("Play now", systemImage: "play.fill")
-                .font(dynamicTypeSize.isAccessibilitySize
-                      ? .system(size: 20, weight: .bold, design: .rounded)
-                      : .system(.headline, design: .rounded).weight(.bold))
+                // Semantic type scales with the user's chosen text size.
+                // The previous fixed 20pt accessibility font stopped scaling
+                // and failed the large-text design contract in #173.
+                .font(.system(.headline, design: .rounded).weight(.bold))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .padding(.vertical, 8)
                 .foregroundStyle(.black)
                 .frame(maxWidth: .infinity, minHeight: ArcadePulseTheme.playHeight)
                 .background(
