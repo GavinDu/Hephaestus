@@ -137,6 +137,12 @@ jobs:
             exit 1
           fi
 
+      - name: Verify real published game/package for mandatory iPhone smoke
+        shell: bash
+        run: |
+          python3 tools/test-feedback/verify-live-game-fixture.py \
+            --feed-url "$BACKEND_HEALTH_URL" --attempts 3 --timeout 10
+
       - name: Boot iPhone simulator
         id: iphone
         shell: bash
@@ -211,6 +217,12 @@ jobs:
     steps:
       - name: Check out iOS app
         uses: actions/checkout@v4
+
+      - name: Verify real published game/package for mandatory iPad smoke
+        shell: bash
+        run: |
+          python3 tools/test-feedback/verify-live-game-fixture.py \
+            --feed-url "$BACKEND_HEALTH_URL" --attempts 3 --timeout 10
 
       - name: Select an available iPad simulator
         id: ipad
