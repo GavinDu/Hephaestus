@@ -23,3 +23,7 @@ These are **compressed preview copies** of approved design concepts generated in
 - Compare real iPhone and iPad simulator results captured as untouched, oriented full-screen files; preserve JSON metadata, test commit SHA, screenshot provenance, and before/after gestures.
 - The two CI contact sheets are **historical screenshot summaries**, provided solely as comparison references and not a substitute for current exact-head evidence.
 - The authoritative platform runtime remains bridgeless WKWebView with server-owned Game IR; do not add fake controls or metrics from concept art.
+
+## Creator Profile / Follow native error safety (#179)
+
+Viewer-specific `is_following` is revoked on authenticated profile GET 401/403. Native `CreatorProfileErrorPresentation` maps GET and Follow failures to fixed helpful copy; internal URLs, bearer tokens and account identities never enter spoken or visual error text. A failed Follow POST can succeed server-side before its response was lost, so the Follow button requires a genuine authoritative profile refetch before another mutation. Signed-out Profile and Follow violet CTAs use black foreground for normal-text contrast, and the failed profile load Retry meets 44pt. Pure Swift tests cover 401/403/404/429, TLS/offline/timeout and private error-string leakage. Never simulate creator data or follow confirmation for tests.

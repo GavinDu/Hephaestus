@@ -2302,6 +2302,57 @@ private struct CreatorDiscoverySheet: View {
     }
 }
 
+/// Profile and Follow errors must never expose backend hostnames, account
+/// identities or bearer tokens. A failed Follow response is not proof that
+/// a write did not reach the server; the status needs a real refresh.
+enum CreatorProfileErrorPresentation {
+    enum Action { case load, follow }
+
+    static func message(for error: Error, action: Action) -> String {
+        if let apiError = error as? APIError,
+           case let .badStatus(status) = apiError {
+            switch status {
+            case 401:
+                return "Your session has expired. Open Profile to sign in again."
+            case 403:
+                return "This account isn't allowed to view or change this creator."
+            case 404:
+                return "This creator isn't available right now. Try again later."
+            case 429:
+                return "Too many requests. Wait a moment, then retry."
+            default: break
+            }
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "You're offline. Reconnect and try again."
+            case .secureConnectionFailed, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .serverCertificateUntrusted,
+                 .serverCertificateHasUnknownRoot:
+                return "A secure connection couldn't be established. Try again."
+            case .timedOut:
+                return "The creator service took too long. Try again."
+            default: break
+            }
+        }
+        switch action {
+        case .load:
+            return "Couldn't refresh creator details. Try again."
+        case .follow:
+            return "Your Follow change couldn't be confirmed. Refresh the creator before trying again."
+        }
+    }
+
+    /// Public creator counts may remain authoritative, but an authenticated
+    /// rejection revokes the viewer-specific following flag attached to them.
+    static func revokesViewerProfile(for error: Error) -> Bool {
+        guard let apiError = error as? APIError,
+              case let .badStatus(status) = apiError else { return false }
+        return status == 401 || status == 403
+    }
+}
+
 private struct CreatorProfileSheet: View {
     let creatorID: String
     let onRequestSignIn: (() -> Void)?
@@ -2368,6 +2419,7 @@ private struct CreatorProfileSheet: View {
                                                 Label("Go to Profile to sign in",
                                                       systemImage: "person.crop.circle")
                                                     .font(.headline.weight(.semibold))
+                                                    .foregroundStyle(.black)
                                                     .frame(maxWidth: .infinity, minHeight: 48)
                                             }
                                             .buttonStyle(.borderedProminent)
@@ -2385,11 +2437,13 @@ private struct CreatorProfileSheet: View {
                                         if isFollowUpdating {
                                             Label("Updating follow…", systemImage: "arrow.triangle.2.circlepath")
                                                 .font(.headline.weight(.semibold))
+                                                .foregroundStyle(.black)
                                                 .frame(maxWidth: .infinity, minHeight: 48)
                                         } else {
                                             Label(profile.is_following ? "Following" : "Follow creator",
                                                   systemImage: profile.is_following ? "person.fill.checkmark" : "person.badge.plus")
                                                 .font(.headline.weight(.semibold))
+                                                .foregroundStyle(.black)
                                                 .frame(maxWidth: .infinity, minHeight: 48)
                                         }
                                     }
@@ -2471,6 +2525,8 @@ private struct CreatorProfileSheet: View {
                             description: Text(errorMessage ?? "Please try again."))
                         Button("Try again") { Task { await load() } }
                             .buttonStyle(.borderedProminent)
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("creator.profile.retryLoad")
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -2609,7 +2665,12 @@ private struct CreatorProfileSheet: View {
         } catch {
             guard revision == profileLoadRevision,
                   viewer == BackendConfig.currentUserID else { return }
-            errorMessage = error.localizedDescription
+            if CreatorProfileErrorPresentation.revokesViewerProfile(for: error) {
+                // The cached profile contains this viewer's is_following
+                // field. Do not keep displaying private state after 401/403.
+                profile = nil
+            }
+            errorMessage = CreatorProfileErrorPresentation.message(for: error, action: .load)
         }
     }
 
@@ -2639,7 +2700,11 @@ private struct CreatorProfileSheet: View {
         } catch {
             guard mutation == followMutationRevision,
                   viewer == BackendConfig.currentUserID else { return }
-            followActionError = "Couldn't update Follow: \(error.localizedDescription)"
+            // The server may have applied the POST before a connection
+            // failed. Block contradictory duplicate Follow toggles until
+            // a current profile GET confirms the real viewer state.
+            followStatusNeedsRefresh = true
+            followActionError = CreatorProfileErrorPresentation.message(for: error, action: .follow)
         }
     }
 }

@@ -140,6 +140,42 @@ struct HephaestusTests {
             verticalSizeClass: .regular, horizontalSizeClass: .regular, searchText: ""))
     }
 
+    @Test func arcadePulseCreatorProfileAndFollowErrorsRemainSafe() {
+        let secret: Error = NSError(
+            domain: "https://private.example.test", code: 56,
+            userInfo: [NSLocalizedDescriptionKey:
+                "Bearer secretToken user@example.test https://private.example.test/v1/follow"]
+        )
+        let failures: [Error] = [
+            secret, APIError.badStatus(401), APIError.badStatus(403),
+            APIError.badStatus(404), APIError.badStatus(429),
+            URLError(.timedOut), URLError(.secureConnectionFailed),
+            URLError(.notConnectedToInternet), URLError(.networkConnectionLost)
+        ]
+        let actions: [CreatorProfileErrorPresentation.Action] = [.load, .follow]
+        for error in failures {
+            for action in actions {
+                let copy = CreatorProfileErrorPresentation.message(for: error, action: action)
+                #expect(!copy.contains("secretToken"))
+                #expect(!copy.contains("private.example.test"))
+                #expect(!copy.contains("user@example.test"))
+                #expect(!copy.contains("Bearer"))
+                #expect(!copy.contains("401"))
+                #expect(!copy.contains("403"))
+            }
+        }
+        #expect(CreatorProfileErrorPresentation.revokesViewerProfile(for: APIError.badStatus(401)))
+        #expect(CreatorProfileErrorPresentation.revokesViewerProfile(for: APIError.badStatus(403)))
+        #expect(!CreatorProfileErrorPresentation.revokesViewerProfile(for: APIError.badStatus(404)))
+        #expect(!CreatorProfileErrorPresentation.revokesViewerProfile(for: URLError(.timedOut)))
+        #expect(CreatorProfileErrorPresentation.message(
+            for: URLError(.secureConnectionFailed), action: .load).contains("secure connection"))
+        #expect(CreatorProfileErrorPresentation.message(
+            for: URLError(.notConnectedToInternet), action: .follow).contains("offline"))
+        #expect(CreatorProfileErrorPresentation.message(
+            for: APIError.badStatus(429), action: .load).contains("Too many"))
+    }
+
     @Test func arcadePulseCreatorDiscoveryErrorsStayTruthfulAndPrivate() {
         let tls = CreatorDiscoveryErrorPresentation.message(
             for: URLError(.secureConnectionFailed))
