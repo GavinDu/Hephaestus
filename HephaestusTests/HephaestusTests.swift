@@ -128,6 +128,53 @@ struct HephaestusTests {
             action: .load, signedIn: true).contains("Too many"))
     }
 
+    @Test func arcadePulseStudioErrorsNeverShowPrivateServerDetails() {
+        let raw = NSError(domain: "https://private.invalid", code: 42, userInfo: [
+            NSLocalizedDescriptionKey: "Bearer alice@example.test https://private.invalid/v1/projects"
+        ])
+        let failures: [Error] = [
+            raw,
+            URLError(.cannotConnectToHost),
+            APIError.badStatus(500),
+            APIError.badStatus(404)
+        ]
+        for error in failures {
+            let shown = CreatorStudioErrorPresentation.message(for: error)
+            #expect(!shown.contains("alice@example.test"))
+            #expect(!shown.contains("private.invalid"))
+            #expect(!shown.contains("Bearer"))
+            #expect(!shown.contains("500"))
+        }
+        #expect(CreatorStudioErrorPresentation.mustRevokeVisibleProjects(
+            for: APIError.badStatus(401)))
+        #expect(CreatorStudioErrorPresentation.mustRevokeVisibleProjects(
+            for: APIError.badStatus(403)))
+        #expect(!CreatorStudioErrorPresentation.mustRevokeVisibleProjects(
+            for: APIError.badStatus(404)))
+        #expect(!CreatorStudioErrorPresentation.mustRevokeVisibleProjects(
+            for: URLError(.notConnectedToInternet)))
+        #expect(CreatorStudioErrorPresentation.message(
+            for: APIError.badStatus(401)).contains("expired"))
+        #expect(CreatorStudioErrorPresentation.message(
+            for: APIError.badStatus(403)).contains("isn't allowed"))
+        #expect(CreatorStudioErrorPresentation.message(
+            for: APIError.badStatus(429)).contains("Too many"))
+        #expect(CreatorStudioErrorPresentation.message(
+            for: URLError(.notConnectedToInternet)).contains("offline"))
+        #expect(CreatorStudioErrorPresentation.message(
+            for: URLError(.secureConnectionFailed)).contains("secure connection"))
+        #expect(CreatorStudioErrorPresentation.message(
+            for: URLError(.timedOut)).contains("too long"))
+    }
+
+    @Test func arcadePulseElectricVioletUsesAAReadableCTAForeground() {
+        // WCAG relative-sRGB luminance; the real design token is the source
+        // of truth for both native Library and Studio sign-in controls.
+        #expect(ArcadePulseTheme.electricVioletContrastWithBlack >= 4.5)
+        #expect(ArcadePulseTheme.electricVioletContrastWithWhite < 4.5)
+        #expect(ArcadePulseTheme.electricVioletContrastWithBlack > 5)
+    }
+
     @Test func arcadePulseFoundationUsesSinglePaletteAndAccessibleTargetSizes() {
         #expect(ArcadePulseTheme.fallbackPalettes.count == 5)
         #expect(ArcadePulseTheme.minimumTarget >= 44)
@@ -139,6 +186,17 @@ struct HephaestusTests {
         }
         // Play is a real 48pt native action, not a fake recorded preview
         // or a zero-distance gesture layered over the feed pager.
+    }
+
+    @Test func ownerlessFeedNeverOffersDeadCreatorProfileOrFollowActions() {
+        // A real server may publish a playable game without a creator ID.
+        // Never manufacture a profile route, display a fake identity, or
+        // expose Follow on the missing/empty/whitespace-only owner.
+        for owner in [nil, "", " ", "\n\t", "  \r\n "] as [String?] {
+            #expect(!ForYouPageLayout.hasNavigableCreator(ownerID: owner))
+        }
+        #expect(ForYouPageLayout.hasNavigableCreator(ownerID: "real-creator"))
+        #expect(ForYouPageLayout.hasNavigableCreator(ownerID: "creator-without-display-name"))
     }
 
     @Test func shippedFeedFallbackPalettesDoNotCollide() {

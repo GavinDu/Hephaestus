@@ -64,6 +64,15 @@ enum FeedSocialErrorPresentation {
 /// Compact layouts fill the available width; regular layouts preserve a
 /// portrait 9:16 stage with a readable maximum width.
 enum ForYouPageLayout {
+    /// A missing, empty or whitespace-only owner is not a creator profile.
+    /// In that case a "View profile" button would be a dead accessibility
+    /// action because the app has no creator ID to navigate to.
+    /// Use this same policy for both visible identity and Follow actions.
+    static func hasNavigableCreator(ownerID: String?) -> Bool {
+        guard let ownerID else { return false }
+        return !ownerID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// A stable per-game palette slot for truthful fallback artwork when no
     /// approved poster/clip exists. Hash through a larger prime first: reducing
     /// modulo a five-color palette inside the loop makes 31 ≡ 1 (mod 5)
