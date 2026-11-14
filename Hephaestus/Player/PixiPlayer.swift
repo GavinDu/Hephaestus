@@ -609,6 +609,22 @@ enum PlayerWebViewPool {
             DevLog.info(.player, "unattached speculative WebView prewarm evicted after memory warning")
         }
     }
+    // A Play-triggered speculative page is not a background asset cache.
+    // Discard it when the app backgrounds instead of allowing fetch/decoding
+    // to run until the ordinary fifteen-second expiry. Attached gameplay is
+    // owned by the current sheet and is never blanked by this observer.
+    private static let backgroundObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
+        forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+    ) { _ in
+        Task { @MainActor in
+            guard PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+                isAttached: PlayerWebViewPool.isAttached,
+                hasPooledView: PlayerWebViewPool.pooledView != nil
+            ) else { return }
+            PlayerWebViewPool.discardUnattachedPrewarm()
+            DevLog.info(.player, "unattached player prewarm evicted on app background")
+        }
+    }
     private static var prewarmEpoch: UInt64 = 0
     private static var prewarmExpiryTask: Task<Void, Never>?
     private static let warmupDelegate = WarmupDelegate()
@@ -763,6 +779,7 @@ enum PlayerWebViewPool {
     private static func ensureCurrentCredentialScope() {
         _ = sessionObserver
         _ = memoryWarningObserver
+        _ = backgroundObserver
         let current = credentialFingerprint()
         if PlayerSessionCachePolicy.shouldPurge(
             cachedFingerprint: sessionFingerprint, currentFingerprint: current

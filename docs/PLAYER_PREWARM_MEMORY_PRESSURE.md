@@ -15,3 +15,9 @@ The production player owns **one pooled WKWebView**. It prewarms only after the 
 ## Review / validation
 
 Swift unit tests exercise unattached/attached × view-present/view-absent. Native Actions must additionally pass Xcode compilation and iPhone/iPad player smoke. This policy test does not prove OS delivery order or real-world memory reclaimed: retain #205 real iPhone/iPad 50+ open/close/swipe memory, thermal and context-loss evidence gates. This slice is safe to revert without changing package semantics.
+
+## App background eviction
+
+A Play-triggered **unattached** prewarm must not continue network fetch, GPU decode or retain a WebKit renderer when the app enters the background. A process-wide `UIApplication.didEnterBackgroundNotification` observer now reevaluates the **current** `isAttached` and `pooledView` state on `MainActor`, then calls the same `discardUnattachedPrewarm()` operation as the memory-warning observer. It is registered once when the pool is initialized. The existing fifteen-second timeout remains an upper bound during foreground use.
+
+The observer never discards an attached game; `onDisappear` / Coordinator retirement remains the only normal end of that presentation. Pure Swift truth-table tests cover unattached/attached and view-present/view-absent. **This is not proof of real background notification ordering, GPU memory reclamation or persistent WebKit cache revocation.** Validate via iPhone/iPad instrumentation and #205's 50+ lifecycle and private-content revocation gates. App/scene-specific multiwindow behavior requires separate validation.
