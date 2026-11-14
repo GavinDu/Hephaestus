@@ -1,4 +1,5 @@
 import Combine
+import CoreFoundation
 import CryptoKit
 import Network
 import SwiftUI
@@ -117,6 +118,16 @@ enum PlayerNativeMetricPayload {
     case firstInput(milliseconds: Int)
     case perfWindow(p95: Int, average: Int, count: Int)
 
+    // WKScriptMessage numeric fields are bridged via NSNumber. Foundation
+    // can cast the special CFBoolean singleton to Int(1)/Int(0); an event
+    // with schema=true or ms=true must not be admitted as a valid number.
+    static func strictInt(_ value: Any?) -> Int? {
+        guard let value else { return nil }
+        if let number = value as? NSNumber,
+           CFGetTypeID(number) == CFBooleanGetTypeID() { return nil }
+        return value as? Int
+    }
+
     var metric: String {
         switch self {
         case .firstSceneRenderSubmit: return "first_scene_render_submit"
@@ -127,28 +138,29 @@ enum PlayerNativeMetricPayload {
 
     static func parse(_ body: [String: Any]) -> Self? {
         let common: Set<String> = ["schema", "type", "sessionId", "gameId", "metric", "sequence"]
-        guard body["schema"] as? Int == 1,
+        guard Self.strictInt(body["schema"]) == 1,
               body["type"] as? String == "player_metric",
               body["sessionId"] as? String != nil,
               body["gameId"] as? String != nil,
-              body["sequence"] as? Int != nil,
+              Self.strictInt(body["sequence"]) != nil,
               let kind = body["metric"] as? String else { return nil }
         switch kind {
         case "first_scene_render_submit":
             guard Set(body.keys) == common.union(["ms"]),
-                  let ms = PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(body["ms"])
+                  let ms = Self.strictInt(body["ms"]),
+                  PlayerRuntimeMetricPolicy.firstSceneRenderSubmitMS(ms) != nil
             else { return nil }
             return .firstSceneRenderSubmit(milliseconds: ms)
         case "first_input":
             guard Set(body.keys) == common.union(["ms"]),
-                  let ms = body["ms"] as? Int, (0...86_400_000).contains(ms)
+                  let ms = Self.strictInt(body["ms"]), (0...86_400_000).contains(ms)
             else { return nil }
             return .firstInput(milliseconds: ms)
         case "perf_window":
             guard Set(body.keys) == common.union(["frameTimeP95Ms", "frameTimeAvgMs", "frameCount"]),
-                  let p95 = body["frameTimeP95Ms"] as? Int,
-                  let average = body["frameTimeAvgMs"] as? Int,
-                  let count = body["frameCount"] as? Int,
+                  let p95 = Self.strictInt(body["frameTimeP95Ms"]),
+                  let average = Self.strictInt(body["frameTimeAvgMs"]),
+                  let count = Self.strictInt(body["frameCount"]),
                   (0...60_000).contains(p95), (0...60_000).contains(average),
                   (1...10_000).contains(count)
             else { return nil }
@@ -1744,7 +1756,7 @@ private struct PlayerWebView: UIViewRepresentable {
                   message.frameInfo.isMainFrame,
                   sameOrigin(message.frameInfo.securityOrigin),
                   let body = message.body as? [String: Any],
-                  body["schema"] as? Int == 1,
+                  PlayerNativeMetricPayload.strictInt(body["schema"]) == 1,
                   let runtimeSessionID = body["sessionId"] as? String,
                   !runtimeSessionID.isEmpty, runtimeSessionID.count <= 128,
                   body["gameId"] as? String == expectedGameID,
