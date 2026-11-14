@@ -573,6 +573,38 @@ struct HephaestusTests {
     #expect(FeedPreviewPolicy.shouldAutoplay(hasClip: true, reduceMotion: false, lowPowerMode: false, constrainedNetwork: false, isOnline: true))
 }
 
+@Test func nativePreviewFirstFrameReadinessCannotLeakBetweenGamesOrVersions() {
+    // Starting AVPlayer (and receiving its URL) does NOT prove an actual
+    // video frame is ready for display. Require the layer's current lease.
+    #expect(!FeedPreviewPolicy.hasDisplayReadyClip(
+        activeGameID: "a", displayedGameID: nil, expectedGameID: "a"))
+    #expect(!FeedPreviewPolicy.hasDisplayReadyClip(
+        activeGameID: "a", displayedGameID: "b", expectedGameID: "a"))
+    #expect(!FeedPreviewPolicy.hasDisplayReadyClip(
+        activeGameID: nil, displayedGameID: "a", expectedGameID: "a"))
+    #expect(!FeedPreviewPolicy.hasDisplayReadyClip(
+        activeGameID: "a", displayedGameID: "a", expectedGameID: "b"))
+    #expect(FeedPreviewPolicy.hasDisplayReadyClip(
+        activeGameID: "a", displayedGameID: "a", expectedGameID: "a"))
+    // Even if a new asset belongs to the same title/game, stale first-frame
+    // callbacks from a prior version or detached AVPlayerLayer must not win.
+    #expect(FeedPreviewPolicy.acceptsFrameCallback(
+        activeGameID: "a", generation: 7,
+        callbackGameID: "a", callbackGeneration: 7))
+    #expect(!FeedPreviewPolicy.acceptsFrameCallback(
+        activeGameID: "a", generation: 8,
+        callbackGameID: "a", callbackGeneration: 7))
+    #expect(!FeedPreviewPolicy.acceptsFrameCallback(
+        activeGameID: "b", generation: 8,
+        callbackGameID: "a", callbackGeneration: 8))
+    #expect(!FeedPreviewPolicy.acceptsFrameCallback(
+        activeGameID: nil, generation: 8,
+        callbackGameID: "a", callbackGeneration: 8))
+    #expect(!FeedPreviewPolicy.acceptsFrameCallback(
+        activeGameID: "", generation: 8,
+        callbackGameID: "", callbackGeneration: 8))
+}
+
 @Test func settledFeedPreviewReusesOnlyTheExactVersionedClip() {
     let old = URL(string: "https://example.test/v1/games/a/previews/1/clip.mp4")!
     let fresh = URL(string: "https://example.test/v1/games/a/previews/2/clip.mp4")!
