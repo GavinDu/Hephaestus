@@ -586,6 +586,18 @@ enum PlayerWebKitSessionStoragePolicy {
     static func newSessionStore() -> WKWebsiteDataStore {
         WKWebsiteDataStore.nonPersistent()
     }
+
+    // Single tested construction path: a caller cannot accidentally use
+    // WKWebViewConfiguration's default disk-persistent data store.
+    static func configuration(processPool: WKProcessPool,
+                              dataStore: WKWebsiteDataStore) -> WKWebViewConfiguration {
+        let configuration = PlayerWebKitSessionStoragePolicy.configuration(
+            processPool: processPool, dataStore: playerWebsiteDataStore
+        )
+        configuration.processPool = processPool
+        configuration.websiteDataStore = dataStore
+        return configuration
+    }
 }
 
 // MARK: - Single pooled player web view
@@ -830,8 +842,6 @@ enum PlayerWebViewPool {
         let configuration = WKWebViewConfiguration()
         // The only handler is attached per presentation and accepts one
         // validated run-result notification; there is no script control API.
-        configuration.processPool = processPool
-        configuration.websiteDataStore = playerWebsiteDataStore
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.applicationNameForUserAgent = "HephaestusPlayer/1.1"

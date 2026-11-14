@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import SwiftUI
+import WebKit
 import Testing
 @testable import Hephaestus
 
@@ -1245,6 +1246,13 @@ struct HephaestusTests {
     #expect(!first.isPersistent)
     #expect(!second.isPersistent)
     #expect(first !== second)
+    let pool = WKProcessPool()
+    let configured = PlayerWebKitSessionStoragePolicy.configuration(
+        processPool: pool, dataStore: first
+    )
+    #expect(configured.websiteDataStore === first)
+    #expect(!configured.websiteDataStore.isPersistent)
+    #expect(configured.processPool === pool)
 }
 
 // Saved games are owner-private even when the UI also has on-device recent
