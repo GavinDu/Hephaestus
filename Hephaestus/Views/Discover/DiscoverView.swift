@@ -2452,6 +2452,40 @@ private struct CreatorProfileSheet: View {
     }
 }
 
+/// Report failures may be ambiguous: a lost POST response does not prove
+/// moderation did not receive the report. Never show raw transport strings.
+enum ReportGameErrorPresentation {
+    static func message(for error: Error) -> String {
+        if let api = error as? APIError, case let .badStatus(status) = api {
+            switch status {
+            case 400:
+                return "The report wasn't accepted. Review its details and try again."
+            case 401:
+                return "Your session has expired. Sign in again from Profile, then retry."
+            case 403:
+                return "This account isn't permitted to submit the report."
+            case 429:
+                return "Too many reports have been sent. Try again in a little while."
+            default: break
+            }
+        }
+        if let network = error as? URLError {
+            switch network.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "You're offline. Your report wasn't confirmed. Reconnect before retrying."
+            case .secureConnectionFailed, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .serverCertificateUntrusted,
+                 .serverCertificateHasUnknownRoot:
+                return "A secure connection couldn't be established. Your report wasn't confirmed."
+            case .timedOut:
+                return "Couldn't confirm whether your report was received. The request took too long."
+            default: break
+            }
+        }
+        return "Couldn't confirm whether your report was received. Review the details before retrying."
+    }
+}
+
 private struct ReportGameSheet: View {
     let game: FeedGame
     @Environment(\.dismiss) private var dismiss
@@ -2489,7 +2523,11 @@ private struct ReportGameSheet: View {
                 }
                 if let errorMessage {
                     Section {
-                        Text(errorMessage).foregroundStyle(.red)
+                        Label(errorMessage, systemImage: "exclamationmark.triangle")
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("report.error")
                     }
                 }
                 if submitted {
@@ -2504,10 +2542,22 @@ private struct ReportGameSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
+                        .frame(minWidth: 44, minHeight: 44)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Submit") { Task { await submit() } }
-                        .disabled(isSubmitting || submitted)
+                    Button {
+                        Task { await submit() }
+                    } label: {
+                        if isSubmitting {
+                            ProgressView()
+                                .accessibilityLabel("Submitting report")
+                        } else {
+                            Text("Submit")
+                        }
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .disabled(isSubmitting || submitted)
+                    .accessibilityIdentifier("report.submit")
                 }
             }
         }
@@ -2516,6 +2566,7 @@ private struct ReportGameSheet: View {
     private func submit() async {
         guard !isSubmitting, !submitted else { return }
         isSubmitting = true
+        errorMessage = nil
         defer { isSubmitting = false }
         let trimmedDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
         let reason = trimmedDetails.isEmpty ? selectedReason : "\(selectedReason): \(trimmedDetails)"
@@ -2530,7 +2581,9 @@ private struct ReportGameSheet: View {
             submitted = true
             errorMessage = nil
         } catch {
-            errorMessage = "Couldn't submit report: \(error.localizedDescription)"
+            // Do not falsely assert that a timed-out POST was definitely
+            // rejected; retain the user's chosen reason and details.
+            errorMessage = ReportGameErrorPresentation.message(for: error)
         }
     }
 }
