@@ -1,5 +1,20 @@
 import SwiftUI
 
+/// Independently tested creator-game row layout. Keep actual published
+/// titles, provenance and Play actions readable without inventing content.
+enum CreatorGameRowLayout {
+    static func prefersStacked(
+        isIPad: Bool,
+        isRegularWidth: Bool,
+        isEnlargedText: Bool,
+        isAccessibilityText: Bool
+    ) -> Bool {
+        // Accessibility text always needs the full card width. Enlarged
+        // non-accessibility text stacks on iPhone and narrow iPad columns.
+        isAccessibilityText || (isEnlargedText && (!isIPad || !isRegularWidth))
+    }
+}
+
 /// A viewer-scoped mutation gate for real social API calls. A second tap on
 /// the same entity does not issue a contradictory request before the first
 /// network write finishes. UUID leases prevent an old-account callback from

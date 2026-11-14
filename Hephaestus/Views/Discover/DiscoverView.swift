@@ -2241,6 +2241,7 @@ private struct CreatorProfileSheet: View {
     let creatorID: String
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var profile: CreatorProfile?
     @State private var errorMessage: String?
     @State private var isLoading = true
@@ -2363,7 +2364,18 @@ private struct CreatorProfileSheet: View {
     }
 
     private func creatorGameRow(_ game: FeedGame) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        // A fixed side-by-side 112pt poster used to squeeze genuine backend
+        // titles and Play at XXL/XXXL, especially on compact iPads.
+        let stacked = CreatorGameRowLayout.prefersStacked(
+            isIPad: UIDevice.current.userInterfaceIdiom == .pad,
+            isRegularWidth: horizontalSizeClass == .regular,
+            isEnlargedText: dynamicTypeSize >= .xxLarge,
+            isAccessibilityText: dynamicTypeSize.isAccessibilitySize
+        )
+        let layout: AnyLayout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        return layout {
             ZStack {
                 LinearGradient(colors: ArcadePulseTheme.fallbackPalette(gameID: game.id),
                                startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -2382,7 +2394,8 @@ private struct CreatorProfileSheet: View {
                         .accessibilityLabel("Gameplay preview unavailable")
                 }
             }
-            .frame(width: 112, height: 116)
+            .frame(width: stacked ? nil : 112, height: stacked ? 152 : 116)
+            .frame(maxWidth: stacked ? .infinity : nil)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 8) {
@@ -2405,13 +2418,18 @@ private struct CreatorProfileSheet: View {
                 } label: {
                     Label("Play game", systemImage: "play.fill")
                         .font(.subheadline.weight(.bold))
-                        .frame(minWidth: 110, minHeight: 44)
+                        // Existing deep orange is not AA-readable with
+                        // white normal-size text. Black is approximately 8:1.
+                        .foregroundStyle(.black)
+                        .frame(minWidth: stacked ? nil : 110,
+                               maxWidth: stacked ? .infinity : nil,
+                               minHeight: 48)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(ArcadePulseTheme.playOrangeDeep)
                 .accessibilityIdentifier("creator.game.play.\(game.id)")
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
