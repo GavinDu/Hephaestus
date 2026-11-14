@@ -1,5 +1,16 @@
 import SwiftUI
 
+/// An early status hint never changes the active network request. A slow
+/// request must be empty, still loading and owned by this scope/generation.
+enum FeedSlowLoadingPolicy {
+    static func canShowLibrary(
+        isLoading: Bool, hasGames: Bool,
+        ownsRequest: Bool, matchesScope: Bool
+    ) -> Bool {
+        isLoading && !hasGames && ownsRequest && matchesScope
+    }
+}
+
 /// Independently tested creator-game row layout. Keep actual published
 /// titles, provenance and Play actions readable without inventing content.
 enum CreatorGameRowLayout {
