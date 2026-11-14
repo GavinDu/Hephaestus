@@ -1568,3 +1568,110 @@ struct HephaestusTests {
     #expect(nextInteractive)
     #expect(!duplicateSequence && !duplicateScene)
 }
+
+@Test func playerHostCallbacksRequireLiveAttachmentAcrossRapidRetries() {
+    let current = PlayerHostLaunchReducer()
+    let canDeliver = PlayerHostCallbackDeliveryPolicy.mayDeliver(
+        ownsCurrentAttachment: true,
+        acceptsRuntimeEvents: current.permitsRuntimeEvents
+    )
+    #expect(canDeliver)
+
+    // Retired SwiftUI coordinators can survive a replacement sheet mount.
+    // The same pooled WKWebView must reject the former lease even when
+    // its session is bound and its launch lifecycle has not yet detached.
+    for lease in 2...128 {
+        let previousOwns = PlayerAttachmentLeasePolicy.mayRecycle(
+            isCurrentPooledView: true,
+            isAttached: true,
+            expectedLease: UInt64(lease - 1),
+            currentLease: UInt64(lease)
+        )
+        let staleCanDeliver = PlayerHostCallbackDeliveryPolicy.mayDeliver(
+            ownsCurrentAttachment: previousOwns,
+            acceptsRuntimeEvents: current.permitsRuntimeEvents
+        )
+        #expect(!staleCanDeliver)
+    }
+    var failed = PlayerHostLaunchReducer()
+    let failureRecorded = failed.navigationFailed()
+    let failedMayDeliver = PlayerHostCallbackDeliveryPolicy.mayDeliver(
+        ownsCurrentAttachment: true,
+        acceptsRuntimeEvents: failed.permitsRuntimeEvents
+    )
+    #expect(failureRecorded)
+    #expect(!failedMayDeliver)
+
+    var detached = PlayerHostLaunchReducer()
+    detached.detach()
+    let detachedMayDeliver = PlayerHostCallbackDeliveryPolicy.mayDeliver(
+        ownsCurrentAttachment: true,
+        acceptsRuntimeEvents: detached.permitsRuntimeEvents
+    )
+    #expect(!detachedMayDeliver)
+}
+
+@Test func verifiedRunNotificationGateKeepsNewestResultAndBoundedWorkAcrossRestarts() {
+    var gate = PlayerVerifiedRunNotificationGate()
+    // Swift Testing macro closures must not directly invoke mutating methods.
+    let invalidEmpty = gate.offer("")
+    let invalidLength = gate.offer(String(repeating: "r", count: 129))
+    let first = gate.offer("run-0")
+    let firstDuplicate = gate.offer("run-0")
+    let second = gate.offer("run-1")
+    #expect(invalidEmpty == nil)
+    #expect(invalidLength == nil)
+    #expect(first == "run-0")
+    #expect(firstDuplicate == nil)
+    #expect(second == "run-1")
+    #expect(gate.pendingCount == 2)
+
+    let deferred = gate.offer("run-2")  // Queued, not dropped.
+    #expect(deferred == nil)
+    #expect(gate.deferredCount == 1)
+    #expect(!gate.isLatest("run-1"))
+    #expect(gate.isLatest("run-2"))
+    let duplicateDeferred = gate.offer("run-2")
+    let supersededDeferred = gate.offer("run-3")
+    #expect(duplicateDeferred == nil)
+    #expect(supersededDeferred == nil)
+    #expect(gate.isLatest("run-3"))
+    #expect(gate.deferredCount == 1)
+
+    let promoted = gate.complete("run-0")
+    #expect(promoted == "run-3")
+    #expect(gate.pendingCount == 2)
+    #expect(gate.deferredCount == 0)
+    let oldCompletion = gate.complete("run-1")
+    #expect(oldCompletion == nil)
+    #expect(gate.isLatest("run-3"))
+    let latestCompletion = gate.complete("run-3")
+    #expect(latestCompletion == nil)
+    #expect(gate.pendingCount == 0)
+
+    // Over 100 in-page replays cannot lock out new scores or retain
+    // unbounded IDs, queued work, or stale fetch completions.
+    for index in 4..<104 {
+        let runID = "run-\(index)"
+        let offered = gate.offer(runID)
+        let completed = gate.complete(runID)
+        #expect(offered == runID)
+        #expect(completed == nil)
+        #expect(gate.recentCount <= PlayerVerifiedRunNotificationGate.maximumRecentRunIDs)
+        #expect(gate.pendingCount == 0)
+        #expect(gate.deferredCount == 0)
+    }
+    #expect(gate.recentCount == PlayerVerifiedRunNotificationGate.maximumRecentRunIDs)
+    let reaccepted = gate.offer("run-0") // Previously aged out.
+    #expect(reaccepted == "run-0")
+    gate.reset()
+    let lateCompletion = gate.complete("run-0")
+    #expect(lateCompletion == nil)
+    #expect(gate.pendingCount == 0)
+    #expect(gate.deferredCount == 0)
+    #expect(gate.recentCount == 0)
+    #expect(!gate.isLatest("run-0"))
+    let newSession = gate.offer("run-103")
+    #expect(newSession == "run-103")
+}
+
