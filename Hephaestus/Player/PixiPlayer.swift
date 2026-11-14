@@ -591,9 +591,7 @@ enum PlayerWebKitSessionStoragePolicy {
     // WKWebViewConfiguration's default disk-persistent data store.
     static func configuration(processPool: WKProcessPool,
                               dataStore: WKWebsiteDataStore) -> WKWebViewConfiguration {
-        let configuration = PlayerWebKitSessionStoragePolicy.configuration(
-            processPool: processPool, dataStore: playerWebsiteDataStore
-        )
+        let configuration = WKWebViewConfiguration()
         configuration.processPool = processPool
         configuration.websiteDataStore = dataStore
         return configuration
@@ -839,7 +837,9 @@ enum PlayerWebViewPool {
     }
 
     private static func makeWebView() -> WKWebView {
-        let configuration = WKWebViewConfiguration()
+        let configuration = PlayerWebKitSessionStoragePolicy.configuration(
+            processPool: processPool, dataStore: playerWebsiteDataStore
+        )
         // The only handler is attached per presentation and accepts one
         // validated run-result notification; there is no script control API.
         configuration.allowsInlineMediaPlayback = true
