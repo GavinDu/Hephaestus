@@ -6,6 +6,7 @@ suppress a failing XCTest, or print a full public feed/creator identity.
 """
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -31,8 +32,12 @@ def read_public_json(opener, url, timeout):
         with opener.open(req, timeout=timeout) as response:
             if response.status != 200:
                 raise FixtureError(f"endpoint returned HTTP {response.status}")
+            # A successful reverse-proxy HTML response is not feed JSON.
+            # Do not parse/print its body or misrepresent it as a fixture.
+            if response.headers.get_content_type() != "application/json":
+                raise FixtureError("public fixture endpoint is not JSON content")
             raw = response.read(MAX_JSON_BYTES + 1)
-    except (error.HTTPError, error.URLError, TimeoutError) as exc:
+    except (error.HTTPError, error.URLError, TimeoutError, OSError) as exc:
         if isinstance(exc, error.HTTPError):
             raise FixtureError(f"endpoint returned HTTP {exc.code}") from exc
         raise FixtureError("public fixture endpoint unreachable or timed out") from exc
@@ -75,11 +80,17 @@ def candidates_in_feed(payload):
 
 
 def package_is_playable(payload, expected_game_id):
-    return (
-        payload.get("gameId") == expected_game_id
-        and isinstance(payload.get("ir"), dict)
-        and bool(payload["ir"])
-    )
+    # Match the concrete backend GamePackage envelope, not an arbitrary
+    # nonempty JSON object that only happens to have a matching ID.
+    if not isinstance(payload, dict) or payload.get("gameId") != expected_game_id:
+        return False
+    if not all(isinstance(payload.get(k), str) and payload[k].strip()
+               for k in ("packageFormatVersion", "minRuntimeVersion", "irVersion")):
+        return False
+    ir = payload.get("ir")
+    return (isinstance(ir, dict) and bool(ir)
+            and isinstance(ir.get("irVersion"), str)
+            and ir["irVersion"] == payload["irVersion"])
 
 
 def check_once(opener, feed_url, timeout):
@@ -128,8 +139,8 @@ def main(argv=None):
         try:
             game_id, total, eligible = check_once(opener, args.feed_url, args.timeout)
             print(
-                f"LIVE_FIXTURE_READY game_id={game_id} owner_present=true "
-                f"feed_count={total} eligible_count={eligible} package=valid"
+                f"LIVE_FIXTURE_READY game_sha12={hashlib.sha256(game_id.encode()).hexdigest()[:12]} "
+                f"owner_present=true feed_count={total} eligible_count={eligible} package=valid"
             )
             return 0
         except FixtureError as exc:
