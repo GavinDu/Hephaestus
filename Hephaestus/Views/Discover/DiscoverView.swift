@@ -2686,7 +2686,7 @@ private struct CommentsSheet: View {
             isLoading = false
             isLoadFailure = true
             errorMessage = CommentsErrorPresentation.message(
-                for: error, action: .load, signedIn: BackendConfig.currentUserID != nil)
+                for: error, action: .load, signedIn: !BackendConfig.currentUserID.isEmpty)
         }
     }
 
@@ -2721,7 +2721,7 @@ private struct CommentsSheet: View {
             // Uncertain delivery retains the same idempotency key and draft
             // so retry doesn't duplicate a comment on the real server.
             errorMessage = CommentsErrorPresentation.message(
-                for: error, action: .post, signedIn: BackendConfig.currentUserID != nil)
+                for: error, action: .post, signedIn: !BackendConfig.currentUserID.isEmpty)
         }
     }
 
@@ -2742,7 +2742,7 @@ private struct CommentsSheet: View {
             deletingCommentIDs.remove(comment.id)
             isLoadFailure = false
             errorMessage = CommentsErrorPresentation.message(
-                for: error, action: .delete, signedIn: BackendConfig.currentUserID != nil)
+                for: error, action: .delete, signedIn: !BackendConfig.currentUserID.isEmpty)
         }
     }
 }
