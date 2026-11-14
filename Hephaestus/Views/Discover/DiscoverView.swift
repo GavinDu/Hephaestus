@@ -93,6 +93,9 @@ struct DiscoverView: View {
         .buttonStyle(.borderedProminent)
         .tint(ArcadePulseTheme.electricViolet)
         .accessibilityIdentifier("feed.error.retry")
+        // This attempt number changes only when a real request starts. It
+        // remains observable after a short watchdog, unlike the spinner.
+        .accessibilityValue("Request attempt \(feedRequestAttempt)")
     }
 
     @ViewBuilder private var feedRecoveryLibrary: some View {
@@ -125,6 +128,7 @@ struct DiscoverView: View {
     @State private var socialMutationGate = FeedSocialMutationGate()
     @State private var socialMutationEpoch = 0
     @State private var isLoading = false
+    @State private var feedRequestAttempt = 0
     @State private var searchText = ""
     @State private var savedGameIDs = Set<String>()
     @State private var followedCreatorIDs = Set<String>()
@@ -955,6 +959,10 @@ struct DiscoverView: View {
             }
             return try await BackendAPI.shared.fetchFeed(scope: requestedScope)
         }
+        // New requests are real cancellation-scoped transports. This
+        // counter is intentionally separate from the coordinator generation,
+        // which also advances when its watchdog expires a failed request.
+        feedRequestAttempt += 1
         isLoading = true
         errorMessage = nil
         // Real production feeds have a 45s bounded loading budget. A
