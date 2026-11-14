@@ -1,5 +1,19 @@
 import SwiftUI
 
+/// Follow mutations require a verified viewer and creator. An ambiguous
+/// write must be reconciled by a real creator GET before a second tap.
+enum CreatorFollowStatePolicy {
+    static func offersFollow(viewerID: String, creatorID: String) -> Bool {
+        !viewerID.isEmpty && !creatorID.isEmpty && viewerID != creatorID
+    }
+
+    static func canSubmit(viewerID: String, creatorID: String,
+                          isUpdating: Bool, needsConfirmation: Bool) -> Bool {
+        offersFollow(viewerID: viewerID, creatorID: creatorID) &&
+            !isUpdating && !needsConfirmation
+    }
+}
+
 /// Independently tested creator-game row layout. Keep actual published
 /// titles, provenance and Play actions readable without inventing content.
 enum CreatorGameRowLayout {
