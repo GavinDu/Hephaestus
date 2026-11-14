@@ -76,13 +76,24 @@ enum ForYouPageLayout {
         return hash % paletteCount
     }
 
-    /// Regular-width landscape tablets get a real information panel
-    /// beside the preview stage. Compact Split View, portrait and large
-    /// accessibility text preserve the single immersive stage instead.
+    /// The contextual metadata panel is intentionally non-scrollable: the
+    /// feed pager owns the vertical drag, so nested scrolling is unreliable.
+    /// Short Stage Manager windows and large text use a single playable stage
+    /// instead of clipped Spotlight content or a crushed media viewport.
+    static let minimumContextPanelHeight: CGFloat = 700
+
+    /// iPad-only actual-window geometry; iPhone compact layout stays intact.
+    static func usesShortIPadViewport(height: CGFloat, isIPad: Bool) -> Bool {
+        isIPad && height < minimumContextPanelHeight
+    }
+
     static func showsIPadContextPanel(
-        width: CGFloat, height: CGFloat, isRegular: Bool, isAccessibilityText: Bool
+        width: CGFloat, height: CGFloat, isRegular: Bool,
+        isAccessibilityText: Bool, isLargeText: Bool = false
     ) -> Bool {
-        isRegular && width > height && width >= 1_024 && !isAccessibilityText
+        isRegular && width > height && width >= 1_024 &&
+            height >= minimumContextPanelHeight &&
+            !isAccessibilityText && !isLargeText
     }
 
     static func contextPanelWidth(containerWidth: CGFloat) -> CGFloat {
