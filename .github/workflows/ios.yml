@@ -108,6 +108,11 @@ jobs:
             [ "$code" = "200" ] && break
             sleep 5
           done
+          # HTTP 200 does not imply a real owner-linked playable game.
+          # Preserve mandatory live player smoke instead of mocking content.
+          python3 tools/test-feedback/verify-live-game-fixture.py \
+            --feed-url https://html-5-game-generator.replit.app/v1/feed \
+            --attempts 3 --timeout 10
           # Boot the device ourselves and wait for it, then forbid
           # parallel-testing clones: across four runs the failure was
           # never inside the test — xcodebuild's "Clone 1 of iPhone 17
@@ -198,6 +203,11 @@ jobs:
             [ "$code" = "200" ] && break
             sleep 5
           done
+      - name: Verify real published game/package before iPad evaluator
+        run: |
+          python3 tools/test-feedback/verify-live-game-fixture.py \
+            --feed-url https://html-5-game-generator.replit.app/v1/feed \
+            --attempts 3 --timeout 10
       - name: Boot iPad simulator
         run: |
           xcrun simctl boot "${{ steps.ipad.outputs.udid }}" || true
