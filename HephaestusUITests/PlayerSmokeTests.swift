@@ -233,7 +233,7 @@ final class PlayerSmokeTests: XCTestCase {
         }
         XCTAssertTrue(analyze.exists && !analyze.isEnabled,
                       "Analyze must stay disabled until artwork and source consent exist.")
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = isPad ? "arcade-pulse-create-entry-ipad" : "arcade-pulse-create-entry-iphone"
         screenshot.lifetime = .keepAlways
         add(screenshot)
@@ -371,7 +371,7 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
         XCTAssertTrue(library.exists && library.isHittable)
         XCTAssertGreaterThanOrEqual(library.frame.height, 44)
-        let snapshot = XCTAttachment(screenshot: app.screenshot())
+        let snapshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         snapshot.name = "arcade-pulse-feed-unavailable-recovery-portrait"
         snapshot.lifetime = .keepAlways
         add(snapshot)
@@ -673,7 +673,7 @@ final class PlayerSmokeTests: XCTestCase {
                                     "The Studio sign-in CTA must meet the minimum touch target.")
         XCTAssertTrue(app.frame.intersects(openProfile.frame),
                       "Studio sign-in must be visible in the actual iPad viewport.")
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "arcade-pulse-ipad-creator-studio-signed-out-portrait"
         screenshot.lifetime = .keepAlways
         add(screenshot)
