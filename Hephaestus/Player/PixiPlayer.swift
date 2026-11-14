@@ -137,9 +137,15 @@ enum PlayerNativeMetricPayload {
     }
 
     static func parse(_ body: [String: Any]) -> Self? {
-        let common: Set<String> = ["schema", "type", "sessionId", "gameId", "metric", "sequence"]
-        guard Self.strictInt(body["schema"]) == 1,
-              body["type"] as? String == "player_metric",
+        guard let schema = Self.strictInt(body["schema"]),
+              schema == 1 || schema == 2 else { return nil }
+        var common: Set<String> = ["schema", "type", "sessionId", "gameId", "metric", "sequence"]
+        if schema == 2 {
+            guard PlayerNativeDocumentEpochGate.isWellFormed(body["documentNonce"] as? String)
+            else { return nil }
+            common.insert("documentNonce")
+        }
+        guard body["type"] as? String == "player_metric",
               body["sessionId"] as? String != nil,
               body["gameId"] as? String != nil,
               Self.strictInt(body["sequence"]) != nil,
@@ -180,6 +186,99 @@ struct PlayerFirstSceneRenderSubmissionGate {
         guard !accepted, let milliseconds, (0...3_600_000).contains(milliseconds) else { return false }
         accepted = true
         return true
+    }
+}
+
+/// One live, cryptographically unpredictable challenge per attempted main-frame
+/// WK document. The pool (not a JS session ID or SwiftUI Coordinator) owns it.
+/// No historical-ID list is needed: late messages must match this exact nonce.
+struct PlayerNativeDocumentEpochGate {
+    private(set) var currentNonce: String?
+    private(set) var navigationStarted = false
+    private var expectingNavigationStart = false
+
+    static func isWellFormed(_ nonce: String?) -> Bool {
+        guard let nonce, nonce.utf8.count == 32 else { return false }
+        return nonce.utf8.allSatisfy {
+            ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102)
+        }
+    }
+
+    mutating func prepareNavigation() -> String {
+        var rng = SystemRandomNumberGenerator()
+        let bytes = (0..<16).map { _ in UInt8.random(in: UInt8.min...UInt8.max, using: &rng) }
+        let alphabet = Array("0123456789abcdef")
+        var result = String()
+        result.reserveCapacity(32)
+        for byte in bytes {
+            result.append(alphabet[Int(byte >> 4)])
+            result.append(alphabet[Int(byte & 0x0f)])
+        }
+        currentNonce = result
+        navigationStarted = false
+        expectingNavigationStart = true
+        return result
+    }
+
+    /// True only for the explicitly prepared navigation; an unannounced
+    /// script-initiated reload invalidates the old challenge immediately.
+    mutating func didStartNavigation() -> Bool {
+        guard expectingNavigationStart else {
+            invalidate()
+            return false
+        }
+        expectingNavigationStart = false
+        navigationStarted = true
+        return true
+    }
+
+    func acceptsV2(_ claimedNonce: String?) -> Bool {
+        guard navigationStarted, Self.isWellFormed(claimedNonce),
+              let currentNonce else { return false }
+        return claimedNonce == currentNonce
+    }
+
+    mutating func invalidate() {
+        currentNonce = nil
+        navigationStarted = false
+        expectingNavigationStart = false
+    }
+}
+
+/// Version negotiation is one-way within a *single* document. This is
+/// compatibility only: a future strict-v2 release must reject v1 from the
+/// very first callback once generator v2 rollout is confirmed.
+struct PlayerNativeBridgeVersionGate {
+    /// The native app must choose its policy BEFORE any JS callback arrives.
+    /// A v1 callback cannot be used to negotiate whether v1 is acceptable.
+    enum AdmissionPolicy {
+        case legacyCompatible
+        case requireV2
+    }
+
+    let policy: AdmissionPolicy
+    private(set) var acceptedV2 = false
+
+    init(policy: AdmissionPolicy = .legacyCompatible) {
+        self.policy = policy
+    }
+
+    func allows(_ schema: Int) -> Bool {
+        switch policy {
+        case .requireV2:
+            return schema == 2
+        case .legacyCompatible:
+            return schema == 2 || (schema == 1 && !acceptedV2)
+        }
+    }
+
+    mutating func didAccept(_ schema: Int) {
+        guard allows(schema) else { return }
+        if schema == 2 { acceptedV2 = true }
+    }
+
+    mutating func reset() {
+        acceptedV2 = false
     }
 }
 
@@ -654,6 +753,7 @@ enum PlayerWebViewPool {
     private static var loadedURL: URL?
     private static var isAttached = false
     private static var attachmentLease: UInt64 = 0
+    private static var documentEpochGate = PlayerNativeDocumentEpochGate()
     private static var sessionFingerprint: String?
     private static let sessionObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
         forName: .hephaestusBackendSessionDidChange, object: nil, queue: .main
@@ -698,6 +798,45 @@ enum PlayerWebViewPool {
         return components?.url
     }
 
+    static func prepareDocumentNavigation(_ webView: WKWebView) {
+        guard pooledView === webView else { return }
+        let nonce = documentEpochGate.prepareNavigation()
+        // Only installed native code can issue a fresh current-document
+        // challenge. Page code cannot derive future navigation epochs.
+        // This app has no other WKUserScripts in this private pooled player.
+        let controller = webView.configuration.userContentController
+        controller.removeAllUserScripts()
+        let source = """
+        Object.defineProperty(window, '__hephaestusNativeBridge', {
+          value: Object.freeze({schema: 2, documentNonce: '\(nonce)'}),
+          writable: false, configurable: false
+        });
+        """
+        controller.addUserScript(WKUserScript(
+            source: source, injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+    }
+
+    static func didStartDocumentNavigation(_ webView: WKWebView) {
+        guard pooledView === webView else { return }
+        _ = documentEpochGate.didStartNavigation()
+    }
+
+    static func acceptsCurrentDocumentNonce(_ webView: WKWebView, nonce: String?) -> Bool {
+        pooledView === webView && isAttached && documentEpochGate.acceptsV2(nonce)
+    }
+
+    static func hasCurrentDocumentNonce(_ webView: WKWebView) -> Bool {
+        pooledView === webView && isAttached &&
+            documentEpochGate.navigationStarted && documentEpochGate.currentNonce != nil
+    }
+
+    static func revokeDocumentNonce(_ webView: WKWebView) {
+        guard pooledView === webView else { return }
+        documentEpochGate.invalidate()
+    }
+
     static func prewarm(gameID: String) {
         ensureCurrentCredentialScope()
         guard !isAttached, let url = playerURL(gameID: gameID) else { return }
@@ -709,6 +848,7 @@ enum PlayerWebViewPool {
         currentURL = url
         loadedURL = nil
         view.navigationDelegate = warmupDelegate
+        prepareDocumentNavigation(view)
         view.load(URLRequest(url: url))
         // A prewarm that is never attached must not hold a loaded game,
         // authenticated resources, or an entire WebContent process forever.
@@ -746,7 +886,10 @@ enum PlayerWebViewPool {
         // even if it reuses the same prewarmed WKWebView after a retry.
         attachmentLease &+= 1
         currentURL = url
-        if shouldLoad { loadedURL = nil }
+        if shouldLoad {
+            loadedURL = nil
+            prepareDocumentNavigation(view)
+        }
         view.navigationDelegate = nil
         return (view, shouldLoad, didFinish, attachmentLease)
     }
@@ -791,6 +934,7 @@ enum PlayerWebViewPool {
               responseURL == currentURL else { return }
         loadedURL = nil
         self.currentURL = nil
+        documentEpochGate.invalidate()
     }
 
     static func ownsActiveAttachment(_ webView: WKWebView, lease: UInt64) -> Bool {
@@ -810,6 +954,7 @@ enum PlayerWebViewPool {
         isAttached = false
         currentURL = nil
         loadedURL = nil
+        documentEpochGate.invalidate()
         webView.navigationDelegate = warmupDelegate
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
@@ -847,6 +992,7 @@ enum PlayerWebViewPool {
         currentURL = nil
         loadedURL = nil
         isAttached = false
+        documentEpochGate.invalidate()
         sessionFingerprint = credentialFingerprint()
         stale?.navigationDelegate = nil
         stale?.stopLoading()
@@ -864,6 +1010,7 @@ enum PlayerWebViewPool {
         pooledView = nil
         currentURL = nil
         loadedURL = nil
+        documentEpochGate.invalidate()
         stale?.stopLoading()
         stale?.navigationDelegate = nil
         stale?.loadHTMLString("", baseURL: nil)
@@ -884,6 +1031,10 @@ enum PlayerWebViewPool {
     }
 
     private final class WarmupDelegate: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            PlayerWebViewPool.didStartDocumentNavigation(webView)
+        }
+
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
@@ -1726,6 +1877,13 @@ private struct PlayerWebView: UIViewRepresentable {
         private var firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
         private var launchLifecycle = PlayerHostLaunchReducer()
         private var runtimeSessionGate = PlayerRuntimeSessionBindingGate()
+        // Compatibility remains explicitly enabled until the trusted generator's
+        // schema-v2 producer is deployed and validated. Flip to .requireV2
+        // as one reviewed release change; never auto-negotiate from the
+        // first untrusted JS callback.
+        private var nativeBridgeVersionGate = PlayerNativeBridgeVersionGate(
+            policy: .legacyCompatible
+        )
         private var runtimeSessionID: String? { runtimeSessionGate.activeSessionID }
         private var isActive: Bool { launchLifecycle.isAttached }
         private var hasObservedTerminalNavigation: Bool { launchLifecycle.observedTerminalNavigation }
@@ -1750,26 +1908,44 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
-            // Retired attachment cannot deliver callbacks during retry or sign-out.
+            // Reject retired attachments, wrong frame/origin, stale navigation
+            // epochs and malformed schemas before binding the first session.
             guard acceptsCurrentHostCallbacks,
                   message.name == PlayerWebView.messageName,
                   message.frameInfo.isMainFrame,
                   sameOrigin(message.frameInfo.securityOrigin),
                   let body = message.body as? [String: Any],
-                  PlayerNativeMetricPayload.strictInt(body["schema"]) == 1,
+                  let schema = PlayerNativeMetricPayload.strictInt(body["schema"]),
+                  (schema == 1 || schema == 2),
+                  let view = attachedWebView,
+                  PlayerWebViewPool.hasCurrentDocumentNonce(view),
+                  nativeBridgeVersionGate.allows(schema),
+                  (schema != 2 || PlayerWebViewPool.acceptsCurrentDocumentNonce(
+                      view, nonce: body["documentNonce"] as? String
+                  )),
                   let runtimeSessionID = body["sessionId"] as? String,
                   !runtimeSessionID.isEmpty, runtimeSessionID.count <= 128,
                   body["gameId"] as? String == expectedGameID,
                   let type = body["type"] as? String,
-                  (type == "player_metric" || type == "verified_run_available"),
+                  (type == "player_metric" || type == "verified_run_available") else { return }
+            let permittedResultFields: Set<String> = schema == 2
+                ? ["schema", "type", "sessionId", "gameId", "runId", "documentNonce"]
+                : ["schema", "type", "sessionId", "gameId", "runId"]
+            // A malformed high-sequence metric or forged result must not
+            // claim the new runtime-session binding slot.
+            let validMetric = type == "player_metric" &&
+                PlayerNativeMetricPayload.parse(body) != nil
+            let validRun = type == "verified_run_available" &&
+                Set(body.keys) == permittedResultFields &&
+                (body["runId"] as? String)?.isEmpty == false
+            guard (validMetric || validRun),
                   runtimeSessionGate.bind(runtimeSessionID) else { return }
+            nativeBridgeVersionGate.didAccept(schema)
             if type == "player_metric" {
                 handleMetric(body, runtimeSessionID: runtimeSessionID)
                 return
             }
-            guard type == "verified_run_available",
-                  Set(body.keys).isSubset(of: ["schema", "type", "sessionId", "gameId", "runId"]),
-                  let runID = body["runId"] as? String,
+            guard let runID = body["runId"] as? String,
                   let toFetch = verifiedRunGate.offer(runID) else { return }
             requestVerifiedRunResult(toFetch, runtimeSessionID: runtimeSessionID)
         }
@@ -1931,11 +2107,14 @@ private struct PlayerWebView: UIViewRepresentable {
             // One-shot recovery; disarm before reload so KVO cannot trigger a
             // second reload and no terminal callback is fabricated.
             disarmPrewarmRecovery()
+            PlayerWebViewPool.prepareDocumentNavigation(webView)
             webView.load(URLRequest(url: expectedURL))
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             guard acceptsCurrentHostCallbacks else { return }
+            PlayerWebViewPool.didStartDocumentNavigation(webView)
+            nativeBridgeVersionGate.reset()
             launchLifecycle.navigationStarted()
             // A real reload has a new web runtime session. Stale metrics,
             // run IDs, and in-flight verified-result lookups from the old
@@ -1958,6 +2137,7 @@ private struct PlayerWebView: UIViewRepresentable {
                   launchLifecycle.navigationFailed(),
                   navigationFailureGate.shouldReportFailure() else { return }
             disarmPrewarmRecovery()
+            if let view = attachedWebView { PlayerWebViewPool.revokeDocumentNonce(view) }
             onLoadFail(error)
         }
 
@@ -2020,6 +2200,7 @@ private struct PlayerWebView: UIViewRepresentable {
             guard acceptsCurrentHostCallbacks,
                   launchLifecycle.webProcessTerminated() else { return }
             disarmPrewarmRecovery()
+            PlayerWebViewPool.revokeDocumentNonce(webView)
             onTerminate()
         }
     }
