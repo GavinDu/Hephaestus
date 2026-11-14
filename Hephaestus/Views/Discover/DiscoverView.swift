@@ -1902,6 +1902,10 @@ private struct ArcadePulseGameDetailsSheet: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
     @State private var playerRequest: PixiPlayerRequest?
+    // URL presence is not proof the actual poster loaded. Only a decoded
+    // image expands the portrait media stage; failures retain an honest,
+    // compact "Preview unavailable" card and accessible Play / Share.
+    @State private var hasDecodedPoster = false
 
     private var shareURL: URL {
         var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"),
@@ -1919,8 +1923,10 @@ private struct ArcadePulseGameDetailsSheet: View {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFit()
+                            .onAppear { hasDecodedPoster = true }
                     } else {
                         unavailablePreview
+                            .onAppear { hasDecodedPoster = false }
                     }
                 }
             } else {
@@ -2027,7 +2033,14 @@ private struct ArcadePulseGameDetailsSheet: View {
             .accessibilityIdentifier("game.details.twoColumn")
         } else {
             VStack(alignment: .leading, spacing: 18) {
-                preview(height: horizontalSizeClass == .regular ? 335 : 240)
+                preview(height: ForYouPageLayout.gameDetailsSingleColumnPreviewHeight(
+                    containerWidth: size.width,
+                    containerHeight: size.height,
+                    isIPad: UIDevice.current.userInterfaceIdiom == .pad,
+                    isRegularWidth: horizontalSizeClass == .regular,
+                    hasDecodedPoster: hasDecodedPoster,
+                    isLargeText: dynamicTypeSize >= .xxLarge
+                ))
                 metadataAndActions
             }
             .frame(maxWidth: 800)

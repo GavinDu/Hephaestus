@@ -103,6 +103,25 @@ enum ForYouPageLayout {
         min(max(0, containerHeight) * 0.74, 640)
     }
 
+    /// A decoded, real backend poster deserves room to breathe on a portrait
+    /// iPad. Missing/failed poster data must NOT inflate an empty gradient
+    /// into a fake full-screen gameplay preview. Preserve compact iPhone and
+    /// narrow Split View priorities and keep Play reachable under XXL text.
+    static func gameDetailsSingleColumnPreviewHeight(
+        containerWidth: CGFloat, containerHeight: CGFloat,
+        isIPad: Bool, isRegularWidth: Bool,
+        hasDecodedPoster: Bool, isLargeText: Bool
+    ) -> CGFloat {
+        let fallbackHeight: CGFloat = isIPad && isRegularWidth ? 335 : 240
+        guard isIPad, hasDecodedPoster else { return fallbackHeight }
+        let viewportHeight = max(0, containerHeight)
+        let availableWidth = max(0, containerWidth - 36)
+        let viewportCap = min(isLargeText ? 360 : 720,
+                              viewportHeight * (isLargeText ? 0.34 : 0.58))
+        let widthCap = availableWidth * 0.85
+        return max(fallbackHeight, min(viewportCap, widthCap))
+    }
+
     static func gameDetailsPreviewWidth(containerWidth: CGFloat) -> CGFloat {
         let usable = max(0, min(containerWidth - 36, 1_200))
         return usable * 0.55

@@ -192,6 +192,34 @@ struct HephaestusTests {
         #expect(ForYouPageLayout.gameDetailsPreviewHeight(containerHeight: 760) >= 550)
         #expect(ForYouPageLayout.gameDetailsPreviewHeight(containerHeight: 620) >= 450)
         #expect(ForYouPageLayout.gameDetailsPreviewHeight(containerHeight: 0) == 0)
+        // Genuine decoded artwork can use the otherwise wasted portrait iPad
+        // viewport. Missing posters stay compact, never upscale fake media.
+        let largePoster = ForYouPageLayout.gameDetailsSingleColumnPreviewHeight(
+            containerWidth: 1_024, containerHeight: 1_366,
+            isIPad: true, isRegularWidth: true,
+            hasDecodedPoster: true, isLargeText: false)
+        #expect(largePoster >= 680)
+        #expect(largePoster <= 720)
+        let missingPoster = ForYouPageLayout.gameDetailsSingleColumnPreviewHeight(
+            containerWidth: 1_024, containerHeight: 1_366,
+            isIPad: true, isRegularWidth: true,
+            hasDecodedPoster: false, isLargeText: false)
+        #expect(missingPoster == 335)
+        let xxlPoster = ForYouPageLayout.gameDetailsSingleColumnPreviewHeight(
+            containerWidth: 1_024, containerHeight: 1_366,
+            isIPad: true, isRegularWidth: true,
+            hasDecodedPoster: true, isLargeText: true)
+        #expect(xxlPoster <= 360)
+        let narrowFallback = ForYouPageLayout.gameDetailsSingleColumnPreviewHeight(
+            containerWidth: 430, containerHeight: 800,
+            isIPad: true, isRegularWidth: false,
+            hasDecodedPoster: false, isLargeText: false)
+        #expect(narrowFallback == 240)
+        let iPhonePoster = ForYouPageLayout.gameDetailsSingleColumnPreviewHeight(
+            containerWidth: 390, containerHeight: 844,
+            isIPad: false, isRegularWidth: false,
+            hasDecodedPoster: true, isLargeText: false)
+        #expect(iPhonePoster == 240)
     }
 
     @Test func compactLandscapeOverlayPreservesPlayerSpaceAndNavigation() {
