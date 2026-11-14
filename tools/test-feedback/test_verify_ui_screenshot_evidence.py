@@ -52,19 +52,27 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             self.assertEqual(module.read_png_metadata(p)["display_width"], 20)
 
     def fixture(self, folder, corrupt_fullscreen=False, omit=None,
-                include_ipad_library=False):
+                include_ipad_library=False, include_ipad_features=False):
         attachments = []
         library = ((module.IPAD_LIBRARY_PORTRAIT, module.IPAD_LIBRARY_LANDSCAPE)
                    if include_ipad_library else ())
+        features = (tuple(module.IPAD_ARCADE_FEATURES)
+                    if include_ipad_features else ())
         for name in (module.LANDSCAPE_PRIMARY +
-                     module.LANDSCAPE_DIAGNOSTIC + module.PORTRAIT_PRIMARY + library):
+                     module.LANDSCAPE_DIAGNOSTIC + module.PORTRAIT_PRIMARY +
+                     library + features):
             if name == omit:
                 continue
             file = name + ".png"
             # Full screen raw portrait + EXIF 8 -> landscape displayed.
             # App-window raw landscape + EXIF 8 -> incorrect portrait displayed.
             rgb = b"\x50\x40\x20" if "after-swipe" in name else b"\x20\x50\x80"
-            if name == module.IPAD_LIBRARY_PORTRAIT:
+            if name in module.IPAD_ARCADE_FEATURES:
+                feature_number = list(module.IPAD_ARCADE_FEATURES).index(name)
+                feature_rgb = bytes((32 + feature_number * 18, 72, 136))
+                orientation = (8 if module.IPAD_ARCADE_FEATURES[name] == "landscape" else 1)
+                payload = png(10, 20, orientation, rgb=feature_rgb)
+            elif name == module.IPAD_LIBRARY_PORTRAIT:
                 payload = png(10, 20, 1, rgb=b"\x20\x50\x80")
             elif name == module.IPAD_LIBRARY_LANDSCAPE:
                 payload = png(10, 20, 8, rgb=b"\x50\x40\x20")
@@ -195,6 +203,68 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             self.fixture(source, omit=module.LANDSCAPE_PRIMARY[0])
             with self.assertRaisesRegex(ValueError, "expected exactly one"):
                 module.verify_and_copy(source, Path(directory) / "out2")
+
+
+    def test_ipad_arcade_feature_matrix_retains_original_full_screen_images(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            out = Path(directory) / "out"
+            folder.mkdir()
+            self.fixture(folder, include_ipad_library=True, include_ipad_features=True)
+            report = module.verify_and_copy(
+                folder, out, require_ipad_library=True,
+                require_ipad_arcade_features=True)
+            self.assertTrue(report["ipad_arcade_features_required"])
+            self.assertEqual(set(report["ipad_arcade_feature_names"]),
+                             set(module.IPAD_ARCADE_FEATURES))
+            self.assertEqual(len(report["verified"]),
+                             len(module.LANDSCAPE_PRIMARY + module.LANDSCAPE_DIAGNOSTIC +
+                                 module.PORTRAIT_PRIMARY) + 2 + len(module.IPAD_ARCADE_FEATURES))
+            self.assertFalse(report["media_ready"])
+            for name, expected_orientation in module.IPAD_ARCADE_FEATURES.items():
+                self.assertEqual((out / (name + ".raw.png")).read_bytes(),
+                                 (folder / (name + ".png")).read_bytes())
+                dims = report["verified"][name]
+                is_landscape = dims["display_width"] > dims["display_height"]
+                self.assertEqual(is_landscape, expected_orientation == "landscape")
+                self.assertTrue(dims["preferred_for_visual_review"])
+
+    def test_ipad_arcade_missing_or_wrong_orientation_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            folder.mkdir()
+            missing = "arcade-pulse-create-entry-ipad"
+            self.fixture(folder, include_ipad_features=True, omit=missing)
+            with self.assertRaisesRegex(ValueError, "expected exactly one screenshot"):
+                module.verify_and_copy(folder, Path(directory) / "out",
+                                       require_ipad_arcade_features=True)
+            self.fixture(folder, include_ipad_features=True)
+            landscape = "arcade-pulse-ipad-creator-studio-signed-out-landscape"
+            (folder / (landscape + ".png")).write_bytes(png(10, 20, 1))
+            with self.assertRaisesRegex(ValueError, "does not display in landscape"):
+                module.verify_and_copy(folder, Path(directory) / "out2",
+                                       require_ipad_arcade_features=True)
+            self.fixture(folder, include_ipad_features=True)
+            portrait = "arcade-pulse-feed-unavailable-recovery-portrait"
+            (folder / (portrait + ".png")).write_bytes(png(10, 20, 8))
+            with self.assertRaisesRegex(ValueError, "does not display in portrait"):
+                module.verify_and_copy(folder, Path(directory) / "out3",
+                                       require_ipad_arcade_features=True)
+
+    def test_ipad_arcade_portrait_reused_as_landscape_fails_even_with_new_exif(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            folder.mkdir()
+            self.fixture(folder, include_ipad_features=True)
+            for portrait, landscape in module.IPAD_ARCADE_ORIENTATION_PAIRS:
+                self.fixture(folder, include_ipad_features=True)
+                index = list(module.IPAD_ARCADE_FEATURES).index(portrait)
+                same_rgb = bytes((32 + index * 18, 72, 136))
+                (folder / (landscape + ".png")).write_bytes(
+                    png(10, 20, 8, rgb=same_rgb, level=9, filter_type=1))
+                with self.assertRaisesRegex(ValueError, "duplicate decoded screenshot pixels"):
+                    module.verify_and_copy(folder, Path(directory) / "out",
+                                           require_ipad_arcade_features=True)
 
 
 if __name__ == "__main__":
