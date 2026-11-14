@@ -161,6 +161,41 @@ struct HephaestusTests {
             action: .load, signedIn: true).contains("Too many"))
     }
 
+    @Test func arcadePulseUnconfirmedCommentWritesNeverClaimSuccessOrCertainFailure() {
+        let privateError = NSError(
+            domain: "https://private.comments.local",
+            code: 503,
+            userInfo: [NSLocalizedDescriptionKey:
+                "Bearer privateCommentToken https://private.comments.local/v1/delete"]
+        )
+        for action in [CommentsErrorPresentation.Action.post, .delete] {
+            for error in [privateError as Error, URLError(.timedOut) as Error,
+                          URLError(.networkConnectionLost) as Error] {
+                let copy = CommentsErrorPresentation.message(
+                    for: error, action: action, signedIn: true)
+                #expect(copy.localizedCaseInsensitiveContains("unconfirmed") ||
+                        copy.contains("Couldn't confirm"))
+                #expect(!copy.contains("privateCommentToken"))
+                #expect(!copy.contains("private.comments.local"))
+                #expect(!copy.contains("comment sent"))
+                #expect(!copy.contains("comment deleted"))
+            }
+        }
+        #expect(CommentsErrorPresentation.message(
+            for: privateError, action: .post, signedIn: true).contains("draft"))
+        #expect(CommentsErrorPresentation.message(
+            for: privateError, action: .delete, signedIn: true).contains("Refresh comments"))
+        #expect(CommentsErrorPresentation.message(
+            for: URLError(.timedOut), action: .load, signedIn: true)
+            .contains("Loading comments"))
+        #expect(CommentsErrorPresentation.message(
+            for: APIError.badStatus(401), action: .post, signedIn: true)
+            .contains("expired"))
+        #expect(CommentsErrorPresentation.message(
+            for: APIError.badStatus(403), action: .delete, signedIn: true)
+            .contains("isn't allowed"))
+    }
+
     @Test func arcadePulseStudioErrorsNeverShowPrivateServerDetails() {
         let raw = NSError(domain: "https://private.invalid", code: 42, userInfo: [
             NSLocalizedDescriptionKey: "Bearer alice@example.test https://private.invalid/v1/projects"
