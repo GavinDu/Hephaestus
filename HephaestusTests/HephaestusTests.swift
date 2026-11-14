@@ -92,6 +92,14 @@ struct HephaestusTests {
         #expect(resumedFollow != nil)
     }
 
+    @Test func arcadePulseElectricVioletUsesAAReadableCTAForeground() {
+        // WCAG relative-sRGB luminance; the real design token is the source
+        // of truth for both native Library and Studio sign-in controls.
+        #expect(ArcadePulseTheme.electricVioletContrastWithBlack >= 4.5)
+        #expect(ArcadePulseTheme.electricVioletContrastWithWhite < 4.5)
+        #expect(ArcadePulseTheme.electricVioletContrastWithBlack > 5)
+    }
+
     @Test func arcadePulseFoundationUsesSinglePaletteAndAccessibleTargetSizes() {
         #expect(ArcadePulseTheme.fallbackPalettes.count == 5)
         #expect(ArcadePulseTheme.minimumTarget >= 44)

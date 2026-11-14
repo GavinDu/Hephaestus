@@ -10,7 +10,35 @@ enum ArcadePulseTheme {
     static let canvas = Color(red: 0.045, green: 0.034, blue: 0.087)
     static let surface = Color(red: 0.094, green: 0.072, blue: 0.153)
     static let raisedSurface = Color(red: 0.150, green: 0.112, blue: 0.227)
-    static let electricViolet = Color(red: 0.57, green: 0.36, blue: 0.99)
+    // Keep RGB single-sourced: source components let the pure test verify
+    // normal-text WCAG contrast without relying on platform Color bridging.
+    static let electricVioletRGB = (red: 0.57, green: 0.36, blue: 0.99)
+    static let electricViolet = Color(
+        red: electricVioletRGB.red,
+        green: electricVioletRGB.green,
+        blue: electricVioletRGB.blue
+    )
+    /// Used for normal-size labels on a solid violet CTA. White-on-violet
+    /// is only ~4.08:1 with this palette; black is ~5.15:1 (WCAG AA).
+    static let onElectricViolet = Color.black
+
+    private static func srgbLuminanceChannel(_ channel: Double) -> Double {
+        channel <= 0.04045 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+    }
+
+    static var electricVioletLuminance: Double {
+        0.2126 * srgbLuminanceChannel(electricVioletRGB.red) +
+        0.7152 * srgbLuminanceChannel(electricVioletRGB.green) +
+        0.0722 * srgbLuminanceChannel(electricVioletRGB.blue)
+    }
+
+    static var electricVioletContrastWithBlack: Double {
+        (electricVioletLuminance + 0.05) / 0.05
+    }
+
+    static var electricVioletContrastWithWhite: Double {
+        1.05 / (electricVioletLuminance + 0.05)
+    }
     static let neonMagenta = Color(red: 0.96, green: 0.26, blue: 0.74)
     static let playOrange = Color(red: 1.0, green: 0.70, blue: 0.29)
     static let playOrangeDeep = Color(red: 1.0, green: 0.48, blue: 0.30)

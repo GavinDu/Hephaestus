@@ -201,6 +201,9 @@ struct CreatorStudioView: View {
             Button(action: onOpenProfile) {
                 Label("Go to Profile to sign in", systemImage: "person.crop.circle")
                     .font(.headline)
+                    // Keep the real Profile navigation legible at normal text:
+                    // white on this violet does not reach WCAG AA 4.5:1.
+                    .foregroundStyle(ArcadePulseTheme.onElectricViolet)
                     .frame(maxWidth: 380, minHeight: 48)
             }
             .buttonStyle(.borderedProminent)
