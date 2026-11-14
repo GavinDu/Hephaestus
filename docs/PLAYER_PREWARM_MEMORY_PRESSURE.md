@@ -15,3 +15,10 @@ The production player owns **one pooled WKWebView**. It prewarms only after the 
 ## Review / validation
 
 Swift unit tests exercise unattached/attached × view-present/view-absent. Native Actions must additionally pass Xcode compilation and iPhone/iPad player smoke. This policy test does not prove OS delivery order or real-world memory reclaimed: retain #205 real iPhone/iPad 50+ open/close/swipe memory, thermal and context-loss evidence gates. This slice is safe to revert without changing package semantics.
+
+
+## Background eviction — independent Epic #202 slice #277
+
+When the app enters the background, an unattached Play-triggered speculative `WKWebView` should not continue download, texture decode or hold a WebContent renderer until its normal 15-second TTL expires. The pool now registers `UIApplication.didEnterBackgroundNotification` lazily once alongside the existing memory-warning observer. The notification schedules a `MainActor` task, **rechecks current attachment ownership** at execution time, and reuses `discardUnattachedPrewarm()` only when a speculative view still exists. An attached game remains owned by its sheet even when a background event races with a Play navigation.
+
+Native Swift Tests cover the unattached/attached × present/absent policy table. They do not prove the OS notification order, WebKit GPU memory actually reclaimed or foreground resume of a real game. Required merge gate: both exact-head iOS Xcode/unit, iPhone player smoke, iPad player/evaluator, native player-presentation and backend contract jobs successful, then senior game-engine architect source review. Real-device 50-cycle memory/thermal and credential cache revocation remain #279/#278 and parent #205; this narrow fix cannot close those issues.
