@@ -1648,3 +1648,125 @@ struct HephaestusTests {
     #expect(newSession == "run-103")
 }
 
+@Test func nativeMetricPayloadValidationPrecedesSequenceAdmission() {
+    var sequences = PlayerRuntimeMetricSequenceGate()
+
+    func event(_ metric: String, _ sequence: Int, _ fields: [String: Any]) -> [String: Any] {
+        var body: [String: Any] = [
+            "schema": 1, "type": "player_metric",
+            "sessionId": "test-session", "gameId": "test-game",
+            "metric": metric, "sequence": sequence,
+        ]
+        for (key, value) in fields { body[key] = value }
+        return body
+    }
+
+    func deliver(_ body: [String: Any], gate: inout PlayerRuntimeMetricSequenceGate) -> Bool {
+        guard let payload = PlayerNativeMetricPayload.parse(body),
+              let sequence = body["sequence"] as? Int else { return false }
+        return gate.accept(metric: payload.metric, sequence: sequence)
+    }
+
+    // A malformed but maximum-valued sequence must not poison the gate.
+    #expect(!deliver(event("first_scene_render_submit", 100_000, ["ms": -1]), gate: &sequences))
+    #expect(sequences.highestSequenceByMetric.isEmpty)
+    #expect(deliver(event("first_scene_render_submit", 2, ["ms": 24]), gate: &sequences))
+    #expect(!deliver(event("first_scene_render_submit", 2, ["ms": 24]), gate: &sequences))
+    #expect(!deliver(event("first_scene_render_submit", 1, ["ms": 24]), gate: &sequences))
+
+    #expect(!deliver(event("first_input", 100_000, ["ms": -1]), gate: &sequences))
+    #expect(deliver(event("first_input", 4, ["ms": 800]), gate: &sequences))
+    #expect(!deliver(event("first_input", 3, ["ms": 800]), gate: &sequences))
+
+    #expect(!deliver(event("perf_window", 100_000, [
+        "frameTimeP95Ms": 20, "frameTimeAvgMs": 9, "frameCount": 0,
+    ]), gate: &sequences))
+    #expect(deliver(event("perf_window", 6, [
+        "frameTimeP95Ms": 20, "frameTimeAvgMs": 9, "frameCount": 100,
+    ]), gate: &sequences))
+    #expect(sequences.highestSequenceByMetric["first_scene_render_submit"] == 2)
+    #expect(sequences.highestSequenceByMetric["first_input"] == 4)
+    #expect(sequences.highestSequenceByMetric["perf_window"] == 6)
+
+    // The v1 emitter supplies one metric-specific field set; mixing payloads
+    // or sneaking extra unexpected keys must not advance any sequence.
+    #expect(!deliver(event("first_scene_render_submit", 90, [
+        "ms": 10, "frameCount": 1,
+    ]), gate: &sequences))
+    #expect(!deliver(event("perf_window", 90, [
+        "ms": 10, "frameTimeP95Ms": 20, "frameTimeAvgMs": 9, "frameCount": 2,
+    ]), gate: &sequences))
+    #expect(!deliver(event("unknown", 90, ["ms": 10]), gate: &sequences))
+    #expect(!deliver(event("first_input", 90, ["ms": 86_400_001]), gate: &sequences))
+
+    // A document replacement clears only the intended epoch's sequences.
+    sequences.reset()
+    #expect(sequences.highestSequenceByMetric.isEmpty)
+    #expect(deliver(event("first_scene_render_submit", 1, ["ms": 12]), gate: &sequences))
+}
+
+@Test func nativeMetricPayloadPolicyRejectsMalformedVersionAndType() {
+    let valid: [String: Any] = [
+        "schema": 1, "type": "player_metric",
+        "sessionId": "session", "gameId": "game",
+        "metric": "first_scene_render_submit", "sequence": 1, "ms": 50,
+    ]
+    #expect(PlayerNativeMetricPayload.parse(valid) != nil)
+    for (key, replacement) in [
+        ("schema", 2 as Any),
+        ("type", "verified_run_available" as Any),
+        ("sequence", "1" as Any),
+        ("ms", -1 as Any),
+    ] {
+        var altered = valid
+        altered[key] = replacement
+        #expect(PlayerNativeMetricPayload.parse(altered) == nil)
+    }
+    var missing = valid
+    missing.removeValue(forKey: "ms")
+    #expect(PlayerNativeMetricPayload.parse(missing) == nil)
+    var unexpected = valid
+    unexpected["debug"] = "unexpected"
+    #expect(PlayerNativeMetricPayload.parse(unexpected) == nil)
+}
+
+
+@Test func nativeMetricRejectsBooleanNSNumberFields() {
+    // WebKit's NSNumber bridge can cast a CFBoolean(true) to Int(1).
+    // Schema, sequence and millisecond fields must reject Boolean payloads
+    // before a malformed high-sequence event advances any native metric gate.
+    #expect(PlayerNativeMetricPayload.strictInt(NSNumber(value: true)) == nil)
+    #expect(PlayerNativeMetricPayload.strictInt(NSNumber(value: false)) == nil)
+    #expect(PlayerNativeMetricPayload.strictInt(NSNumber(value: 1)) == 1)
+    #expect(PlayerNativeMetricPayload.strictInt(NSNumber(value: 1.0)) == 1)
+
+    let scene: [String: Any] = [
+        "schema": 1, "type": "player_metric",
+        "sessionId": "test-session", "gameId": "game-1",
+        "metric": "first_scene_render_submit", "sequence": 5, "ms": 12
+    ]
+    #expect(PlayerNativeMetricPayload.parse(scene) != nil)
+    for field in ["schema", "sequence", "ms"] {
+        var invalid = scene
+        invalid[field] = NSNumber(value: true)
+        #expect(PlayerNativeMetricPayload.parse(invalid) == nil)
+    }
+
+    var input = scene
+    input["metric"] = "first_input"
+    input["ms"] = NSNumber(value: true)
+    #expect(PlayerNativeMetricPayload.parse(input) == nil)
+
+    var perf = scene
+    perf.removeValue(forKey: "ms")
+    perf["metric"] = "perf_window"
+    perf["frameTimeP95Ms"] = 16
+    perf["frameTimeAvgMs"] = 10
+    perf["frameCount"] = 60
+    #expect(PlayerNativeMetricPayload.parse(perf) != nil)
+    for field in ["frameTimeP95Ms", "frameTimeAvgMs", "frameCount"] {
+        var invalid = perf
+        invalid[field] = NSNumber(value: true)
+        #expect(PlayerNativeMetricPayload.parse(invalid) == nil)
+    }
+}
