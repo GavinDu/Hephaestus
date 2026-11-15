@@ -8,6 +8,19 @@ import UIKit
 
 // MARK: - Discover
 
+/// Count only actual feed transport begins, not generation revocation by a
+/// watchdog. The user-visible attempt number is stable after recovery and
+/// contains no URL, token, game ID, or other private request metadata.
+struct FeedRequestAttemptCounter {
+    private(set) var count: UInt64 = 0
+
+    mutating func didBeginRequest() {
+        if count < UInt64.max { count += 1 }
+    }
+
+    var accessibilityValue: String { "Attempt \(count)" }
+}
+
 private struct PlayerResultPresentation: Identifiable {
     let game: FeedGame
     let result: VerifiedRunResult
@@ -95,6 +108,7 @@ struct DiscoverView: View {
         }
         .buttonStyle(ArcadePulseRecoveryButtonStyle())
         .accessibilityIdentifier("feed.error.retry")
+        .accessibilityValue(feedRequestAttempts.accessibilityValue)
     }
 
     @ViewBuilder private var feedRecoveryLibrary: some View {
@@ -134,6 +148,7 @@ struct DiscoverView: View {
     @State private var isFeedPreferencesPresented = false
     @State private var likedGameIDs = Set<String>()
     @State private var feedRequestCoordinator = FeedRequestCoordinator()
+    @State private var feedRequestAttempts = FeedRequestAttemptCounter()
     @State private var nextCursor: String?
     @State private var isLoadingMore = false
     @State private var loadMoreError: String?
@@ -968,6 +983,9 @@ struct DiscoverView: View {
             }
             return try await BackendAPI.shared.fetchFeed(scope: requestedScope)
         }
+        // A real coordinator.begin creates exactly one new transport. The
+        // attempt count must survive a watchdog, unlike generation epochs.
+        feedRequestAttempts.didBeginRequest()
         isLoading = true
         errorMessage = nil
         // Real production feeds have a 45s bounded loading budget. A
