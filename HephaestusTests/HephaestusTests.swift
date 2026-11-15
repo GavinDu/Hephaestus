@@ -2862,6 +2862,24 @@ struct HephaestusTests {
         isAttached: true, transferringLease: nil, currentLease: 10,
         hasAttachedReceiver: false, credentialScopeCurrent: true
     ) == .drop)
+    // A zero lease is never attached authorization. A detached owner
+    // cannot keep an old Coordinator receiver or a transfer lease.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 0,
+        hasAttachedReceiver: true, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 0, currentLease: 0,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: true, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: 10, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
     // Even a current lease and live receiver cannot bypass a credential
     // epoch that changed synchronously before the notification callback.
     #expect(Policy.recipient(
