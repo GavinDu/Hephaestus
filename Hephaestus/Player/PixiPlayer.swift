@@ -189,6 +189,83 @@ struct PlayerFirstSceneRenderSubmissionGate {
     }
 }
 
+/// Pure ownership and readiness policy for the player hold poster.
+/// Navigation completion never implies gameplay scene submission or visible
+/// GPU-composited pixels. Future WebKit wiring must pass only native-observed
+/// frame/origin/document/credential/attachment provenance, not JS flags.
+/// The current production poster is NOT wired to this reducer yet (#353).
+struct PlayerPosterSceneReadinessGate {
+    enum Phase: Equatable {
+        case holding
+        case sceneSubmitted
+        case revealed
+        case recovery
+        case retired
+    }
+
+    let gameID: String
+    let documentNonce: String
+    let attempt: Int
+    private(set) var phase: Phase = .holding
+    private(set) var navigationFinished = false
+
+    init?(gameID: String, documentNonce: String, attempt: Int) {
+        guard !gameID.isEmpty, gameID.utf8.count <= 128,
+              PlayerNativeDocumentEpochGate.isWellFormed(documentNonce),
+              attempt >= 0 else { return nil }
+        self.gameID = gameID
+        self.documentNonce = documentNonce
+        self.attempt = attempt
+    }
+
+    /// Returns whether the navigation event belonged to this attempt,
+    /// NOT whether its scene is ready or its poster may fade.
+    mutating func recordNavigationFinish(attempt: Int) -> Bool {
+        guard attempt == self.attempt, phase == .holding ||
+                phase == .sceneSubmitted else { return false }
+        navigationFinished = true
+        return true
+    }
+
+    /// Prevalidated scene-submit from a current, attached native WebKit
+    /// document (or exactly-once transfer of a validated pool candidate).
+    /// Distinct native provenance booleans are NOT read from message.body.
+    mutating func recordSceneSubmission(
+        gameID: String, documentNonce: String, attempt: Int,
+        isTrustedMainFrame: Bool, isSameOrigin: Bool,
+        credentialScopeCurrent: Bool, ownsCurrentAttachment: Bool
+    ) -> Bool {
+        guard phase == .holding,
+              gameID == self.gameID, documentNonce == self.documentNonce,
+              attempt == self.attempt,
+              isTrustedMainFrame, isSameOrigin,
+              credentialScopeCurrent, ownsCurrentAttachment else { return false }
+        phase = .sceneSubmitted
+        return true
+    }
+
+    /// At most one reveal. Reduced-motion may choose an immediate opacity
+    /// change, but MUST NOT relax the scene-ready requirement.
+    mutating func consumeReveal(attempt: Int) -> Bool {
+        guard phase == .sceneSubmitted, attempt == self.attempt else { return false }
+        phase = .revealed
+        return true
+    }
+
+    /// A bounded hold timeout is an actionable error/recovery path, never
+    /// permission to display a potentially blank or stale WebView.
+    mutating func expireHold(attempt: Int) -> Bool {
+        guard phase == .holding, attempt == self.attempt else { return false }
+        phase = .recovery
+        return true
+    }
+
+    mutating func retire() {
+        phase = .retired
+        navigationFinished = false
+    }
+}
+
 /// One live, cryptographically unpredictable challenge per attempted main-frame
 /// WK document. The pool (not a JS session ID or SwiftUI Coordinator) owns it.
 /// No historical-ID list is needed: late messages must match this exact nonce.
