@@ -4,6 +4,57 @@ import UIKit
 
 // MARK: - Profile
 
+/// Native Profile actions can return sensitive AuthServices/URLSession errors.
+/// Never expose raw provider URLs, Apple identifiers, account tokens or the
+/// server's exception text to the visible accessibility hierarchy.
+enum ProfileErrorPresentation {
+    enum Action { case appleSignIn, accountDeletion, moderationAppeal }
+
+    static func message(for error: Error, action: Action) -> String {
+        if let api = error as? APIError, case let .badStatus(status) = api {
+            switch status {
+            case 400:
+                return "Please review the information and try again."
+            case 401:
+                return "Your session has expired. Sign in again from Profile."
+            case 403:
+                return "This account isn't permitted to complete the action."
+            case 429:
+                return "Too many requests. Try again in a little while."
+            default: break
+            }
+        }
+        if let network = error as? URLError {
+            switch network.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "You're offline. Reconnect and check the current account status."
+            case .secureConnectionFailed, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .serverCertificateUntrusted,
+                 .serverCertificateHasUnknownRoot:
+                return "A secure connection couldn't be established. Check your network."
+            case .timedOut:
+                switch action {
+                case .appleSignIn:
+                    return "Apple sign-in is taking too long. Try again from Profile."
+                case .accountDeletion:
+                    return "Couldn't confirm whether account deletion completed. Check the account before retrying."
+                case .moderationAppeal:
+                    return "Couldn't confirm whether your appeal was received. Check moderation status before retrying."
+                }
+            default: break
+            }
+        }
+        switch action {
+        case .appleSignIn:
+            return "Apple sign-in couldn't be completed. Try again from Profile."
+        case .accountDeletion:
+            return "Couldn't confirm whether account deletion completed. Check the account before retrying."
+        case .moderationAppeal:
+            return "Couldn't confirm whether your appeal was received. Check moderation status before retrying."
+        }
+    }
+}
+
 struct ProfileView: View {
     @State private var backendOK = false
     @State private var checked = false
@@ -25,8 +76,8 @@ struct ProfileView: View {
             sessionMessage = "Signed in with Apple. Session valid for 30 days."
             DevLog.info(.api, "signed in with Apple")
         } catch {
-            sessionMessage = "Sign-in failed: \(error.localizedDescription)"
-            DevLog.error(.api, "Apple sign-in exchange failed: \(error.localizedDescription)")
+            sessionMessage = ProfileErrorPresentation.message(for: error, action: .appleSignIn)
+            DevLog.error(.api, "Apple sign-in exchange failed; see redacted error category")
         }
     }
 
@@ -38,8 +89,8 @@ struct ProfileView: View {
             sessionMessage = "Account deleted. Your social data was removed."
             DevLog.info(.api, "account deleted")
         } catch {
-            sessionMessage = "Could not delete the account: \(error.localizedDescription)"
-            DevLog.error(.api, "account deletion failed: \(error.localizedDescription)")
+            sessionMessage = ProfileErrorPresentation.message(for: error, action: .accountDeletion)
+            DevLog.error(.api, "account deletion confirmation unavailable")
         }
     }
 
@@ -71,8 +122,9 @@ struct ProfileView: View {
                                 }
                                 Task { await signInWithAppleToken(identityToken) }
                             case .failure(let error):
-                                sessionMessage = "Apple sign-in failed: \(error.localizedDescription)"
-                                DevLog.error(.api, "Apple sign-in failed: \(error.localizedDescription)")
+                                sessionMessage = ProfileErrorPresentation.message(
+                                    for: error, action: .appleSignIn)
+                                DevLog.error(.api, "Apple authentication attempt did not complete")
                             }
                         }
                         .signInWithAppleButtonStyle(.black)
@@ -130,6 +182,7 @@ struct ProfileView: View {
                         Text(sessionMessage)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("session-status")
                     }
                 }
@@ -282,6 +335,8 @@ private struct ModerationAppealSheet: View {
                     Section {
                         Text(message)
                             .foregroundStyle(didSubmit ? .green : .secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("profile.moderation.appealStatus")
                     }
                 }
                 Section {
@@ -294,6 +349,8 @@ private struct ModerationAppealSheet: View {
                             Label("Submit appeal", systemImage: "paperplane")
                         }
                     }
+                    .frame(minHeight: 48)
+                    .accessibilityIdentifier("profile.moderation.submitAppeal")
                     .disabled(isSubmitting || gameID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                               reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                               reason.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count > 1000 || didSubmit)
@@ -326,7 +383,9 @@ private struct ModerationAppealSheet: View {
             didSubmit = true
             message = "Appeal submitted (\(result.appeal_id)). Status: \(result.status)."
         } catch {
-            message = "Couldn't submit appeal: \(error.localizedDescription)"
+            // The submit POST may have reached moderation before the
+            // response was lost. Never fabricate a failed or accepted receipt.
+            message = ProfileErrorPresentation.message(for: error, action: .moderationAppeal)
         }
     }
 }
