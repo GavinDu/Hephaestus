@@ -292,8 +292,8 @@ struct PlayerFirstSceneRenderSubmissionGate {
 /// At most one candidate scene-submit milestone per current speculative
 /// WK document. Its identity is immutable; neither URL equality alone nor a
 /// JS session ID alone is sufficient to transfer ownership after a retry.
-/// This *pure ledger* has no WebKit listener yet. #351 connects the collector
-/// and #352 consumes on the real attached Coordinator.
+/// The pure ledger is written only by the strict, pool-owned schema-v2
+/// listener (#351) and consumed once by the current Coordinator lease (#352).
 struct PlayerPrewarmSceneMilestoneLedger {
     struct Identity: Equatable {
         let gameID: String
