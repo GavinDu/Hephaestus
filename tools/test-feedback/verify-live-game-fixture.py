@@ -17,6 +17,23 @@ from urllib import error, parse, request
 MAX_JSON_BYTES = 2_000_000
 SAFE_GAME_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
+# Fixed allowlist ONLY. Deployed package shape can be stale, but logging
+# arbitrary dictionary keys leaks data accidentally attached by an upstream
+# serializer; never emit raw values, creator profile fields or unknown keys.
+SAFE_PACKAGE_WIRE_FIELDS = (
+    "gameId", "game_id", "packageFormatVersion", "package_format_version",
+    "minRuntimeVersion", "irVersion", "ir", "gameIR", "irHash", "irSha256",
+    "assets",
+)
+
+
+def safe_package_field_presence(payload):
+    """Names from a fixed public contract allowlist, never caller-owned keys."""
+    if not isinstance(payload, dict):
+        return "not_object"
+    return "|".join(k for k in SAFE_PACKAGE_WIRE_FIELDS if k in payload) or "none"
+
+
 
 class FixtureError(Exception):
     pass
@@ -154,6 +171,7 @@ def check_once(opener, feed_url, timeout):
         )
     origin = parse.urlsplit(feed_url)
     failure_reasons = Counter()
+    missing_format_shapes = Counter()
     for game_id in eligible[:5]:
         package_url = parse.urlunsplit(
             (origin.scheme, origin.netloc,
@@ -164,15 +182,22 @@ def check_once(opener, feed_url, timeout):
         except FixtureError as exc:
             failure_reasons[package_failure_category(str(exc))] += 1
             continue
-        if package_is_playable(package, game_id):
+        reason = package_invalid_reason(package, game_id)
+        if reason is None:
             return game_id, total, len(eligible)
-        failure_reasons["invalid_envelope_" + package_invalid_reason(package, game_id)] += 1
+        failure_reasons["invalid_envelope_" + reason] += 1
+        if reason == "missing_package_format":
+            missing_format_shapes[safe_package_field_presence(package)] += 1
     # Only categorical bounded counts; never the raw URL, response or ID.
     breakdown = ",".join(f"{key}:{failure_reasons[key]}" for key in sorted(failure_reasons))
+    # At most five real candidates, and only a fixed list of contract key
+    # *names*. Never expose a game ID, creator identity or arbitrary JSON.
+    shapes = ",".join(f"{key}:{missing_format_shapes[key]}" for key in sorted(missing_format_shapes))
+    shape_hint = f", safe_package_keys={shapes}" if shapes else ""
     raise FixtureError(
         f"feed has owner-linked game(s) but no retrievable matching playable package "
         f"(feed_count={total}, eligible_count={len(eligible)}, "
-        f"package_failure_breakdown={breakdown}); fixture #288 not ready"
+        f"package_failure_breakdown={breakdown}{shape_hint}); fixture #288 not ready"
     )
 
 
