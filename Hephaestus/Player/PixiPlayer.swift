@@ -558,6 +558,30 @@ enum PlayerPrewarmResponsePolicy {
     }
 }
 
+/// WebKit may report port zero for default HTTP/HTTPS security origins.
+/// Normalize only the standard port, never an arbitrary custom port. This
+/// pure policy does not grant WebKit callbacks any authority by itself:
+/// the Coordinator still requires current view/lease, main-frame, nonce,
+/// bound runtime session, game identity and schema validation.
+enum PlayerWebKitOriginPolicy {
+    static func matches(
+        expectedURL: URL, frameScheme: String, frameHost: String, framePort: Int
+    ) -> Bool {
+        guard let scheme = expectedURL.scheme?.lowercased(),
+              (scheme == "https" || scheme == "http"),
+              let host = expectedURL.host?.lowercased(), !host.isEmpty,
+              expectedURL.user == nil, expectedURL.password == nil,
+              (0...65535).contains(framePort) else { return false }
+        let defaultPort = scheme == "https" ? 443 : 80
+        let expectedPort = expectedURL.port ?? defaultPort
+        guard (1...65535).contains(expectedPort),
+              frameScheme.lowercased() == scheme,
+              frameHost.lowercased() == host else { return false }
+        let actualPort = framePort == 0 ? defaultPort : framePort
+        return actualPort == expectedPort
+    }
+}
+
 /// A single failed main-frame navigation can surface through both
 /// decidePolicyFor(response) and didFailProvisionalNavigation (the latter
 /// commonly reports NSURLErrorCancelled after an HTTP error response is
@@ -2146,10 +2170,12 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         private func sameOrigin(_ origin: WKSecurityOrigin) -> Bool {
-            guard let expectedScheme = BackendConfig.baseURL.scheme,
-                  let expectedHost = BackendConfig.baseURL.host else { return false }
-            let expectedPort = BackendConfig.baseURL.port ?? (expectedScheme == "https" ? 443 : 80)
-            return origin.protocol == expectedScheme && origin.host == expectedHost && origin.port == expectedPort
+            PlayerWebKitOriginPolicy.matches(
+                expectedURL: BackendConfig.baseURL,
+                frameScheme: origin.protocol,
+                frameHost: origin.host,
+                framePort: origin.port
+            )
         }
 
         func observeProgress(of webView: WKWebView) {
