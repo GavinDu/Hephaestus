@@ -1374,6 +1374,7 @@ struct PixiPlayerSheet: View {
                                                        name: "WebContentProcessTerminated",
                                                        message: "auto-reload \(autoReloads) of 2")
                                 loadError = nil
+                                loadFailureCategory = nil
                                 isLoading = true
                                 progress = 0
                                 showSlowHint = false
