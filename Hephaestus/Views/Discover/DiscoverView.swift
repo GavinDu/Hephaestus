@@ -2657,6 +2657,19 @@ private struct CreatorProfileSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .task { await load() }
+            .onChange(of: creatorID) { _, _ in
+                // This sheet may be reused for a different real Creator.
+                // Invalidate all old owner/write callbacks before refreshing.
+                profileLoadRevision += 1
+                followMutationRevision += 1
+                profile = nil
+                errorMessage = nil
+                isLoading = true
+                isFollowUpdating = false
+                followStatusNeedsRefresh = false
+                expectedFollowingAfterWrite = nil
+                Task { await load() }
+            }
             .onReceive(NotificationCenter.default.publisher(
                 for: .hephaestusBackendSessionDidChange
             )) { _ in
