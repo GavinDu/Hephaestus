@@ -1323,22 +1323,28 @@ final class PlayerSmokeTests: XCTestCase {
             }
             print("UI_EVALUATOR_VISUAL_AUDIT orientation=\(profile.1) media=\(mediaReadiness) label=\(mediaLabel) interaction_score_is_not_visual_approval=true")
 
+            // XCUIScreen captures the whole physical native screen. In a
+            // rotated simulator app.screenshot() can capture a cropped,
+            // EXIF-rotated application window with a 54% black region, even
+            // when the genuine screen shows a full-width playable feed.
+            // Keep the app capture ONLY as a diagnostic; evaluate real pixels
+            // and source-provenance from untouched screen captures.
             let beforeCapture = app.screenshot()
+            let beforeScreen = XCUIScreen.main.screenshot()
             // Landscape xcresult exports have shown sideways feed chrome and a
             // large black region even while the swipe evaluator scores 100.
             // Retain a separate full-screen capture to distinguish an
             // app-window screenshot/export issue from native rendering.
             // Never replace or silently rotate the original app capture.
             if expectedLandscape {
-                let fullScreen = XCUIScreen.main.screenshot()
-                let fullScreenAttachment = XCTAttachment(screenshot: fullScreen)
+                let fullScreenAttachment = XCTAttachment(screenshot: beforeScreen)
                 fullScreenAttachment.name = "feed-full-screen-before-swipe-landscape"
                 fullScreenAttachment.lifetime = .keepAlways
                 add(fullScreenAttachment)
                 let appImageWidth = beforeCapture.image.cgImage?.width ?? 0
                 let appImageHeight = beforeCapture.image.cgImage?.height ?? 0
-                let fullScreenWidth = fullScreen.image.cgImage?.width ?? 0
-                let fullScreenHeight = fullScreen.image.cgImage?.height ?? 0
+                let fullScreenWidth = beforeScreen.image.cgImage?.width ?? 0
+                let fullScreenHeight = beforeScreen.image.cgImage?.height ?? 0
                 print("UI_EVALUATOR_LANDSCAPE_CAPTURE app_px=\(appImageWidth)x\(appImageHeight) screen_px=\(fullScreenWidth)x\(fullScreenHeight) app_frame=\(app.frame)")
                 // Report the simulator snapshot-orientation mismatch
                 // explicitly instead of letting a passing swipe score hide
@@ -1485,8 +1491,9 @@ final class PlayerSmokeTests: XCTestCase {
             print("UI_EVALUATOR_SCORE device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1) score=\(score)/100 touch_targets=\(touchTargetsPassed)/4 games=\(totalGames) visible_pages=\(pages.count) swipe_advanced=\(didAdvance)")
 
             let afterCapture = app.screenshot()
+            let afterScreen = XCUIScreen.main.screenshot()
             if expectedLandscape {
-                let fullScreenAfter = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                let fullScreenAfter = XCTAttachment(screenshot: afterScreen)
                 fullScreenAfter.name = "feed-full-screen-after-swipe-landscape"
                 fullScreenAfter.lifetime = .keepAlways
                 add(fullScreenAfter)
@@ -1496,10 +1503,22 @@ final class PlayerSmokeTests: XCTestCase {
             afterSwipe.lifetime = .keepAlways
             add(afterSwipe)
 
-            // Treat the captured screenshots as evaluator inputs, not just
-            // attachments: a successful page transition must produce a
-            // measurable visual change in the rendered feed viewport.
-            let visualDelta = screenshotDifferenceRatio(beforeCapture.image, afterCapture.image)
+            // Evaluate EXACT original full-screen frames, never cropped app
+            // diagnostics. The two screen captures must come from the same
+            // physical orientation/dimensions before any pixel comparison.
+            let beforeRaster = beforeScreen.image.cgImage
+            let afterRaster = afterScreen.image.cgImage
+            XCTAssertNotNil(beforeRaster, "Original native before screenshot must decode.")
+            XCTAssertNotNil(afterRaster, "Original native after screenshot must decode.")
+            XCTAssertEqual(beforeRaster?.width, afterRaster?.width,
+                           "Before/after full-screen captures must use one unchanged orientation.")
+            XCTAssertEqual(beforeRaster?.height, afterRaster?.height,
+                           "Before/after full-screen captures must use one unchanged orientation.")
+            XCTAssertEqual(beforeScreen.image.imageOrientation.rawValue,
+                           afterScreen.image.imageOrientation.rawValue,
+                           "Native screenshot metadata cannot change orientation during one swipe.")
+            print("UI_EVALUATOR_SCREENSHOT_SOURCE orientation=\(profile.1) source=original_XCUIScreen_fullscreen app_screenshot_is_diagnostic=true")
+            let visualDelta = screenshotDifferenceRatio(beforeScreen.image, afterScreen.image)
             XCTAssertNotNil(visualDelta,
                             "The \(profile.1) evaluator screenshots should be decodable.")
             XCTAssertGreaterThan(visualDelta ?? 0, 0.005,
