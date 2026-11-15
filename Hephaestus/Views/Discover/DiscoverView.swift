@@ -2208,6 +2208,8 @@ private struct CreatorDiscoverySheet: View {
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var loadGeneration = 0
+    // A new query must not present previously confirmed creators as current.
+    @State private var resultsMatchCurrentSearch = false
     @State private var appliedSearchText = ""
     @State private var appliedTopicText = ""
 
@@ -2230,16 +2232,33 @@ private struct CreatorDiscoverySheet: View {
                     Text("Search creators by ID or public game title. Topic filtering is an exact match.")
                 }
 
-                if isLoading && creators.isEmpty {
+                if isLoading {
+                    // Reset search is different from pagination. Never expose
+                    // prior search rows as results for a pending new query.
                     HStack { Spacer(); ProgressView("Finding creators…"); Spacer() }
-                } else if creators.isEmpty && errorMessage == nil {
-                    ContentUnavailableView(
-                        "No creators found",
-                        systemImage: "person.2",
-                        description: Text("Try another search or topic.")
-                    )
+                        .accessibilityIdentifier("creator.discovery.searching")
+                } else if creators.isEmpty {
+                    if errorMessage == nil {
+                        ContentUnavailableView(
+                            "No creators found",
+                            systemImage: "person.2",
+                            description: Text("Try another search or topic.")
+                        )
+                    }
                 } else {
-                    Section("Creators") {
+                    Section(CreatorDiscoveryResultsPolicy.sectionTitle(
+                        resultsMatchCurrentSearch: resultsMatchCurrentSearch
+                    )) {
+                        if !resultsMatchCurrentSearch {
+                            Label(
+                                "These are previous results. The current search could not be confirmed.",
+                                systemImage: "clock.arrow.circlepath"
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(ArcadePulseTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("creator.discovery.previousResults")
+                        }
                         ForEach(creators) { creator in
                             Button {
                                 profileRequest = CreatorProfileRequest(id: creator.creator_id)
@@ -2268,7 +2287,7 @@ private struct CreatorDiscoverySheet: View {
                             .accessibilityLabel("View creator \(creator.creator_id), \(creator.post_count) public games")
                         }
                     }
-                    if nextCursor != nil {
+                    if nextCursor != nil && resultsMatchCurrentSearch {
                         Section {
                             Button {
                                 Task { await load(reset: false) }
@@ -2320,6 +2339,7 @@ private struct CreatorDiscoverySheet: View {
             appliedSearchText = searchText
             appliedTopicText = topicText
             nextCursor = nil
+            resultsMatchCurrentSearch = false
             isLoading = true
             isLoadingMore = false
         } else {
@@ -2342,6 +2362,8 @@ private struct CreatorDiscoverySheet: View {
             guard generation == loadGeneration else { return }
             if reset {
                 creators = response.creators
+                // Only the winning generation confirms these live rows.
+                resultsMatchCurrentSearch = true
             } else {
                 var seen = Set(creators.map(\.creator_id))
                 creators.append(contentsOf: response.creators.filter { seen.insert($0.creator_id).inserted })
