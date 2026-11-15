@@ -61,6 +61,16 @@ struct LibraryView: View {
         )
     }
 
+    /// Presentation is derived from the same fail-closed current-account
+    /// count, never from an unverified saved array.
+    private var savedCountCaption: LibrarySavedCountCaption.Presentation {
+        LibrarySavedCountCaption.presentation(
+            confirmedCount: confirmedSavedCount,
+            signedIn: !BackendConfig.currentUserID.isEmpty,
+            loading: isLoadingSaved
+        )
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -182,17 +192,17 @@ struct LibraryView: View {
                     HStack {
                         Text("Saved games")
                         Spacer()
-                        if let count = confirmedSavedCount {
-                            Text("\(count)")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel("\(count) saved games")
-                        } else {
-                            Text("—")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel("Saved games count unavailable")
-                        }
+                        // A standalone dash is not a readable state. Preserve
+                        // confirmed numbers, but name signed-out/loading/error
+                        // states without inventing a backend total.
+                        Text(savedCountCaption.visibleText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .multilineTextAlignment(.trailing)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("library.savedCount.status")
+                            .accessibilityLabel(savedCountCaption.accessibilityLabel)
                     }
                 }
 
@@ -393,6 +403,43 @@ struct LibraryView: View {
             ) else { return }
             errorMessage = "Couldn't remove saved game. Please try again."
         }
+    }
+}
+
+/// Separate visual communication from the current-account backend truth
+/// gate. A previously loaded count must never leak into a signed-out,
+/// loading, errored or revoked session.
+enum LibrarySavedCountCaption {
+    struct Presentation {
+        let visibleText: String
+        let accessibilityLabel: String
+    }
+
+    static func presentation(
+        confirmedCount: Int?, signedIn: Bool, loading: Bool
+    ) -> Presentation {
+        if let count = confirmedCount, signedIn, !loading {
+            return Presentation(
+                visibleText: String(count),
+                accessibilityLabel: "\(count) saved games"
+            )
+        }
+        if !signedIn {
+            return Presentation(
+                visibleText: "Sign in",
+                accessibilityLabel: "Sign in to see saved-game count"
+            )
+        }
+        if loading {
+            return Presentation(
+                visibleText: "Loading",
+                accessibilityLabel: "Loading saved-game count"
+            )
+        }
+        return Presentation(
+            visibleText: "Unavailable",
+            accessibilityLabel: "Saved games count unavailable"
+        )
     }
 }
 
