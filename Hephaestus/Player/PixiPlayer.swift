@@ -10,10 +10,10 @@ import WebKit
 //
 // The player is the PixiJS + Rapier Game IR runtime — the single runtime
 // since the 2026-10-20 consolidation. The runtime is served by the backend
-// at /player and embedded here in a constrained WKWebView: the only native
-// message is a verified-run notification; there is no evaluateJavaScript
-// control channel and no arbitrary native API exposure (App Store Guideline
-// 4.7 posture). Everything this
+// at /player and embedded here in a constrained WKWebView: the sole narrow
+// message name carries validated runtime metrics and opaque run-result
+// notifications, never arbitrary native control. There is no evaluateJavaScript
+// control channel or general native API (App Store Guideline 4.7). Everything this
 // shell does for resource control, performance, and telemetry respects
 // that boundary:
 //   - performance reaches the page only as a URL parameter (?quality=),
@@ -229,6 +229,30 @@ struct PlayerPrewarmV2SceneMetricGate {
     }
 }
 
+/// Pure native-side provenance policy for speculative WebKit callbacks.
+/// The caller supplies identity/frame/origin from WKScriptMessage itself, not
+/// from browser JSON. URL equality includes the exact game and quality query.
+enum PlayerPrewarmMessageOriginPolicy {
+    static func allows(
+        isCurrentPooledView: Bool,
+        isAttached: Bool,
+        expectedURL: URL?,
+        actualURL: URL?,
+        isMainFrame: Bool,
+        originScheme: String,
+        originHost: String,
+        originPort: Int,
+        backendURL: URL
+    ) -> Bool {
+        guard isCurrentPooledView, !isAttached, isMainFrame,
+              let expectedURL, actualURL == expectedURL,
+              let scheme = backendURL.scheme, let host = backendURL.host
+        else { return false }
+        let expectedPort = backendURL.port ?? (scheme == "https" ? 443 : 80)
+        return originScheme == scheme && originHost == host &&
+            originPort == expectedPort
+    }
+}
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
@@ -847,6 +871,13 @@ enum PlayerWebViewPool {
     private static var prewarmEpoch: UInt64 = 0
     private static var prewarmExpiryTask: Task<Void, Never>?
     private static let warmupDelegate = WarmupDelegate()
+    // Owned independently of SwiftUI sheet presentation so a genuine
+    // schema-v2 first-scene submission can be captured *before* attach.
+    // WKUserContentController retains the handler; this handler never
+    // retains a WKWebView or any game content.
+    private static let prewarmMetricName = "hephaestusRunResult"
+    private static let prewarmMetricHandler = PrewarmMetricListener()
+    private static var prewarmSceneGate = PlayerPrewarmV2SceneMetricGate()
 
     static func playerURL(gameID: String, quality: String? = nil) -> URL? {
         // Do not construct a player URL for an empty identifier, and never
@@ -872,6 +903,7 @@ enum PlayerWebViewPool {
 
     static func prepareDocumentNavigation(_ webView: WKWebView) {
         guard pooledView === webView else { return }
+        prewarmSceneGate.reset()
         let nonce = documentEpochGate.prepareNavigation()
         // Only installed native code can issue a fresh current-document
         // challenge. Page code cannot derive future navigation epochs.
@@ -892,6 +924,7 @@ enum PlayerWebViewPool {
 
     static func didStartDocumentNavigation(_ webView: WKWebView) {
         guard pooledView === webView else { return }
+        prewarmSceneGate.reset()
         _ = documentEpochGate.didStartNavigation()
     }
 
@@ -907,6 +940,7 @@ enum PlayerWebViewPool {
     static func revokeDocumentNonce(_ webView: WKWebView) {
         guard pooledView === webView else { return }
         documentEpochGate.invalidate()
+        prewarmSceneGate.reset()
     }
 
     static func prewarm(gameID: String) {
@@ -914,7 +948,12 @@ enum PlayerWebViewPool {
         guard !isAttached, let url = playerURL(gameID: gameID) else { return }
         let view = pooledView ?? makeWebView()
         pooledView = view
+        // An existing prewarm already has its listener; do not briefly
+        // unregister it while a first-scene message may be in flight.
         if currentURL == url && (view.isLoading || loadedURL == url) { return }
+        // A recycled sheet removed its coordinator handler. Reinstall exactly
+        // one narrow pool handler before the *new* speculative navigation.
+        installPrewarmMetricHandler(view)
 
         view.stopLoading()
         currentURL = url
@@ -1007,6 +1046,7 @@ enum PlayerWebViewPool {
         loadedURL = nil
         self.currentURL = nil
         documentEpochGate.invalidate()
+        prewarmSceneGate.reset()
     }
 
     static func ownsActiveAttachment(_ webView: WKWebView, lease: UInt64) -> Bool {
@@ -1027,6 +1067,7 @@ enum PlayerWebViewPool {
         currentURL = nil
         loadedURL = nil
         documentEpochGate.invalidate()
+        prewarmSceneGate.reset()
         webView.navigationDelegate = warmupDelegate
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
@@ -1065,6 +1106,7 @@ enum PlayerWebViewPool {
         loadedURL = nil
         isAttached = false
         documentEpochGate.invalidate()
+        prewarmSceneGate.reset()
         sessionFingerprint = credentialFingerprint()
         // Never let a newly created player WebView share persistent data or
         // a WebContent process pool with the retired Keychain identity.
@@ -1087,17 +1129,68 @@ enum PlayerWebViewPool {
         currentURL = nil
         loadedURL = nil
         documentEpochGate.invalidate()
+        prewarmSceneGate.reset()
         stale?.stopLoading()
         stale?.navigationDelegate = nil
         stale?.loadHTMLString("", baseURL: nil)
+    }
+
+    private static func installPrewarmMetricHandler(_ webView: WKWebView) {
+        let controller = webView.configuration.userContentController
+        controller.removeScriptMessageHandler(forName: prewarmMetricName)
+        controller.add(prewarmMetricHandler, name: prewarmMetricName)
+    }
+
+    // A pool-owned listener cannot receive a run result or other privileges.
+    // Require WKScriptMessage.webView identity, current immutable player URL,
+    // native frame/origin and credential fingerprint, and the one current
+    // nonce-bound schema-v2 metric before storing a bounded observation.
+    private static func collectPrewarmMetric(_ message: WKScriptMessage) {
+        guard message.name == prewarmMetricName,
+              let view = pooledView, let url = currentURL,
+              let expectedGameID = URLComponents(
+                  url: url, resolvingAgainstBaseURL: false
+              )?.queryItems?.first(where: { $0.name == "game" })?.value,
+              let body = message.body as? [String: Any] else { return }
+        let source = message.frameInfo.securityOrigin
+        let trustedProvenance = PlayerPrewarmMessageOriginPolicy.allows(
+            isCurrentPooledView: message.webView === view,
+            isAttached: isAttached,
+            expectedURL: currentURL, actualURL: view.url,
+            isMainFrame: message.frameInfo.isMainFrame,
+            originScheme: source.protocol, originHost: source.host,
+            originPort: source.port, backendURL: BackendConfig.baseURL
+        )
+        guard trustedProvenance else { return }
+        _ = prewarmSceneGate.record(
+            body, expectedGameID: expectedGameID,
+            currentDocumentNonce: documentEpochGate.currentNonce,
+            isTrustedMainFrame: message.frameInfo.isMainFrame,
+            isSameOrigin: trustedProvenance,
+            navigationStarted: documentEpochGate.navigationStarted,
+            credentialScopeCurrent: sessionFingerprint == credentialFingerprint()
+        )
+    }
+
+    // This separate handler owns no game state and cannot accidentally
+    // retain the pooled WebView. The sheet swaps its own handler by removing
+    // this same single name on attach. Future #352 owns snapshot transfer.
+    private final class PrewarmMetricListener: NSObject, WKScriptMessageHandler {
+        func userContentController(_ userContentController: WKUserContentController,
+                                   didReceive message: WKScriptMessage) {
+            PlayerWebViewPool.collectPrewarmMetric(message)
+        }
     }
 
     private static func makeWebView() -> WKWebView {
         let configuration = PlayerWebKitSessionStoragePolicy.configuration(
             processPool: processPool, dataStore: playerWebsiteDataStore
         )
-        // The only handler is attached per presentation and accepts one
-        // validated run-result notification; there is no script control API.
+        // Prewarm must register before view.load; the pool listener accepts
+        // only schema-v2 scene *metrics*, never a run or native control.
+        configuration.userContentController.add(
+            prewarmMetricHandler, name: prewarmMetricName
+        )
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.applicationNameForUserAgent = "HephaestusPlayer/1.1"
@@ -1153,6 +1246,11 @@ enum PlayerWebViewPool {
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             PlayerWebViewPool.markFailed(webView)
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            PlayerWebViewPool.markFailed(webView)
+            PlayerWebViewPool.revokeDocumentNonce(webView)
         }
     }
 }
