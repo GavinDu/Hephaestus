@@ -74,27 +74,32 @@ struct GameFeedCard: View {
         ArcadePulseTheme.fallbackPalette(gameID: game.id)
     }
 
-    private func expressionTag(_ title: String, count: Int) -> some View {
-        Text("\(title) · \(count)")
+    private func expressionTag(_ title: String, count: Int?) -> some View {
+        Text(PlayableExpressionClaimCountPresentation.visualLabel(
+            category: title, count: count
+        ))
             .font(.caption.weight(.semibold))
             .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(PlayableExpressionClaimCountPresentation.accessibilityLabel(
+                category: title, count: count
+            ))
             .padding(.horizontal, 7)
             .padding(.vertical, 5)
             .background(.white.opacity(0.16), in: Capsule())
     }
 
     private func expressionAccessibilityLabel(_ expression: FeedPlayableExpression) -> String {
-        let preserved = expression.preserved?.count ?? 0
-        let invented = expression.invented?.count ?? 0
-        let uncertain = expression.uncertain?.count ?? 0
         return [
             "Playable expression",
             expression.intent,
             expression.chosen_interpretation.map { "Interpretation: \($0)" },
             "Source shared",
-            "Preserved claims: \(preserved)",
-            "Invented claims: \(invented)",
-            "Uncertain claims: \(uncertain)"
+            PlayableExpressionClaimCountPresentation.accessibilityLabel(
+                category: "Preserved", count: expression.preserved?.count),
+            PlayableExpressionClaimCountPresentation.accessibilityLabel(
+                category: "Invented", count: expression.invented?.count),
+            PlayableExpressionClaimCountPresentation.accessibilityLabel(
+                category: "Uncertain", count: expression.uncertain?.count)
         ].compactMap { $0 }.joined(separator: ". ")
     }
 
@@ -129,9 +134,9 @@ struct GameFeedCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             metadataLayout {
-                expressionTag("Preserved", count: expression.preserved?.count ?? 0)
-                expressionTag("Invented", count: expression.invented?.count ?? 0)
-                expressionTag("Uncertain", count: expression.uncertain?.count ?? 0)
+                expressionTag("Preserved", count: expression.preserved?.count)
+                expressionTag("Invented", count: expression.invented?.count)
+                expressionTag("Uncertain", count: expression.uncertain?.count)
             }
         }
         .padding(12)
