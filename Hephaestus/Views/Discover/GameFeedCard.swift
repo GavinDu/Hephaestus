@@ -120,38 +120,82 @@ struct GameFeedCard: View {
         .accessibilityLabel(expressionAccessibilityLabel(expression))
     }
 
+    /// A backend media reference must be an absolute web URL. Never treat a
+    /// relative path or a local-file/JavaScript scheme as approved poster art.
+    static func validatedPosterURL(_ raw: String?) -> URL? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty,
+              let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              let host = url.host, !host.isEmpty else { return nil }
+        return url
+    }
+
+    /// Decorative fallback is only rendered when no decoded real poster is
+    /// available; it is NOT evidence of game play or a recorded preview.
+    private var fallbackArtwork: some View {
+        ZStack {
+            Circle()
+                .fill(.white.opacity(0.12))
+                .frame(width: 180, height: 180)
+                .offset(x: 210, y: -80)
+            Circle()
+                .stroke(.white.opacity(0.18), lineWidth: 1)
+                .frame(width: 220, height: 220)
+                .offset(x: 180, y: -20)
+            Image(systemName: "gamecontroller.fill")
+                .font(.system(size: 64, weight: .medium))
+                .foregroundStyle(.white.opacity(0.88))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var posterArtwork: some View {
+        if let posterURL = Self.validatedPosterURL(game.previewPosterURL) {
+            AsyncImage(url: posterURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFit()
+                case .empty:
+                    ProgressView("Loading game artwork")
+                        .tint(.white)
+                        .foregroundStyle(.white)
+                case .failure:
+                    fallbackArtwork
+                @unknown default:
+                    fallbackArtwork
+                }
+            }
+            .accessibilityHidden(true)
+        } else {
+            fallbackArtwork
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .bottomLeading) {
                 LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
-                if let poster = game.previewPosterURL, let url = URL(string: poster) {
-                    AsyncImage(url: url) { phase in
-                        if let image = phase.image { image.resizable().scaledToFit() }
-                        else { LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing) }
-                    }
+                posterArtwork
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
-                    .accessibilityHidden(true)
-                }
-                if previewPlayback.activeGameID == game.id && !reduceMotion {
-                    FeedPreviewSurface(player: previewPlayback.player)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black)
-                        .accessibilityHidden(true)
-                }
-                if (game.previewPosterURL == nil || game.previewPosterURL?.isEmpty == true)
-                    && previewPlayback.activeGameID != game.id {
-                    Circle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 180, height: 180)
-                    .offset(x: 210, y: -80)
-                Circle()
-                    .stroke(.white.opacity(0.18), lineWidth: 1)
-                    .frame(width: 220, height: 220)
-                    .offset(x: 180, y: -20)
-                Image(systemName: "gamecontroller.fill")
-                    .font(.system(size: 64, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.88))
+                // This grid card does not normally own the feed's shared
+                // decoder. If explicitly enabled, keep the current poster
+                // visible until AVPlayerLayer has a *real* decoded frame.
+                if shouldAutoplayPreview &&
+                    previewPlayback.activeGameID == game.id && !reduceMotion {
+                    FeedPreviewSurface(
+                        player: previewPlayback.player,
+                        onReadyForDisplay: { [generation = previewPlayback.presentationGeneration] ready in
+                            previewPlayback.reportDisplayReadiness(
+                                gameID: game.id, generation: generation, ready: ready
+                            )
+                        }
+                    )
+                    .id(previewPlayback.presentationGeneration)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityHidden(true)
                 }

@@ -176,7 +176,7 @@ jobs:
   # Real iPad UI evaluation at a regular-width size class.
   ipad-feed-ui-evaluator:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Find an available iPad simulator
@@ -218,6 +218,7 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStalledTransportReachesHonestRecovery \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorGuestSignInRoutesToProfileAfterDismiss \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadGameDetailsAdaptiveLayout \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/ipad-feed-ui.log || {
               grep -E "error:|XCTAssert" /tmp/ipad-feed-ui.log | sort -u | head -30 | while read -r l; do
@@ -249,13 +250,14 @@ jobs:
       # Native app-window landscape attachments can export with a misleading
       # portrait crop and black bands. Keep originals; validate and separately
       # publish orientation-correct *full-screen* evidence for review.
-      - name: Validate native iPad feed and Library screenshot evidence
+      - name: Validate native iPad feed, Library, Game Details and feature screenshot evidence
         run: |
           python3 tools/test-feedback/verify-ui-screenshot-evidence.py \
             --input /tmp/ipad-feed-ui-screenshots \
             --out /tmp/ipad-feed-ui-review \
             --require-ipad-library \
-            --require-ipad-arcade-features
+            --require-ipad-arcade-features \
+            --require-ipad-details
       - name: Upload iPad UI evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4

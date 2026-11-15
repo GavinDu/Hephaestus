@@ -1,5 +1,7 @@
 # Preview-to-game handoff design (Hephaestus #58)
 
+> **Historical design / source-status warning (Epic [#202](https://github.com/GavinDu/Hephaestus/issues/202), November 2026):** The original October 2026 proposal below deliberately used `WKNavigationDelegate.didFinish` for a poster crossfade. **That only proves navigation completion, not a rendered, interactive or GPU-composited first game frame.** The source already has one narrow, main-frame/origin/session-validated `WKScriptMessageHandler` for runtime metrics and opaque run-result notifications; therefore "bridgeless" and "cannot observe first input" claims below are **superseded**. The browser `first_scene_render_submit` signal proves renderer *submission* only. The remaining pool-owned prewarm collection [#351](https://github.com/GavinDu/Hephaestus/issues/351), exactly-once transfer [#352](https://github.com/GavinDu/Hephaestus/issues/352), truthful poster release/recovery [#353](https://github.com/GavinDu/Hephaestus/issues/353), native schema-v2 first-message [#286](https://github.com/GavinDu/Hephaestus/issues/286), and physical first GPU-present [#276](https://github.com/GavinDu/Hephaestus/issues/276) are **open** until separately proven. Current iOS simulator CI cannot establish a physical first pixel, 50-cycle thermal baseline or App Review approval. Keep this file as a record of the original #58 trade-off, **not** current runtime readiness policy.
+
 Design proposal for making Play feel like the clip turning into the
 game, confirmed by Gavin 2026-10-26 and implemented on PR #86
 (see "Implementation" below). The remaining follow-ups are a
@@ -26,7 +28,7 @@ feed card:
 - The preview stops when the player opens (`FeedPreviewPlayback`
   stops on player presentation), so a clip never plays under a game.
 - The sheet already drives its loading indicator from
-  `estimatedProgress` and its ready state from navigation finish.
+  `estimatedProgress` and historically/releases its poster on **navigation finish only**. This state is `TapToNavReady`, not first scene, first input or GPU-present.
 
 What #58 still owes is the *feel* of the handoff, not the pool.
 
@@ -37,18 +39,20 @@ What #58 still owes is the *feel* of the handoff, not the pool.
   — no white flash, no black frame, no jump to a spinner.
 - A swipe down (or close) returns to the same card and scroll
   position it came from.
-- Tap-to-interactive is measured, against the 1.5 s median budget
-  on Wi-Fi stated in #58 — and the measurement must say honestly
-  what "interactive" means (see below).
+- The original 1.5 s median Wi-Fi budget in #58 was evaluated against **tap-to-navigation-ready**, not actual tap-to-interactive. A new baseline must separate first renderer submit, first input and physical composited frame.
 - Only one live runtime exists at a time (already guaranteed by
   the pool; the handoff must not break it by warming a second view).
 
 ## The readiness problem (the one design decision that matters)
 
-The shell is bridgeless: it can observe navigation finish and
-estimated progress, but it **cannot** observe the runtime's first
-frame. "The runtime reports ready" therefore has two possible
-meanings, and the design must pick one:
+**Superseded premise:** The shell is **not bridgeless**. Production
+`Hephaestus/Player/PixiPlayer.swift` uses a tightly validated
+`WKScriptMessageHandler` for first-scene *renderer submission*, first
+input, performance windows and an opaque server-run notification; it does
+not offer arbitrary native-control APIs. Navigation finish is observable
+through WKNavigationDelegate, while first GPU-present still requires
+independent physical-device measurement. The original October 2026
+proposal below contrasted two incomplete readiness definitions:
 
 1. **Navigation finished (implementable now, no runtime change).**
    The sheet already treats this as ready. The crossfade would run
@@ -56,16 +60,13 @@ meanings, and the design must pick one:
    game behind the crossfade, so the first visible game frame can
    lag the crossfade by the runtime's boot time. This is the honest
    version of "ready" the shell can offer today.
-2. **First frame rendered (needs a runtime-side signal).** The
-   runtime would have to expose readiness through a channel the
-   shell can observe without a JS bridge — for example a
-   same-document navigation, a document-title change on first
-   frame, or a query the shell polls via the page URL. All of these
-   are workarounds with their own fragility, and they need a runtime
-   change plus a contract, not just app code. The probe gate already
-   measures first-frame readiness from the browser side
-   (`booted`/`frames`), so the signal exists — it is the
-   shell-observable form of it that is missing.
+2. **First renderer submission (now narrowly signaled, handoff still open).**
+   The runtime emits `first_scene_render_submit` through the narrowly
+   validated bridge on an attached player. Prewarm can emit before attach,
+   which requires a separately reviewed pool listener and one-time
+   lease-bound transfer (#351/#352). Renderer submission **is not** proof
+   a GPU compositor presented those pixels or that the user can interact
+   (#276). Do not infer this milestone from a URL/title/progress change.
 
 Proposal: build the handoff on definition 1 now (crossfade on
 navigation finish, with the last-frame hold covering the boot gap
@@ -104,13 +105,16 @@ would corrupt the tap-to-interactive measurement.
 
 ## Measurement
 
-- **Tap-to-interactive (shell definition):** tap timestamp →
-  navigation-finish timestamp, recorded per play as player
-  telemetry. This is measurable today and is the number the 1.5 s
-  median budget should be judged against until definition 2 exists.
-- **Time to first input:** runtime-side only (first input event in
-  the game). Not measurable from the shell; do not approximate it
-  from navigation finish. The #61 note already records this split.
+- **Tap-to-navigation-ready (historical shell metric):** tap timestamp →
+  navigation-finish timestamp, recorded as `TapToNavReady`. It is
+  measurable, but must **not** be named or used as a tap-to-interactive
+  performance result. Revisit the original 1.5 s budget using actual
+  first-input and first-composited-frame evidence once available.
+- **Time to first input:** the runtime now emits a narrowly validated
+  native first-input metric for an attached document, but that is
+  distinct from navigation finish and does not prove first GPU present.
+  Prewarm and schema-v2 exact-document message ownership remain gated
+  by #286/#351/#352; never approximate missing evidence from didFinish.
 - **Prewarm hit rate:** share of plays where `take(url:)` returned
   an already-finished navigation. This is the number that says
   whether finger-down prewarming earns its memory cost. Log it as

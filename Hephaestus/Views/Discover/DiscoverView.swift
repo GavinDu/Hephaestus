@@ -93,8 +93,7 @@ struct DiscoverView: View {
             Label("Try again", systemImage: "arrow.clockwise")
                 .frame(maxWidth: .infinity, minHeight: 48)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(ArcadePulseTheme.electricViolet)
+        .buttonStyle(ArcadePulseRecoveryButtonStyle())
         .accessibilityIdentifier("feed.error.retry")
     }
 
@@ -357,7 +356,7 @@ struct DiscoverView: View {
                                 Label("Retry loading", systemImage: "arrow.clockwise")
                                     .frame(minHeight: 44)
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(ArcadePulseRecoveryButtonStyle())
                             .accessibilityIdentifier("feed.retryLoading")
 
                             LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: HephaestusDesign.sectionSpacing) {
@@ -700,9 +699,7 @@ struct DiscoverView: View {
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
             }
-            .sheet(item: $detailGame) { game in
-                ArcadePulseGameDetailsSheet(game: game)
-            }
+            .modifier(ArcadePulseGameDetailsPresentation(selection: $detailGame))
             .sheet(item: $reportingGame) { game in
                 ReportGameSheet(game: game)
             }
@@ -2036,11 +2033,36 @@ private struct ForYouPagerView: View {
     }
 }
 
+/// iPad's default form-sheet is narrow even when the app's landscape window
+/// has room for two columns. Present genuine Game Details in the full iPad
+/// window; preserve the existing sheet/dismiss experience on iPhone.
+private struct ArcadePulseGameDetailsPresentation: ViewModifier {
+    @Binding var selection: FeedGame?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            content.fullScreenCover(item: $selection) { game in
+                ArcadePulseGameDetailsSheet(game: game)
+            }
+        } else {
+            content.sheet(item: $selection) { game in
+                ArcadePulseGameDetailsSheet(game: game)
+            }
+        }
+    }
+}
+
 private struct ArcadePulseGameDetailsSheet: View {
     let game: FeedGame
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
     @State private var playerRequest: PixiPlayerRequest?
+    // URL presence is not proof the actual poster loaded. Only a decoded
+    // image expands the portrait media stage; failures retain an honest,
+    // compact "Preview unavailable" card and accessible Play / Share.
+    @State private var hasDecodedPoster = false
 
     private var shareURL: URL {
         var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"),
@@ -2049,16 +2071,19 @@ private struct ArcadePulseGameDetailsSheet: View {
         return components?.url ?? BackendConfig.baseURL
     }
 
-    private var preview: some View {
+    private func preview(height: CGFloat) -> some View {
         ZStack {
+            // The gradient is merely a fallback, never a recorded preview.
             LinearGradient(colors: ArcadePulseTheme.fallbackPalette(gameID: game.id),
                            startPoint: .topLeading, endPoint: .bottomTrailing)
             if let poster = game.previewPosterURL, let url = URL(string: poster) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFit()
+                            .onAppear { hasDecodedPoster = true }
                     } else {
                         unavailablePreview
+                            .onAppear { hasDecodedPoster = false }
                     }
                 }
             } else {
@@ -2066,12 +2091,13 @@ private struct ArcadePulseGameDetailsSheet: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: horizontalSizeClass == .regular ? 335 : 240)
+        .frame(height: height)
         .clipShape(RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(game.previewPosterURL == nil
-                            ? "Gameplay preview unavailable"
-                            : "Game preview image or fallback for \(game.title)")
+        .accessibilityLabel(hasDecodedPoster
+                            ? "Game artwork for \(game.title)"
+                            : "Gameplay preview unavailable for \(game.title)")
+        .accessibilityValue(hasDecodedPoster ? "Poster displayed" : "Preview unavailable")
         .accessibilityIdentifier("game.details.preview")
     }
 
@@ -2081,66 +2107,124 @@ private struct ArcadePulseGameDetailsSheet: View {
                 .font(.system(size: 38))
             Text("Preview unavailable")
                 .font(.headline)
-            Text("Play the actual game below")
+            Text("Use Play to launch the actual game")
                 .font(.caption)
+                .multilineTextAlignment(.center)
         }
         .foregroundStyle(.white)
     }
 
+    /// Shared actual feed metadata; no fabricated ratings, counts, game
+    /// release dates, updates or suggested games to fill empty tablet space.
+    private var metadataAndActions: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(game.title)
+                .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("game.details.title")
+            if let owner = game.ownerID, !owner.isEmpty {
+                Label(game.creatorDisplayName?.isEmpty == false
+                      ? game.creatorDisplayName! : owner,
+                      systemImage: "person.crop.circle")
+                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+            }
+            // Play and Share must be reachable before optional long
+            // creator-provided descriptions, topics or version metadata.
+            ArcadePulsePlayCTA {
+                playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
+            }
+            ShareLink(item: shareURL) {
+                Label("Share game", systemImage: "square.and.arrow.up")
+                    .font(.headline)
+                    .foregroundStyle(ArcadePulseTheme.onElectricViolet)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(
+                        ArcadePulseTheme.electricViolet,
+                        in: RoundedRectangle(
+                            cornerRadius: ArcadePulseTheme.pillRadius,
+                            style: .continuous
+                        )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius))
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the native system sharing options")
+            if let caption = game.caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.body)
+                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let topics = game.topics, !topics.isEmpty {
+                Text(topics.prefix(5).map { "#\($0)" }.joined(separator: "  "))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                if let orientation = game.orientationLabel {
+                    Label(orientation, systemImage: "rotate.right")
+                }
+                if let version = game.publishedVersion {
+                    Label("Published version \(version)", systemImage: "square.stack.3d.up")
+                }
+                if let remixParent = game.remixParentID, !remixParent.isEmpty {
+                    Label("Published remix", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(ArcadePulseTheme.textSecondary)
+
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func adaptiveLayout(size: CGSize) -> some View {
+        let twoColumn = ForYouPageLayout.showsIPadGameDetailsTwoColumn(
+            width: size.width, height: size.height,
+            isRegular: horizontalSizeClass == .regular,
+            isLargeText: dynamicTypeSize >= .xxLarge
+        )
+        if twoColumn {
+            HStack(alignment: .top, spacing: 24) {
+                preview(height: ForYouPageLayout.gameDetailsPreviewHeight(
+                    containerHeight: size.height,
+                    hasDecodedPoster: hasDecodedPoster))
+                    .frame(width: ForYouPageLayout.gameDetailsPreviewWidth(
+                        containerWidth: size.width))
+                metadataAndActions
+            }
+            .frame(maxWidth: 1_200, alignment: .topLeading)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("game.details.twoColumn")
+        } else {
+            VStack(alignment: .leading, spacing: 18) {
+                preview(height: ForYouPageLayout.gameDetailsSingleColumnPreviewHeight(
+                    containerWidth: size.width,
+                    containerHeight: size.height,
+                    isIPad: UIDevice.current.userInterfaceIdiom == .pad,
+                    isRegularWidth: horizontalSizeClass == .regular,
+                    hasDecodedPoster: hasDecodedPoster,
+                    isLargeText: dynamicTypeSize >= .xxLarge
+                ))
+                metadataAndActions
+            }
+            .frame(maxWidth: 800)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("game.details.singleColumn")
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    preview
-                    Text(game.title)
-                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                        .foregroundStyle(.white)
-                        .accessibilityIdentifier("game.details.title")
-                    if let owner = game.ownerID, !owner.isEmpty {
-                        Label(game.creatorDisplayName?.isEmpty == false
-                              ? game.creatorDisplayName! : owner,
-                              systemImage: "person.crop.circle")
-                            .foregroundStyle(ArcadePulseTheme.textSecondary)
-                    }
-                    if let caption = game.caption, !caption.isEmpty {
-                        Text(caption)
-                            .font(.body)
-                            .foregroundStyle(ArcadePulseTheme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let topics = game.topics, !topics.isEmpty {
-                        Text(topics.prefix(5).map { "#\($0)" }.joined(separator: "  "))
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(ArcadePulseTheme.neonMagenta)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    VStack(alignment: .leading, spacing: 10) {
-                        if let orientation = game.orientationLabel {
-                            Label(orientation, systemImage: "rotate.right")
-                        }
-                        if let version = game.publishedVersion {
-                            Label("Published version \(version)", systemImage: "square.stack.3d.up")
-                        }
-                        if let remixParent = game.remixParentID, !remixParent.isEmpty {
-                            Label("Published remix", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                    }
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(ArcadePulseTheme.textSecondary)
-                    ArcadePulsePlayCTA {
-                        playerRequest = PixiPlayerRequest(gameID: game.id, title: game.title)
-                    }
-                    ShareLink(item: shareURL) {
-                        Label("Share game", systemImage: "square.and.arrow.up")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(ArcadePulseTheme.electricViolet)
+            GeometryReader { geometry in
+                ScrollView {
+                    adaptiveLayout(size: geometry.size)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                        .padding(18)
                 }
-                .frame(maxWidth: horizontalSizeClass == .regular ? 800 : 560)
-                .frame(maxWidth: .infinity)
-                .padding(18)
             }
             .background(ArcadePulseTheme.canvas)
             .preferredColorScheme(.dark)
@@ -2163,9 +2247,6 @@ private struct CreatorProfileRequest: Identifiable {
     let id: String
 }
 
-/// Display a genuine creator request failure without disclosing transport
-/// hostnames, account tokens, TLS implementation text or private creator IDs.
-/// Failure does not imply a published creator list was successfully loaded.
 enum CreatorDiscoveryErrorPresentation {
     static func message(for error: Error, isPagination: Bool) -> String {
         let prefix = isPagination
@@ -2208,6 +2289,8 @@ private struct CreatorDiscoverySheet: View {
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var loadGeneration = 0
+    // A new query must not present previously confirmed creators as current.
+    @State private var resultsMatchCurrentSearch = false
     @State private var appliedSearchText = ""
     @State private var appliedTopicText = ""
 
@@ -2215,14 +2298,11 @@ private struct CreatorDiscoverySheet: View {
         NavigationStack {
             List {
                 Section {
-                    HStack {
-                        TextField("Filter by topic (optional)", text: $topicText)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .submitLabel(.search)
-                            .onSubmit { Task { await load(reset: true) } }
-                        Button("Apply") { Task { await load(reset: true) } }
-                            .disabled(isLoading)
+                    CreatorTopicFilterControls(
+                        topicText: $topicText,
+                        isLoading: isLoading
+                    ) {
+                        Task { await load(reset: true) }
                     }
                 } header: {
                     Text("Topic")
@@ -2230,45 +2310,60 @@ private struct CreatorDiscoverySheet: View {
                     Text("Search creators by ID or public game title. Topic filtering is an exact match.")
                 }
 
-                if isLoading && creators.isEmpty {
+                if isLoading {
+                    // Reset search is different from pagination. Never expose
+                    // prior search rows as results for a pending new query.
                     HStack { Spacer(); ProgressView("Finding creators…"); Spacer() }
-                } else if creators.isEmpty && errorMessage == nil {
-                    ContentUnavailableView(
-                        "No creators found",
-                        systemImage: "person.2",
-                        description: Text("Try another search or topic.")
-                    )
+                        .accessibilityIdentifier("creator.discovery.searching")
+                } else if creators.isEmpty {
+                    if CreatorDiscoveryResultsPolicy.showsEmptyMessage(
+                        isLoading: isLoading,
+                        hasResults: !creators.isEmpty,
+                        hasError: errorMessage != nil
+                    ) {
+                        ContentUnavailableView(
+                            "No creators found",
+                            systemImage: "person.2",
+                            description: Text("Try another search or topic.")
+                        )
+                    }
                 } else {
-                    Section("Creators") {
+                    Section(CreatorDiscoveryResultsPolicy.sectionTitle(
+                        resultsMatchCurrentSearch: resultsMatchCurrentSearch
+                    )) {
+                        if !resultsMatchCurrentSearch {
+                            Label(
+                                "These are previous results. The current search could not be confirmed.",
+                                systemImage: "clock.arrow.circlepath"
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(ArcadePulseTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("creator.discovery.previousResults")
+                        }
                         ForEach(creators) { creator in
                             Button {
                                 profileRequest = CreatorProfileRequest(id: creator.creator_id)
                             } label: {
-                                VStack(alignment: .leading, spacing: 7) {
-                                    HStack(alignment: .firstTextBaseline) {
-                                        Text(creator.creator_id)
-                                            .font(.headline)
-                                            .foregroundStyle(.primary)
-                                        Spacer()
-                                        Text("\(creator.post_count) games")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    if !creator.topics.isEmpty {
-                                        Text(creator.topics.prefix(5).map { "#\($0)" }.joined(separator: "  "))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                }
-                                .padding(.vertical, 3)
+                                CreatorDirectoryRow(
+                                    creatorID: creator.creator_id,
+                                    publicGameCount: creator.post_count,
+                                    topics: creator.topics
+                                )
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("View creator \(creator.creator_id), \(creator.post_count) public games")
+                            .accessibilityLabel(
+                                "View creator \(creator.creator_id), " +
+                                CreatorDirectoryRowLayout.publicGameCount(creator.post_count)
+                            )
                         }
                     }
-                    if nextCursor != nil {
+                    if CreatorDiscoveryResultsPolicy.allowsNextPage(
+                        resultsMatchCurrentSearch: resultsMatchCurrentSearch,
+                        hasNextCursor: nextCursor != nil,
+                        isLoading: isLoading
+                    ) {
                         Section {
                             Button {
                                 Task { await load(reset: false) }
@@ -2320,6 +2415,7 @@ private struct CreatorDiscoverySheet: View {
             appliedSearchText = searchText
             appliedTopicText = topicText
             nextCursor = nil
+            resultsMatchCurrentSearch = false
             isLoading = true
             isLoadingMore = false
         } else {
@@ -2342,6 +2438,8 @@ private struct CreatorDiscoverySheet: View {
             guard generation == loadGeneration else { return }
             if reset {
                 creators = response.creators
+                // Only the winning generation confirms these live rows.
+                resultsMatchCurrentSearch = true
             } else {
                 var seen = Set(creators.map(\.creator_id))
                 creators.append(contentsOf: response.creators.filter { seen.insert($0.creator_id).inserted })
@@ -2353,6 +2451,14 @@ private struct CreatorDiscoverySheet: View {
                 for: error, isPagination: !reset
             )
         }
+    }
+}
+
+/// Keep truthful creator statistics legible in compact windows and at
+/// accessibility text sizes. This is a sizing policy, not a data source.
+enum CreatorMetricLayout {
+    static func stacksMetrics(isRegularWidth: Bool, typeSize: DynamicTypeSize) -> Bool {
+        typeSize.isAccessibilitySize || (!isRegularWidth && typeSize >= .xxxLarge)
     }
 }
 
@@ -2372,6 +2478,19 @@ private struct CreatorProfileSheet: View {
     @State private var errorMessage: String?
     @State private var isLoading = true
     @State private var playerRequest: PixiPlayerRequest?
+
+    private var stacksCreatorMetrics: Bool {
+        CreatorMetricLayout.stacksMetrics(
+            isRegularWidth: horizontalSizeClass == .regular,
+            typeSize: dynamicTypeSize
+        )
+    }
+
+    private var creatorMetricsLayout: AnyLayout {
+        stacksCreatorMetrics
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+    }
 
     var body: some View {
         NavigationStack {
@@ -2405,11 +2524,12 @@ private struct CreatorProfileSheet: View {
                                     }
                                     Spacer(minLength: 0)
                                 }
-                                HStack(spacing: 10) {
+                                creatorMetricsLayout {
                                     creatorMetric("Games", value: profile.post_count)
                                     creatorMetric("Followers", value: profile.follower_count)
                                     creatorMetric("Following", value: profile.following_count)
                                 }
+                                .accessibilityIdentifier("creator.profile.metrics")
                                 if BackendConfig.currentUserID.isEmpty {
                                     VStack(alignment: .leading, spacing: 10) {
                                         Text("Sign in from Profile to follow this creator.")
@@ -2497,16 +2617,36 @@ private struct CreatorProfileSheet: View {
     }
 
     private func creatorMetric(_ label: String, value: Int) -> some View {
-        VStack(spacing: 5) {
-            Text(value.formatted())
-                .font(.headline.weight(.bold))
-                .monospacedDigit()
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(ArcadePulseTheme.textSecondary)
+        // All labels and numbers come from a real creator response; never
+        // truncate an accessible number or shrink it to fit three columns.
+        let readableCount = value.formatted()
+        return Group {
+            if stacksCreatorMetrics {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(label)
+                        .font(.subheadline)
+                        .foregroundStyle(ArcadePulseTheme.textSecondary)
+                    Spacer(minLength: 8)
+                    Text(readableCount)
+                        .font(.headline.weight(.bold))
+                        .monospacedDigit()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 6)
+            } else {
+                VStack(spacing: 5) {
+                    Text(readableCount)
+                        .font(.headline.weight(.bold))
+                        .monospacedDigit()
+                    Text(label)
+                        .font(.caption)
+                        .foregroundStyle(ArcadePulseTheme.textSecondary)
+                }
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 52)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label): \(readableCount)")
     }
 
     private func creatorGameRow(_ game: FeedGame) -> some View {
@@ -2635,7 +2775,11 @@ private struct ReportGameSheet: View {
                 }
                 if let errorMessage {
                     Section {
-                        Text(errorMessage).foregroundStyle(.red)
+                        Label(errorMessage, systemImage: "exclamationmark.triangle")
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("report.error")
                     }
                 }
                 if submitted {
@@ -2650,10 +2794,22 @@ private struct ReportGameSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
+                        .frame(minWidth: 44, minHeight: 44)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Submit") { Task { await submit() } }
-                        .disabled(isSubmitting || submitted)
+                    Button {
+                        Task { await submit() }
+                    } label: {
+                        if isSubmitting {
+                            ProgressView()
+                                .accessibilityLabel("Submitting report")
+                        } else {
+                            Text("Submit")
+                        }
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .disabled(isSubmitting || submitted)
+                    .accessibilityIdentifier("report.submit")
                 }
             }
         }
@@ -2662,6 +2818,7 @@ private struct ReportGameSheet: View {
     private func submit() async {
         guard !isSubmitting, !submitted else { return }
         isSubmitting = true
+        errorMessage = nil
         defer { isSubmitting = false }
         let trimmedDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
         let reason = trimmedDetails.isEmpty ? selectedReason : "\(selectedReason): \(trimmedDetails)"
@@ -2676,7 +2833,9 @@ private struct ReportGameSheet: View {
             submitted = true
             errorMessage = nil
         } catch {
-            errorMessage = "Couldn't submit report: \(error.localizedDescription)"
+            // A lost moderation POST response is not confirmed rejection.
+            // Preserve the user's original reason and detailed report.
+            errorMessage = ReportGameErrorPresentation.message(for: error)
         }
     }
 }
