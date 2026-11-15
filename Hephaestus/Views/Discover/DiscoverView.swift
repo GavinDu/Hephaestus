@@ -2454,6 +2454,14 @@ private struct CreatorDiscoverySheet: View {
     }
 }
 
+/// Keep truthful creator statistics legible in compact windows and at
+/// accessibility text sizes. This is a sizing policy, not a data source.
+enum CreatorMetricLayout {
+    static func stacksMetrics(isRegularWidth: Bool, typeSize: DynamicTypeSize) -> Bool {
+        typeSize.isAccessibilitySize || (!isRegularWidth && typeSize >= .xxxLarge)
+    }
+}
+
 private struct CreatorProfileSheet: View {
     let creatorID: String
     let onRequestSignIn: (() -> Void)?
@@ -2470,6 +2478,19 @@ private struct CreatorProfileSheet: View {
     @State private var errorMessage: String?
     @State private var isLoading = true
     @State private var playerRequest: PixiPlayerRequest?
+
+    private var stacksCreatorMetrics: Bool {
+        CreatorMetricLayout.stacksMetrics(
+            isRegularWidth: horizontalSizeClass == .regular,
+            typeSize: dynamicTypeSize
+        )
+    }
+
+    private var creatorMetricsLayout: AnyLayout {
+        stacksCreatorMetrics
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+    }
 
     var body: some View {
         NavigationStack {
@@ -2503,11 +2524,12 @@ private struct CreatorProfileSheet: View {
                                     }
                                     Spacer(minLength: 0)
                                 }
-                                HStack(spacing: 10) {
+                                creatorMetricsLayout {
                                     creatorMetric("Games", value: profile.post_count)
                                     creatorMetric("Followers", value: profile.follower_count)
                                     creatorMetric("Following", value: profile.following_count)
                                 }
+                                .accessibilityIdentifier("creator.profile.metrics")
                                 if BackendConfig.currentUserID.isEmpty {
                                     VStack(alignment: .leading, spacing: 10) {
                                         Text("Sign in from Profile to follow this creator.")
@@ -2595,16 +2617,36 @@ private struct CreatorProfileSheet: View {
     }
 
     private func creatorMetric(_ label: String, value: Int) -> some View {
-        VStack(spacing: 5) {
-            Text(value.formatted())
-                .font(.headline.weight(.bold))
-                .monospacedDigit()
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(ArcadePulseTheme.textSecondary)
+        // All labels and numbers come from a real creator response; never
+        // truncate an accessible number or shrink it to fit three columns.
+        let readableCount = value.formatted()
+        return Group {
+            if stacksCreatorMetrics {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(label)
+                        .font(.subheadline)
+                        .foregroundStyle(ArcadePulseTheme.textSecondary)
+                    Spacer(minLength: 8)
+                    Text(readableCount)
+                        .font(.headline.weight(.bold))
+                        .monospacedDigit()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 6)
+            } else {
+                VStack(spacing: 5) {
+                    Text(readableCount)
+                        .font(.headline.weight(.bold))
+                        .monospacedDigit()
+                    Text(label)
+                        .font(.caption)
+                        .foregroundStyle(ArcadePulseTheme.textSecondary)
+                }
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 52)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label): \(readableCount)")
     }
 
     private func creatorGameRow(_ game: FeedGame) -> some View {
