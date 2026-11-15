@@ -1036,7 +1036,7 @@ struct DiscoverView: View {
         let watchdog = Task { @MainActor in
             do {
                 try await Task.sleep(for:
-                    testingEarlySlowHint ? .seconds(35) :
+                    testingEarlySlowHint ? .seconds(70) :
                     (testingStalledTransport ? .seconds(3) : .seconds(45)))
             } catch { return }
             guard isLoading, games.isEmpty,
