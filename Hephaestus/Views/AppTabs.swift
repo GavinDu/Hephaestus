@@ -14,6 +14,8 @@ import UIKit
 /// Recently played games.
 struct LibraryView: View {
     let onOpenProfile: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var recent: [RecentGame] = []
     @State private var recentScopeKey: String?
     @State private var saved: [FeedGame] = []
@@ -69,6 +71,38 @@ struct LibraryView: View {
             signedIn: !BackendConfig.currentUserID.isEmpty,
             loading: isLoadingSaved
         )
+    }
+
+    /// A stacked header leaves genuine account state readable at the largest
+    /// text sizes instead of letting two competing columns truncate.
+    private var savedGamesSectionHeader: some View {
+        Group {
+            if LibrarySavedCountLayout.stacks(
+                for: dynamicTypeSize, compact: horizontalSizeClass == .compact
+            ) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Saved games")
+                    savedCountStatus
+                }
+            } else {
+                HStack {
+                    Text("Saved games")
+                    Spacer()
+                    savedCountStatus
+                }
+            }
+        }
+    }
+
+    private var savedCountStatus: some View {
+        Text(savedCountCaption.visibleText)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.primary)
+            .multilineTextAlignment(.trailing)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("library.savedCount.status")
+            .accessibilityLabel(savedCountCaption.accessibilityLabel)
     }
 
     var body: some View {
@@ -189,20 +223,7 @@ struct LibraryView: View {
                         }
                     }
                 } header: {
-                    HStack {
-                        Text("Saved games")
-                        Spacer()
-                        // Avoid a meaningless tiny dash. Never imply zero or a
-                        // saved collection before the current owner is verified.
-                        Text(savedCountCaption.visibleText)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .multilineTextAlignment(.trailing)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("library.savedCount.status")
-                            .accessibilityLabel(savedCountCaption.accessibilityLabel)
-                    }
+                    savedGamesSectionHeader
                 }
 
                 Section {
@@ -402,6 +423,13 @@ struct LibraryView: View {
             ) else { return }
             errorMessage = "Couldn't remove saved game. Please try again."
         }
+    }
+}
+
+/// Responsive Library header: don't force unrelated labels into a cramped row.
+enum LibrarySavedCountLayout {
+    static func stacks(for size: DynamicTypeSize, compact: Bool) -> Bool {
+        size.isAccessibilitySize || (compact && (size == .xxLarge || size == .xxxLarge))
     }
 }
 
