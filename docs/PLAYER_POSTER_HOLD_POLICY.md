@@ -16,3 +16,9 @@ A single attempt pins published game ID, exact HTTPS player URL, a 32-lowercase-
 - **CI gate:** all exact-head native Xcode, iPhone player smoke, iPad feed/presentation and backend contract jobs must pass before merging/closing this small slice, even if an unrelated live fixture or runner capacity blocks it. No artificial feed game or bypass.
 
 Rollback: remove one new source file, one new test file, this document. Production behavior, score semantics and existing WebKit lifecycles remain unchanged.
+
+## 2026-11-15 reviewer consolidation: exact game URL and one-shot reveal
+
+Concurrent atomic issue #407 / draft PR #410 overlapped this same pure policy. A senior-engine-architect source comparison found #406's existing attempt contract stronger (exact HTTPS URL, nonzero current lease, credential fingerprint), so the reusable one-shot `consumeReveal` was ported into this policy instead of merging two independent poster reducers. `consumeReveal` requires the exact current attempt and lease, changes `sceneSubmitted → revealed` only once and prevents a second crossfade; subsequent WebContent failure may still go to recovery. The parent UI still requires #353 integration and real simulator evidence.
+
+`Attempt.isValid` also now binds the declared game ID to exactly one `game` query item on the canonical `/player` URL, rejects missing/duplicate/foreign game IDs, invalid paths and URL fragments, and preserves HTTPS/nonce/auth/lease checks. Swift tests specifically cover game ID mismatch and duplicate query aliases, strict one-shot consumption, stale lease and post-reveal failure. This is a pure policy, not a page trust proof; live wrapper code MUST derive native trust from WebKit and current owner. Full exact-head native GitHub Actions required; #407/PR #410 are superseded as duplicate work, not considered completed release evidence.
