@@ -1,5 +1,21 @@
 # Preview-to-game handoff design (Hephaestus #58)
 
+> **Historical #58 handoff design — not current runtime-readiness truth.**
+> The shipping `PixiPlayer.swift` now uses a narrow, origin/main-frame/
+> schema/session/lease-validated `WKScriptMessageHandler` with versioned
+> document nonces. A trusted `first_scene_render_submit` is **render
+> submission**, not OS GPU-composited first visible gameplay. Navigation
+> finish, scene submission, first actual visible frame and first accepted
+> input are separate milestones. Any older statements below about a
+> bridgeless host or navigation-finish readiness describe this October 2026
+> proposal rather than deployed behavior. Refer to
+> [Runtime Epic #202](https://github.com/GavinDu/Hephaestus/issues/202),
+> [physical compositor evidence #276](https://github.com/GavinDu/Hephaestus/issues/276)
+> and [PixiPlayer.swift](../Hephaestus/Player/PixiPlayer.swift).
+> Review the narrow native message channel under
+> [Apple App Review 4.7.2](https://developer.apple.com/app-store/review/guidelines/);
+> neither Apple approval nor physical hardware evidence is claimed.
+
 Design proposal for making Play feel like the clip turning into the
 game, confirmed by Gavin 2026-10-26 and implemented on PR #86
 (see "Implementation" below). The remaining follow-ups are a
@@ -26,7 +42,8 @@ feed card:
 - The preview stops when the player opens (`FeedPreviewPlayback`
   stops on player presentation), so a clip never plays under a game.
 - The sheet already drives its loading indicator from
-  `estimatedProgress` and its ready state from navigation finish.
+  `estimatedProgress`; the original design treated navigation finish as
+  its **shell** ready state, not runtime first-frame or first-input evidence.
 
 What #58 still owes is the *feel* of the handoff, not the pool.
 
@@ -45,9 +62,9 @@ What #58 still owes is the *feel* of the handoff, not the pool.
 
 ## The readiness problem (the one design decision that matters)
 
-The shell is bridgeless: it can observe navigation finish and
-estimated progress, but it **cannot** observe the runtime's first
-frame. "The runtime reports ready" therefore has two possible
+In this historical proposal, the shell was treated as bridgeless: it
+could observe navigation finish and estimated progress, but could **not**
+observe the runtime's first frame. "The runtime reports ready" therefore has two possible
 meanings, and the design must pick one:
 
 1. **Navigation finished (implementable now, no runtime change).**
