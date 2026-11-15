@@ -273,6 +273,90 @@ struct PlayerFirstSceneRenderSubmissionGate {
     }
 }
 
+/// At most one candidate scene-submit milestone per current speculative
+/// WK document. Its identity is immutable; neither URL equality alone nor a
+/// JS session ID alone is sufficient to transfer ownership after a retry.
+/// This *pure ledger* has no WebKit listener yet. #351 connects the collector
+/// and #352 consumes on the real attached Coordinator.
+struct PlayerPrewarmSceneMilestoneLedger {
+    struct Identity: Equatable {
+        let gameID: String
+        let playerURL: URL
+        let documentNonce: String
+        let credentialFingerprint: String
+        let runtimeSessionID: String
+
+        var isValid: Bool {
+            !gameID.isEmpty &&
+            playerURL.scheme == "https" &&
+            playerURL.host != nil &&
+            playerURL.user == nil && playerURL.password == nil &&
+            playerURL.fragment == nil &&
+            URLComponents(url: playerURL, resolvingAgainstBaseURL: false)?
+                .queryItems?.filter({ $0.name == "game" }).count == 1 &&
+            URLComponents(url: playerURL, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "game" })?.value == gameID &&
+            PlayerNativeDocumentEpochGate.isWellFormed(documentNonce) &&
+            !credentialFingerprint.isEmpty &&
+            !runtimeSessionID.isEmpty &&
+            runtimeSessionID.utf8.count <= 128
+        }
+    }
+
+    struct Submission: Equatable {
+        let identity: Identity
+        let sequence: Int
+        let milliseconds: Int
+    }
+
+    private(set) var candidate: Submission?
+    private(set) var hasTransferred = false
+
+    mutating func record(
+        identity: Identity,
+        expected: Identity,
+        sequence: Int,
+        milliseconds: Int,
+        isMainFrame: Bool,
+        isSpeculative: Bool,
+        navigationStarted: Bool
+    ) -> Bool {
+        guard candidate == nil, !hasTransferred,
+              identity.isValid, expected.isValid, identity == expected,
+              isMainFrame, isSpeculative, navigationStarted,
+              (0...100_000).contains(sequence),
+              (0...3_600_000).contains(milliseconds) else { return false }
+        candidate = Submission(
+            identity: identity, sequence: sequence, milliseconds: milliseconds
+        )
+        return true
+    }
+
+    /// A retired SwiftUI Coordinator must not steal a successor's pending
+    /// milestone. Mismatched identities do not consume a current candidate;
+    /// navigation/session invalidation separately clears all stale state.
+    mutating func consume(
+        expected: Identity,
+        offeredLease: UInt64,
+        currentLease: UInt64,
+        isCurrentPooledView: Bool,
+        isAttached: Bool
+    ) -> Submission? {
+        guard !hasTransferred, let candidate,
+              candidate.identity == expected, expected.isValid,
+              offeredLease != 0, offeredLease == currentLease,
+              isCurrentPooledView, isAttached else { return nil }
+        hasTransferred = true
+        self.candidate = nil
+        return candidate
+    }
+
+    mutating func invalidate() {
+        candidate = nil
+        hasTransferred = false
+    }
+}
+
 /// One live, cryptographically unpredictable challenge per attempted main-frame
 /// WK document. The pool (not a JS session ID or SwiftUI Coordinator) owns it.
 /// No historical-ID list is needed: late messages must match this exact nonce.
@@ -902,6 +986,7 @@ enum PlayerWebViewPool {
     private static let prewarmMetricName = "hephaestusRunResult"
     private static let prewarmMetricHandler = PrewarmMetricListener()
     private static var prewarmSceneGate = PlayerPrewarmV2SceneMetricGate()
+    private static var sceneMilestoneLedger = PlayerPrewarmSceneMilestoneLedger()
 
     static func playerURL(gameID: String, quality: String? = nil) -> URL? {
         // Do not construct a player URL for an empty identifier, and never
@@ -928,6 +1013,7 @@ enum PlayerWebViewPool {
     static func prepareDocumentNavigation(_ webView: WKWebView) {
         guard pooledView === webView else { return }
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         let nonce = documentEpochGate.prepareNavigation()
         // Only installed native code can issue a fresh current-document
         // challenge. Page code cannot derive future navigation epochs.
@@ -949,6 +1035,7 @@ enum PlayerWebViewPool {
     static func didStartDocumentNavigation(_ webView: WKWebView) {
         guard pooledView === webView else { return }
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         _ = documentEpochGate.didStartNavigation()
     }
 
@@ -965,6 +1052,7 @@ enum PlayerWebViewPool {
         guard pooledView === webView else { return }
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
     }
 
     static func prewarm(gameID: String) {
@@ -1071,6 +1159,7 @@ enum PlayerWebViewPool {
         self.currentURL = nil
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
     }
 
     static func ownsActiveAttachment(_ webView: WKWebView, lease: UInt64) -> Bool {
@@ -1092,6 +1181,7 @@ enum PlayerWebViewPool {
         loadedURL = nil
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         webView.navigationDelegate = warmupDelegate
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
@@ -1131,6 +1221,7 @@ enum PlayerWebViewPool {
         isAttached = false
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         sessionFingerprint = credentialFingerprint()
         // Never let a newly created player WebView share persistent data or
         // a WebContent process pool with the retired Keychain identity.
@@ -1154,6 +1245,7 @@ enum PlayerWebViewPool {
         loadedURL = nil
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         stale?.stopLoading()
         stale?.navigationDelegate = nil
         stale?.loadHTMLString("", baseURL: nil)
