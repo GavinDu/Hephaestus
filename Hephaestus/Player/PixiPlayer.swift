@@ -270,7 +270,12 @@ enum PlayerPrewarmMessageOwnershipPolicy {
         credentialScopeCurrent: Bool
     ) -> Recipient {
         guard credentialScopeCurrent else { return .drop }
-        if !isAttached { return .speculative }
+        if !isAttached {
+            // A detached view must not retain a successor's handler/lease.
+            return transferringLease == nil && !hasAttachedReceiver
+                ? .speculative : .drop
+        }
+        guard currentLease != 0 else { return .drop }
         if let transferringLease {
             return transferringLease != 0 && transferringLease == currentLease
                 ? .speculative : .drop
@@ -1148,7 +1153,10 @@ enum PlayerWebViewPool {
         _ receiver: WKScriptMessageHandler, webView: WKWebView,
         url: URL, lease: UInt64, gameID: String
     ) -> PlayerPrewarmSceneMilestoneLedger.Submission? {
-        guard ownsAttachedNavigation(webView, url: url, lease: lease) else { return nil }
+        // A native auth mutation can race take() before its notification.
+        ensureCurrentCredentialScope()
+        guard ownsAttachedNavigation(webView, url: url, lease: lease),
+              lease != 0 else { return nil }
         attachedMessageReceiver = receiver
         defer { transferringLease = nil }
         guard transferringLease == lease,
