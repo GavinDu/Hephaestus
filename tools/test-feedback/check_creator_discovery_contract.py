@@ -17,9 +17,10 @@ PUBLIC_ENDPOINT = "https://html-5-game-generator.replit.app/v1/creators?limit=20
 class ContractError(Exception):
     """A fixed, non-sensitive error class, never a server-provided message."""
 
-    def __init__(self, category: str):
+    def __init__(self, category: str, http_status: int | None = None):
         super().__init__(category)
         self.category = category
+        self.http_status = http_status
 
 
 class RejectRedirects(request.HTTPRedirectHandler):
@@ -29,11 +30,15 @@ class RejectRedirects(request.HTTPRedirectHandler):
 
 def validate_response(status: int, content_type: str, body: bytes) -> int:
     """Return array cardinality only; never expose entries or creator IDs."""
+    if 300 <= status < 400:
+        raise ContractError("unexpected_redirect", status)
     if status != 200:
-        raise ContractError("unexpected_http_status")
+        raise ContractError("unexpected_http_status", status)
     mime = content_type.split(";", 1)[0].strip().lower()
+    if mime == "text/html":
+        raise ContractError("html_instead_of_json", status)
     if mime != "application/json" and not (mime.startswith("application/") and mime.endswith("+json")):
-        raise ContractError("non_json_content_type")
+        raise ContractError("non_json_content_type", status)
     if len(body) > MAX_BODY_BYTES:
         raise ContractError("oversized_response")
     try:
@@ -74,8 +79,10 @@ def probe() -> tuple[int, int]:
             mime = response.headers.get("Content-Type", "")
             body = response.read(MAX_BODY_BYTES + 1)
     except error.HTTPError as failure:
-        # No raw HTTP body, headers or diagnostic string is logged.
-        raise ContractError("unexpected_http_status") from None
+        # No response body, headers or raw exception text is logged.
+        status = int(failure.code)
+        category = "unexpected_redirect" if 300 <= status < 400 else "unexpected_http_status"
+        raise ContractError(category, status) from None
     except (error.URLError, TimeoutError, OSError):
         raise ContractError("transport_unavailable") from None
     return status, validate_response(status, mime, body)
@@ -85,7 +92,9 @@ def main() -> int:
     try:
         status, count = probe()
     except ContractError as failure:
-        print(f"creator_schema_contract result=FAIL category={failure.category}")
+        # HTTP status is public, low-cardinality metadata; never log response text.
+        suffix = f" http_status={failure.http_status}" if failure.http_status is not None else ""
+        print(f"creator_schema_contract result=FAIL category={failure.category}{suffix}")
         return 1
     print(f"creator_schema_contract result=PASS http_status={status} creators_count={count}")
     return 0
