@@ -483,14 +483,35 @@ final class PlayerSmokeTests: XCTestCase {
                       "Library must be the real saved/recent native destination.")
         XCTAssertTrue(app.frame.intersects(destination.frame),
                       "The Library destination must be visible, not behind old feed.")
-        let signIn = app.buttons["library.signIn"].firstMatch
-        if signIn.exists {
-            XCTAssertTrue(signIn.isHittable,
-                          "The actual signed-out Library must have a working Profile route.")
-            XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
-        }
         XCTAssertFalse(library.isHittable,
                        "The old loading stage must no longer intercept taps.")
+        // A real Library is a scrollable native List. In compact iPhone
+        // landscape the signed-out Profile CTA may be below the visible
+        // Library header; element existence alone does not make it hittable.
+        // Scroll the real list, not a fabricated sign-in surface, then
+        // exercise the genuine host-owned Profile route.
+        let signIn = app.buttons["library.signIn"].firstMatch
+        if signIn.exists {
+            let libraryList = app.tables.firstMatch
+            for _ in 0..<5 where !signIn.isHittable {
+                XCTAssertTrue(libraryList.exists,
+                              "Signed-out Library must provide a scrollable real list.")
+                libraryList.swipeUp()
+            }
+            XCTAssertTrue(signIn.isHittable,
+                          "Signed-out Library must expose a reachable Profile sign-in CTA.")
+            XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+            signIn.tap()
+            let appleSignIn = app.buttons["Sign in with Apple"].firstMatch
+            XCTAssertTrue(appleSignIn.waitForExistence(timeout: 10) &&
+                          appleSignIn.isHittable,
+                          "Library guest CTA must route to genuine Profile, not a covered sheet.")
+            let profile = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            profile.name = isPad ? "arcade-pulse-early-ipad-profile-arrived" :
+                                   "arcade-pulse-early-iphone-profile-arrived"
+            profile.lifetime = .keepAlways
+            add(profile)
+        }
         let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         arrived.name = isPad ? "arcade-pulse-early-ipad-library-arrived" :
                                "arcade-pulse-early-iphone-library-arrived"
@@ -501,7 +522,7 @@ final class PlayerSmokeTests: XCTestCase {
 
     /// Stall the actual public-feed transport only; never inject or approve
     /// a fake game. The production watchdog is 45s; this opt-in native test
-    /// uses 3s and must expose the same truthful Retry/Library recovery.
+    /// uses 10s per retry to allow UI inspection without a second watchdog race.
     @MainActor
     func testArcadePulseStalledTransportReachesHonestRecovery() throws {
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
