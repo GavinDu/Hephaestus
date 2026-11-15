@@ -2244,28 +2244,18 @@ private struct CreatorDiscoverySheet: View {
                             Button {
                                 profileRequest = CreatorProfileRequest(id: creator.creator_id)
                             } label: {
-                                VStack(alignment: .leading, spacing: 7) {
-                                    HStack(alignment: .firstTextBaseline) {
-                                        Text(creator.creator_id)
-                                            .font(.headline)
-                                            .foregroundStyle(.primary)
-                                        Spacer()
-                                        Text("\(creator.post_count) games")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    if !creator.topics.isEmpty {
-                                        Text(creator.topics.prefix(5).map { "#\($0)" }.joined(separator: "  "))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                }
-                                .padding(.vertical, 3)
+                                CreatorDirectoryRow(
+                                    creatorID: creator.creator_id,
+                                    publicGameCount: creator.post_count,
+                                    topics: creator.topics
+                                )
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("View creator \(creator.creator_id), \(creator.post_count) public games")
+                            .accessibilityLabel(
+                                "View creator \(creator.creator_id), " +
+                                CreatorDirectoryRowLayout.publicGameCount(creator.post_count)
+                            )
                         }
                     }
                     if nextCursor != nil {
