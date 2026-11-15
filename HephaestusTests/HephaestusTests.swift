@@ -702,9 +702,8 @@ struct HephaestusTests {
         )
         #expect(!PlayerLoadRetryPolicy.shouldOfferManualRetry(category: category))
         #expect(!PlayerLoadRetryPolicy.shouldRetryOnForeground(category: category))
-        // A later WebContent termination must not resurrect a permanent failure
-        // as an automatically reloaded or manually recoverable document.
-        #expect(!PlayerLoadRetryPolicy.shouldOfferManualRetry(category: category))
+        // The same pure policy guards both the visible Retry button and
+        // the WebContent-crash path, which must preserve this permanent error.
         #expect(!PlayerLoadFailure.userMessage(
             for: PlayerLoadFailure.httpError(statusCode: status)
         ).isEmpty)
