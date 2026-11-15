@@ -86,8 +86,15 @@ def package_invalid_reason(payload, expected_game_id):
         return "not_object"
     if payload.get("gameId") != expected_game_id:
         return "game_id_mismatch"
+    # Match the current Go GamePackage v2.0 wire contract, not any
+    # nonempty legacy string. A versioned incompatible package is not a
+    # playable smoke prerequisite just because it returned HTTP 200.
+    format_version = payload.get("packageFormatVersion")
+    if not isinstance(format_version, str) or not format_version:
+        return "missing_package_format"
+    if format_version != "2.0":
+        return "unsupported_package_format"
     for key, category in (
-        ("packageFormatVersion", "missing_package_format"),
         ("minRuntimeVersion", "missing_min_runtime"),
         ("irVersion", "missing_ir_version"),
     ):
@@ -100,6 +107,16 @@ def package_invalid_reason(payload, expected_game_id):
         return "missing_ir_ir_version"
     if ir["irVersion"] != payload["irVersion"]:
         return "ir_version_mismatch"
+    # The full digest is required in the canonical v2.0 response. Only
+    # test safe shape/legacy-prefix consistency here: Python JSON encoding
+    # is not the canonical Go Game IR marshaler and cannot attest the hash.
+    full_sha = payload.get("irSha256")
+    if not isinstance(full_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", full_sha):
+        return "missing_full_ir_sha"
+    if payload.get("irHash") != full_sha[:12]:
+        return "short_ir_hash_mismatch"
+    if not isinstance(payload.get("assets"), list):
+        return "missing_assets_array"
     return None
 
 
