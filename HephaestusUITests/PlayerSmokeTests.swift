@@ -450,18 +450,28 @@ final class PlayerSmokeTests: XCTestCase {
                               "arcade-pulse-stalled-feed-iphone-portrait"
         timeout.lifetime = .keepAlways
         add(timeout)
-        // Retry starts a NEW genuine (in this test: deliberately stalled)
-        // transport. It must not be canceled by the old watchdog generation.
+        // Retry creates a NEW genuine coordinator-owned transport. Loading
+        // visibility is transient (the 3s watchdog can elapse between UI
+        // queries), so use the stable real-attempt value after recovery.
+        let priorValue = try XCTUnwrap(retry.value as? String)
+        XCTAssertTrue(priorValue.hasPrefix("Attempt "),
+                      "Retry must expose a screen-reader-readable genuine request count.")
+        let oldCount = try XCTUnwrap(UInt64(priorValue.dropFirst("Attempt ".count)))
         retry.tap()
-        // The loader HStack is intentionally one accessibility element
-        // labelled "Loading games", not a separately exposed static text.
-        let loading = app.descendants(matching: .any)["Loading games"].firstMatch
-        XCTAssertTrue(loading.waitForExistence(timeout: 6),
-                      "Retry must leave the prior error and start a new actual transport attempt.")
-        XCTAssertFalse(title.exists, "The old recovery must clear during a new request.")
-        XCTAssertTrue(title.waitForExistence(timeout: 20),
-                      "A new attempt must independently reach its own recovery without mock success.")
+        let nextValue = "Attempt \(oldCount + 1)"
+        let nextRecovery = expectation(
+            for: NSPredicate(format: "exists == true AND value == %@", nextValue),
+            evaluatedWith: retry
+        )
+        wait(for: [nextRecovery], timeout: 20)
+        XCTAssertTrue(title.exists,
+                      "A new stalled attempt must independently reach its own honest recovery.")
+        XCTAssertTrue(library.exists && library.isHittable)
         XCTAssertFalse(app.buttons["game.play"].firstMatch.exists)
+        let retried = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        retried.name = "arcade-pulse-stalled-feed-retry-attempt-evidence"
+        retried.lifetime = .keepAlways
+        add(retried)
         XCUIDevice.shared.orientation = .portrait
     }
 
