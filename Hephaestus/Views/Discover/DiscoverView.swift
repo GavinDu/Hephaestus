@@ -69,6 +69,25 @@ private struct FeedSearchVisibilityModifier: ViewModifier {
     }
 }
 
+/// A guest request from nested Creator details can change the app's Profile
+/// destination ONLY after the inner sheet and outer directory both dismiss.
+/// Normal Done and repeated callbacks are never sign-in navigation.
+struct CreatorNestedGuestSignInGate {
+    private(set) var isAwaitingDirectoryDismiss = false
+
+    mutating func requestAfterInnerCreatorDismiss() -> Bool {
+        guard !isAwaitingDirectoryDismiss else { return false }
+        isAwaitingDirectoryDismiss = true
+        return true
+    }
+
+    mutating func consumeAfterDirectoryDismiss() -> Bool {
+        guard isAwaitingDirectoryDismiss else { return false }
+        isAwaitingDirectoryDismiss = false
+        return true
+    }
+}
+
 /// Backend-backed social feeds use the verified bearer session when present.
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
@@ -143,6 +162,7 @@ struct DiscoverView: View {
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
     @State private var openProfileAfterCreatorDismiss = false
+    @State private var nestedGuestSignInGate = CreatorNestedGuestSignInGate()
     @State private var settledForYouGameID: String?
     @State private var resultPresentation: PlayerResultPresentation?
 
@@ -718,8 +738,21 @@ struct DiscoverView: View {
                         profileRequest = nil
                     })
             }
-            .sheet(isPresented: $isCreatorDiscoveryPresented) {
-                CreatorDiscoverySheet()
+            .sheet(isPresented: $isCreatorDiscoveryPresented, onDismiss: {
+                // The host must not switch tabs under either live SwiftUI
+                // sheet. Only an explicit one-shot guest request can navigate.
+                if nestedGuestSignInGate.consumeAfterDirectoryDismiss() {
+                    onOpenProfile?()
+                }
+            }) {
+                CreatorDiscoverySheet(
+                    onRequestSignIn: onOpenProfile == nil ? nil : {
+                        // Called only when the inner creator's onDismiss fires.
+                        if nestedGuestSignInGate.requestAfterInnerCreatorDismiss() {
+                            isCreatorDiscoveryPresented = false
+                        }
+                    }
+                )
             }
             .sheet(isPresented: $isFeedPreferencesPresented) {
                 FeedPreferencesSheet(
@@ -2279,12 +2312,14 @@ enum CreatorDiscoveryErrorPresentation {
 }
 
 private struct CreatorDiscoverySheet: View {
+    let onRequestSignIn: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
     @State private var topicText = ""
     @State private var creators: [CreatorDiscoveryEntry] = []
     @State private var nextCursor: String?
     @State private var profileRequest: CreatorProfileRequest?
+    @State private var openProfileAfterNestedCreatorDismiss = false
     @State private var errorMessage: String?
     @State private var isLoading = false
     @State private var isLoadingMore = false
@@ -2403,8 +2438,21 @@ private struct CreatorDiscoverySheet: View {
             }
             .refreshable { await load(reset: true) }
             .task { await load(reset: true) }
-            .sheet(item: $profileRequest) { request in
-                CreatorProfileSheet(creatorID: request.id)
+            .sheet(item: $profileRequest, onDismiss: {
+                // The outer directory must dismiss before the app-root
+                // Profile navigation executes. Never use a timed delay.
+                if openProfileAfterNestedCreatorDismiss {
+                    openProfileAfterNestedCreatorDismiss = false
+                    onRequestSignIn?()
+                }
+            }) { request in
+                CreatorProfileSheet(
+                    creatorID: request.id,
+                    onRequestSignIn: onRequestSignIn == nil ? nil : {
+                        openProfileAfterNestedCreatorDismiss = true
+                        profileRequest = nil
+                    }
+                )
             }
         }
     }
