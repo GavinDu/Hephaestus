@@ -177,6 +177,58 @@ enum PlayerNativeMetricPayload {
     }
 }
 
+/// Strict, pure prewarm first-scene callback admission for a *future*
+/// pool-owned WKScriptMessageHandler installed before speculative navigation.
+/// This helper is intentionally not a handler or a score/result bridge.
+/// Trust flags MUST be supplied from native WebKit frame/origin/navigation
+/// provenance rather than from any JavaScript message dictionary.
+struct PlayerPrewarmV2SceneMetricGate {
+    private(set) var firstMilliseconds: Int?
+    private(set) var firstSequence: Int?
+    private(set) var firstSessionID: String?
+
+    mutating func record(
+        _ body: [String: Any],
+        expectedGameID: String,
+        currentDocumentNonce: String?,
+        isTrustedMainFrame: Bool,
+        isSameOrigin: Bool,
+        navigationStarted: Bool,
+        credentialScopeCurrent: Bool
+    ) -> Bool {
+        // Reject *before* recording a sequence. An invalid high-sequence
+        // message must not consume the single valid scene-ready milestone.
+        guard firstMilliseconds == nil,
+              isTrustedMainFrame, isSameOrigin,
+              navigationStarted, credentialScopeCurrent,
+              !expectedGameID.isEmpty, expectedGameID.utf8.count <= 128,
+              let currentDocumentNonce,
+              PlayerNativeDocumentEpochGate.isWellFormed(currentDocumentNonce),
+              PlayerNativeMetricPayload.strictInt(body["schema"]) == 2,
+              body["documentNonce"] as? String == currentDocumentNonce,
+              body["gameId"] as? String == expectedGameID,
+              let session = body["sessionId"] as? String,
+              !session.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              session.utf8.count <= 128,
+              let sequence = PlayerNativeMetricPayload.strictInt(body["sequence"]),
+              (0...100_000).contains(sequence),
+              let payload = PlayerNativeMetricPayload.parse(body)
+        else { return false }
+        guard case let .firstSceneRenderSubmit(milliseconds) = payload
+        else { return false }
+        firstMilliseconds = milliseconds
+        firstSequence = sequence
+        firstSessionID = session
+        return true
+    }
+
+    mutating func reset() {
+        firstMilliseconds = nil
+        firstSequence = nil
+        firstSessionID = nil
+    }
+}
+
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
