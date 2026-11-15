@@ -990,7 +990,8 @@ final class PlayerSmokeTests: XCTestCase {
         app.launchArguments += [
             "--ui-test-sidebar-open", "--ui-test-library-entry",
             "-UIPreferredContentSizeCategoryName",
-            "UICTContentSizeCategoryAccessibilityM"
+            // Accessibility5 (not Accessibility1): verify the maximum native text size.
+            "UICTContentSizeCategoryAccessibilityXXXL"
         ]
         app.launch()
         let library = app.buttons["nav.sidebar.library"].firstMatch
@@ -1007,6 +1008,8 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertTrue(destination.label.contains(name),
                           "Sidebar VoiceOver name must preserve the full destination.")
             XCTAssertGreaterThanOrEqual(destination.frame.height, 44)
+            XCTAssertGreaterThanOrEqual(destination.frame.width, 44,
+                                       "Every sidebar control must retain a reachable 44pt width.")
         }
         let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         before.name = "arcade-pulse-ipad-sidebar-xxl-landscape-before-profile"
@@ -1019,15 +1022,17 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(profile.frame.height, 44)
         profile.tap()
         let signIn = app.buttons["Sign in with Apple"].firstMatch
-        XCTAssertTrue(signIn.waitForExistence(timeout: 15),
-                      "Sidebar Profile must open actual Apple authentication screen.")
+        XCTAssertTrue(signIn.waitForExistence(timeout: 15) && signIn.isHittable,
+                      "Sidebar Profile must expose a hittable real Apple authentication action.")
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
         let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         after.name = "arcade-pulse-ipad-sidebar-xxl-landscape-after-profile"
         after.lifetime = .keepAlways
         add(after)
         XCUIDevice.shared.orientation = .portrait
-        XCTAssertTrue(signIn.waitForExistence(timeout: 15),
-                      "Rotation must retain real Profile destination.")
+        XCTAssertTrue(signIn.waitForExistence(timeout: 15) && signIn.isHittable,
+                      "Rotation must retain a hittable real Profile sign-in action.")
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
         let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         portrait.name = "arcade-pulse-ipad-sidebar-xxl-portrait-profile"
         portrait.lifetime = .keepAlways
