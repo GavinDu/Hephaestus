@@ -14,6 +14,8 @@ To avoid WebKit callback loss on handler replacement, this change keeps **one WK
 
 The native Coordinator binds the transferred session and schema 2 and records **scene submission only**, not a trusted score, playable input, verified run, or GPU-composited frame.
 
+**Security hardening review (2026-11-15):** the permanent handler checks the actual Keychain fingerprint at every WebKit callback **before** routing, not only when `take` begins; the Coordinator installation also synchronously checks the current auth scope. A mid-flight login/logout can invalidate the old pooled view and weak receiver before its notification is delivered. A pure routing policy rejects false credential epoch in all three phases, zero current attachment lease and contradictory detached state retaining a Coordinator/transfer lease. Swift negative tests cover each case; no raw credential is logged. A newly invalidated view is never entitled to deliver its queued script message.
+
 ## Senior game-engine architect skeptical review and limitations
 
 The pure unit tests cover speculative→transferring→attached routing, stale lease rejection, no-receiver drop, duplicate scene, exactly-once consume and invalidation; existing #357 tests cover 160 nonce changes, malformed URL/gameID/credential/session/quality, invalid sequence. These tests do not prove WebKit message delivery order on an actual iPhone/iPad; the required dedicated simulator callback-before/after-attach/redirect/termination test and real device latency evidence are still acceptance blockers. Physical iPhone/iPad presentation + 50-cycle thermal checks are separate issues #276/#279.
