@@ -248,11 +248,19 @@ enum PlayerPrewarmMessageOriginPolicy {
               let expectedURL, actualURL == expectedURL,
               let scheme = backendURL.scheme, let host = backendURL.host
         else { return false }
-        let expectedPort = backendURL.port ?? (scheme == "https" ? 443 : 80)
+        // WebKit normalizes omitted/default ports to 0 in
+        // WKSecurityOrigin.port. Only normalize 0 to the scheme's known
+        // default: an explicit nondefault backend port must still match
+        // exactly, never admit a foreign origin as a default-port alias.
+        guard scheme == "https" || scheme == "http" else { return false }
+        let defaultPort = scheme == "https" ? 443 : 80
+        let expectedPort = backendURL.port ?? defaultPort
+        let normalizedOriginPort = originPort == 0 ? defaultPort : originPort
         return originScheme == scheme && originHost == host &&
-            originPort == expectedPort
+            normalizedOriginPort == expectedPort
     }
 }
+
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
