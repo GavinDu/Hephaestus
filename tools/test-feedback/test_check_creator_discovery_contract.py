@@ -40,7 +40,8 @@ class CreatorDiscoveryContractTests(unittest.TestCase):
     def test_html_http_200_is_not_empty_creator_directory(self):
         with self.assertRaises(contract.ContractError) as caught:
             contract.validate_response(200, "text/html", b"<html>app shell</html>")
-        self.assertEqual(caught.exception.category, "non_json_content_type")
+        self.assertEqual(caught.exception.category, "html_instead_of_json")
+        self.failure(self.valid, "non_json_content_type", content_type="text/plain")
 
     def test_malformed_json_or_non_object_root_fails(self):
         with self.assertRaises(contract.ContractError) as caught:
@@ -52,7 +53,7 @@ class CreatorDiscoveryContractTests(unittest.TestCase):
 
     def test_reject_http_error_or_redirect_even_if_body_is_valid(self):
         self.failure(self.valid, "unexpected_http_status", status=404)
-        self.failure(self.valid, "unexpected_http_status", status=302)
+        self.failure(self.valid, "unexpected_redirect", status=302)
         self.assertIsNone(contract.RejectRedirects().redirect_request(
             None, None, 302, "redirect", {}, "https://other.invalid"))
 
@@ -96,6 +97,12 @@ class CreatorDiscoveryContractTests(unittest.TestCase):
             output.getvalue().strip(),
             "creator_schema_contract result=FAIL category=non_json_content_type")
         self.assertNotIn("unit-test-owner", output.getvalue())
+        with mock.patch.object(contract, "probe",
+                               side_effect=contract.ContractError("unexpected_redirect", 302)):
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(contract.main(), 1)
+        self.assertIn("category=unexpected_redirect http_status=302", output.getvalue())
+        self.assertNotIn("other.invalid", output.getvalue())
 
 
 if __name__ == "__main__":
