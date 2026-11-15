@@ -485,27 +485,37 @@ final class PlayerSmokeTests: XCTestCase {
                       "The Library destination must be visible, not behind old feed.")
         XCTAssertFalse(library.isHittable,
                        "The old loading stage must no longer intercept taps.")
-        // A real Library is a scrollable native List. In compact iPhone
-        // landscape the signed-out Profile CTA may be below the visible
-        // Library header; element existence alone does not make it hittable.
-        // Scroll the real list, not a fabricated sign-in surface, then
-        // exercise the genuine host-owned Profile route.
+        // Original failed-run native screenshot proves the actual Library
+        // guest CTA is fully visible. SwiftUI List is not necessarily an
+        // XCTest 'Table' (it can be a CollectionView/ScrollView), and an
+        // element's cached isHittable may lag device rotation. Do NOT
+        // require a fabricated table or pretend merely seeing text passes.
+        // Physically tap the real onscreen 44pt CTA and verify the real host
+        // Profile destination accepts the action.
         let signIn = app.buttons["library.signIn"].firstMatch
         if signIn.exists {
-            let libraryList = app.tables.firstMatch
-            for _ in 0..<5 where !signIn.isHittable {
-                XCTAssertTrue(libraryList.exists,
-                              "Signed-out Library must provide a scrollable real list.")
-                libraryList.swipeUp()
-            }
-            XCTAssertTrue(signIn.isHittable,
-                          "Signed-out Library must expose a reachable Profile sign-in CTA.")
-            XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
-            signIn.tap()
+            XCTAssertTrue(signIn.waitForExistence(timeout: 8))
+            let hitFrame = signIn.frame
+            XCTAssertGreaterThanOrEqual(hitFrame.width, 44)
+            XCTAssertGreaterThanOrEqual(hitFrame.height, 44)
+            XCTAssertTrue(hitFrame.origin.x.isFinite &&
+                          hitFrame.origin.y.isFinite &&
+                          hitFrame.width.isFinite && hitFrame.height.isFinite,
+                          "Real Library sign-in needs a finite native hit rectangle.")
+            let appBounds = app.frame
+            XCTAssertTrue(appBounds.contains(CGPoint(x: hitFrame.midX,
+                                                    y: hitFrame.midY)),
+                          "The actual Library Profile CTA must be within the visible app window.")
+            let origin = app.coordinate(
+                withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            origin.withOffset(CGVector(
+                dx: hitFrame.midX - appBounds.minX,
+                dy: hitFrame.midY - appBounds.minY
+            )).tap()
             let appleSignIn = app.buttons["Sign in with Apple"].firstMatch
             XCTAssertTrue(appleSignIn.waitForExistence(timeout: 10) &&
                           appleSignIn.isHittable,
-                          "Library guest CTA must route to genuine Profile, not a covered sheet.")
+                          "Physical native Library CTA tap must open genuine Apple Profile sign-in.")
             let profile = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             profile.name = isPad ? "arcade-pulse-early-ipad-profile-arrived" :
                                    "arcade-pulse-early-iphone-profile-arrived"
