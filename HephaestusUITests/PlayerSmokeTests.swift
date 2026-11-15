@@ -750,16 +750,29 @@ final class PlayerSmokeTests: XCTestCase {
         let play = app.buttons["game.play"].firstMatch
         XCTAssertGreaterThanOrEqual(preview.frame.width, 450,
                                     "Landscape two-column preview must remain media-dominant.")
-        XCTAssertGreaterThanOrEqual(preview.frame.height, window.frame.height * 0.52,
-                                    "iPad landscape Game Details must use the available screen height, not leave a small preview above an empty lower half.")
+        let mediaStatus = preview.value as? String ?? ""
+        if mediaStatus == "Poster displayed" {
+            XCTAssertGreaterThanOrEqual(preview.frame.height, window.frame.height * 0.52,
+                                        "Only a genuinely decoded poster should occupy the large iPad landscape stage.")
+        } else {
+            XCTAssertEqual(mediaStatus, "Preview unavailable",
+                           "Unconfirmed preview media must never be announced as a displayed poster.")
+            XCTAssertLessThanOrEqual(preview.frame.height, 337,
+                                     "Do not inflate missing/loading art into a giant fake gameplay preview.")
+            XCTAssertGreaterThanOrEqual(preview.frame.height, 160,
+                                        "The honest fallback must remain visually understandable.")
+        }
         XCTAssertLessThanOrEqual(preview.frame.maxY, window.frame.maxY + 2,
                                  "Larger preview must remain within the native visible window.")
         XCTAssertGreaterThanOrEqual(title.frame.minX, preview.frame.maxX + 12,
                                     "The native Game Details title must be beside preview, not below it.")
         XCTAssertTrue(play.exists && play.isHittable)
         XCTAssertGreaterThanOrEqual(play.frame.height, 44)
-        XCTAssertTrue(app.buttons["Share game"].firstMatch.exists,
+        let share = app.buttons["Share game"].firstMatch
+        XCTAssertTrue(share.exists && share.isHittable,
                       "Sharing the actual published game must be available.")
+        XCTAssertGreaterThanOrEqual(share.frame.height, 44,
+                                    "Real system Share must remain a full accessible touch target.")
         let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         landscape.name = "arcade-pulse-ipad-game-details-landscape-two-column"
         landscape.lifetime = .keepAlways
