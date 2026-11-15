@@ -75,4 +75,8 @@ struct ArcadePulseCreatorFollowRebaseTests {
     }
 
 
+    @Test func creatorFollowForegroundMeetsNormalTextContrast() {
+        #expect(ArcadePulseTheme.electricVioletContrastWithBlack >= 4.5)
+    }
+
 }
