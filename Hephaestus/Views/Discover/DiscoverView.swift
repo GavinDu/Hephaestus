@@ -2215,14 +2215,11 @@ private struct CreatorDiscoverySheet: View {
         NavigationStack {
             List {
                 Section {
-                    HStack {
-                        TextField("Filter by topic (optional)", text: $topicText)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .submitLabel(.search)
-                            .onSubmit { Task { await load(reset: true) } }
-                        Button("Apply") { Task { await load(reset: true) } }
-                            .disabled(isLoading)
+                    CreatorTopicFilterControls(
+                        topicText: $topicText,
+                        isLoading: isLoading
+                    ) {
+                        Task { await load(reset: true) }
                     }
                 } header: {
                     Text("Topic")
