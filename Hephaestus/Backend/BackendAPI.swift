@@ -349,6 +349,12 @@ struct VerifiedRunResult: Decodable, Identifiable {
     let status: String
     let result: Outcome?
     let rank: Rank?
+    // These fields must come from an authorized, server-owned replay
+    // attestation endpoint, never from JS notifications or a client score.
+    // Legacy result payloads omit them and must fail closed.
+    let attested: Bool?
+    let rankingScope: String?
+    let evidenceStatus: String?
 
     var id: String { runID }
 
@@ -374,10 +380,19 @@ struct VerifiedRunResult: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case runID = "runId"
         case gameID = "gameId"
-        case status, result, rank
+        case status, result, rank, attested, rankingScope, evidenceStatus
     }
 
-    var isVerified: Bool { status == "verified" && result != nil }
+    // A historical status/score alone can be browser-controlled; require
+    // explicit server-only provenance. No currently deployed backend creates
+    // an independently verified gameplay verdict.
+    var isVerified: Bool {
+        status == "verified" &&
+        result != nil &&
+        attested == true &&
+        rankingScope == "verified_only" &&
+        evidenceStatus == "verified"
+    }
 }
 
 struct IngestResult: Codable {
