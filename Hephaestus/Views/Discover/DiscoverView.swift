@@ -2356,6 +2356,40 @@ private struct CreatorDiscoverySheet: View {
     }
 }
 
+/// Creator GET and Follow failures never expose transport URLs, account
+/// tokens or raw details; a failed POST may have reached the backend.
+enum CreatorProfileErrorPresentation {
+    enum Action { case load, follow }
+
+    static func message(for error: Error, action: Action) -> String {
+        let suffix = action == .follow
+            ? "Follow status is unconfirmed. Refresh to check before trying again."
+            : "Try again to refresh this creator."
+        if let api = error as? APIError, case let .badStatus(status) = api {
+            switch status {
+            case 401: return "Sign in again from Profile. " + suffix
+            case 403: return "This creator action isn't permitted for your account. " + suffix
+            case 429: return "Too many requests. Try again in a little while. " + suffix
+            default: break
+            }
+        }
+        if let network = error as? URLError {
+            switch network.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "You're offline. Reconnect and try again. " + suffix
+            case .secureConnectionFailed, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .serverCertificateUntrusted,
+                 .serverCertificateHasUnknownRoot:
+                return "A secure connection couldn't be established. " + suffix
+            case .timedOut:
+                return "The creator service is taking too long. " + suffix
+            default: break
+            }
+        }
+        return "The creator service isn't available right now. " + suffix
+    }
+}
+
 private struct CreatorProfileSheet: View {
     let creatorID: String
     let onRequestSignIn: (() -> Void)?
@@ -2371,6 +2405,10 @@ private struct CreatorProfileSheet: View {
     @State private var profile: CreatorProfile?
     @State private var errorMessage: String?
     @State private var isLoading = true
+    @State private var isFollowUpdating = false
+    @State private var followStatusNeedsRefresh = false
+    @State private var profileLoadRevision = 0
+    @State private var followMutationRevision = 0
     @State private var playerRequest: PixiPlayerRequest?
 
     var body: some View {
@@ -2430,25 +2468,59 @@ private struct CreatorProfileSheet: View {
                                             .accessibilityIdentifier("creator.profile.openProfile")
                                         }
                                     }
-                                } else if profile.creator_id != BackendConfig.currentUserID {
+                                } else if CreatorFollowStatePolicy.offersFollow(
+                                    viewerID: BackendConfig.currentUserID,
+                                    creatorID: profile.creator_id
+                                ) {
                                     Button {
                                         Task { await toggleFollow(profile.is_following) }
                                     } label: {
-                                        Label(profile.is_following ? "Following" : "Follow creator",
-                                              systemImage: profile.is_following ? "person.fill.checkmark" : "person.badge.plus")
+                                        Label(isFollowUpdating ? "Updating follow status…" :
+                                              (followStatusNeedsRefresh ? "Refresh status before following" :
+                                               (profile.is_following ? "Following" : "Follow creator")),
+                                              systemImage: profile.is_following ?
+                                                "person.fill.checkmark" : "person.badge.plus")
                                             .font(.headline.weight(.semibold))
                                             .frame(maxWidth: .infinity, minHeight: 48)
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .tint(ArcadePulseTheme.electricViolet)
+                                    .disabled(!CreatorFollowStatePolicy.canSubmit(
+                                        viewerID: BackendConfig.currentUserID,
+                                        creatorID: profile.creator_id,
+                                        isUpdating: isFollowUpdating,
+                                        needsConfirmation: followStatusNeedsRefresh
+                                    ))
                                     .accessibilityIdentifier("creator.profile.follow")
-                                }
                             }
                             .padding(18)
                             .background(ArcadePulseTheme.surface,
                                         in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
                             .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("creator.profile.header")
+
+                            if let errorMessage {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Label(errorMessage, systemImage: "exclamationmark.triangle")
+                                        .font(.subheadline)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Button {
+                                        Task { await load() }
+                                    } label: {
+                                        Label(followStatusNeedsRefresh ?
+                                              "Refresh follow status" : "Try again",
+                                              systemImage: "arrow.clockwise")
+                                            .frame(maxWidth: .infinity, minHeight: 48)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .accessibilityIdentifier("creator.profile.retryLoad")
+                                }
+                                .padding(14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(ArcadePulseTheme.surface,
+                                            in: RoundedRectangle(cornerRadius: 14))
+                                .accessibilityIdentifier("creator.profile.error")
+                            }
 
                             Text("Published games")
                                 .font(.system(.title2, design: .rounded).weight(.bold))
@@ -2479,6 +2551,8 @@ private struct CreatorProfileSheet: View {
                             description: Text(errorMessage ?? "Please try again."))
                         Button("Try again") { Task { await load() } }
                             .buttonStyle(.borderedProminent)
+                            .frame(minWidth: 44, minHeight: 48)
+                            .accessibilityIdentifier("creator.profile.retryLoad")
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -2490,6 +2564,19 @@ private struct CreatorProfileSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .task { await load() }
+            .onReceive(NotificationCenter.default.publisher(
+                for: .hephaestusBackendSessionDidChange
+            )) { _ in
+                // Old account callbacks must never update the new viewer.
+                profileLoadRevision += 1
+                followMutationRevision += 1
+                profile = nil
+                errorMessage = nil
+                isLoading = true
+                isFollowUpdating = false
+                followStatusNeedsRefresh = false
+                Task { await load() }
+            }
             .fullScreenCover(item: $playerRequest) { request in
                 PixiPlayerSheet(gameID: request.gameID, title: request.title)
             }
@@ -2583,18 +2670,70 @@ private struct CreatorProfileSheet: View {
                     in: RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius))
     }
 
-    private func load() async {
-        isLoading = true
-        defer { isLoading = false }
-        do { profile = try await BackendAPI.shared.fetchCreatorProfile(id: creatorID); errorMessage = nil }
-        catch { errorMessage = error.localizedDescription }
+    private func load(confirmingFollow: Bool = false) async {
+        profileLoadRevision += 1
+        let revision = profileLoadRevision
+        let viewer = BackendConfig.currentUserID
+        let startedWhileMutating = isFollowUpdating
+        // Preserve genuine published posts during an in-place GET refresh.
+        if profile == nil { isLoading = true }
+        defer {
+            if revision == profileLoadRevision { isLoading = false }
+        }
+        do {
+            let fetched = try await BackendAPI.shared.fetchCreatorProfile(id: creatorID)
+            guard CreatorFollowStatePolicy.mayApplyCreatorRead(
+                requestRevision: revision, currentRevision: profileLoadRevision,
+                sameViewer: viewer == BackendConfig.currentUserID,
+                startedWhileMutating: startedWhileMutating,
+                isPostWriteConfirmation: confirmingFollow
+            ) else { return }
+            profile = fetched
+            errorMessage = nil
+            // Only a real creator GET confirms the follow state after POST.
+            followStatusNeedsRefresh = false
+        } catch {
+            guard CreatorFollowStatePolicy.mayApplyCreatorRead(
+                requestRevision: revision, currentRevision: profileLoadRevision,
+                sameViewer: viewer == BackendConfig.currentUserID,
+                startedWhileMutating: startedWhileMutating,
+                isPostWriteConfirmation: confirmingFollow
+            ) else { return }
+            errorMessage = CreatorProfileErrorPresentation.message(for: error, action: .load)
+        }
     }
 
     private func toggleFollow(_ currentlyFollowing: Bool) async {
+        let viewer = BackendConfig.currentUserID
+        guard CreatorFollowStatePolicy.canSubmit(
+            viewerID: viewer, creatorID: creatorID,
+            isUpdating: isFollowUpdating, needsConfirmation: followStatusNeedsRefresh
+        ) else { return }
+        // An already-running creator GET may contain pre-write relationship
+        // state; revoke it before starting an ambiguous POST.
+        profileLoadRevision += 1
+        followMutationRevision += 1
+        let revision = followMutationRevision
+        isFollowUpdating = true
+        defer {
+            if revision == followMutationRevision { isFollowUpdating = false }
+        }
         do {
             try await BackendAPI.shared.setFollowing(creatorID, following: !currentlyFollowing)
-            await load()
-        } catch { errorMessage = error.localizedDescription }
+            guard revision == followMutationRevision,
+                  viewer == BackendConfig.currentUserID else { return }
+            followStatusNeedsRefresh = true
+            // No optimistic count or inverse button from only an acknowledged
+            // mutation: refresh true server-owned relationship first.
+            await load(confirmingFollow: true)
+        } catch {
+            guard revision == followMutationRevision,
+                  viewer == BackendConfig.currentUserID else { return }
+            // Network failures can be ambiguous POST outcomes. Require GET.
+            followStatusNeedsRefresh = true
+            errorMessage = CreatorProfileErrorPresentation.message(
+                for: error, action: .follow)
+        }
     }
 }
 
