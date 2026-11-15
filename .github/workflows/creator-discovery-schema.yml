@@ -1,0 +1,37 @@
+name: Creator discovery deployed schema
+
+# Diagnose deployed public JSON contract without blocking independent iOS fixes.
+# PRs exercise only offline tests; schedule/manual runs check the live endpoint.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/creator-discovery-schema.yml"
+      - "tools/test-feedback/check_creator_discovery_contract.py"
+      - "tools/test-feedback/test_check_creator_discovery_contract.py"
+  workflow_dispatch:
+  schedule:
+    - cron: "17 12 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  offline-contract:
+    name: Creator JSON contract unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test valid/invalid JSON shape and safe failure output
+        run: python3 -m unittest discover -s tools/test-feedback -p test_check_creator_discovery_contract.py -v
+
+  deployed-contract:
+    name: Deployed public Creator schema (manual/scheduled)
+    if: github.event_name != 'pull_request'
+    needs: offline-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe only HTTP/JSON structure, never log response body
+        run: python3 tools/test-feedback/check_creator_discovery_contract.py
