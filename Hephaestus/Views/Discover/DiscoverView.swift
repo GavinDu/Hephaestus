@@ -2479,6 +2479,9 @@ private struct CreatorProfileSheet: View {
     @State private var isLoading = true
     @State private var isFollowUpdating = false
     @State private var followStatusNeedsRefresh = false
+    /// Only set after a successfully acknowledged POST; never guess the
+    /// outcome of a timed-out or lost-response write.
+    @State private var expectedFollowingAfterWrite: Bool?
     @State private var profileLoadRevision = 0
     @State private var followMutationRevision = 0
     @State private var playerRequest: PixiPlayerRequest?
@@ -2665,6 +2668,7 @@ private struct CreatorProfileSheet: View {
                 isLoading = true
                 isFollowUpdating = false
                 followStatusNeedsRefresh = false
+                expectedFollowingAfterWrite = nil
                 Task { await load() }
             }
             .fullScreenCover(item: $playerRequest) { request in
@@ -2799,9 +2803,21 @@ private struct CreatorProfileSheet: View {
                 isPostWriteConfirmation: confirmingFollow
             ) else { return }
             profile = fetched
-            errorMessage = nil
-            // The real GET, not a POST acknowledgement, confirms follow state.
-            followStatusNeedsRefresh = false
+            // A read replica may return the PREVIOUS state immediately
+            // after an acknowledged Follow POST. Keep its genuine games
+            // visible but do not claim the mutation is confirmed or enable
+            // another write until a same-owner GET matches our target.
+            if CreatorFollowStatePolicy.confirmsAcknowledgedTarget(
+                expectedFollowing: expectedFollowingAfterWrite,
+                observedFollowing: fetched.is_following
+            ) {
+                errorMessage = nil
+                followStatusNeedsRefresh = false
+                expectedFollowingAfterWrite = nil
+            } else {
+                followStatusNeedsRefresh = true
+                errorMessage = CreatorFollowStatePolicy.syncPendingMessage
+            }
         } catch {
             guard CreatorFollowStatePolicy.mayApplyCreatorRead(
                 requestRevision: revision, currentRevision: profileLoadRevision,
@@ -2832,11 +2848,14 @@ private struct CreatorProfileSheet: View {
             guard revision == followMutationRevision,
                   viewer == BackendConfig.currentUserID else { return }
             followStatusNeedsRefresh = true
+            expectedFollowingAfterWrite = !currentlyFollowing
             await load(confirmingFollow: true)
         } catch {
             guard revision == followMutationRevision,
                   viewer == BackendConfig.currentUserID else { return }
             // A dropped response does not prove a Follow POST failed.
+            // Never set an *acknowledged* target after a lost response.
+            expectedFollowingAfterWrite = nil
             followStatusNeedsRefresh = true
             errorMessage = CreatorProfileErrorPresentation.message(
                 for: error, action: .follow)
