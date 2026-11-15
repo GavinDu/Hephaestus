@@ -2332,3 +2332,167 @@ struct HephaestusTests {
     fresh.request.cancel()
     coordinator.finishIfCurrent(fresh.generation)
 }
+
+
+@Test func prewarmV2SceneMetricGateAdmitsExactlyOneCurrentTrustedSceneSubmission() {
+    let nonce = String(repeating: "a", count: 32)
+    let valid: [String: Any] = [
+        "schema": 2, "type": "player_metric",
+        "sessionId": "trusted-current-session", "gameId": "published-game",
+        "documentNonce": nonce, "metric": "first_scene_render_submit",
+        "sequence": 3, "ms": 27,
+    ]
+    var gate = PlayerPrewarmV2SceneMetricGate()
+    let admitted = gate.record(
+        valid, expectedGameID: "published-game", currentDocumentNonce: nonce,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true
+    )
+    #expect(admitted)
+    #expect(gate.firstMilliseconds == 27)
+    #expect(gate.firstSequence == 3)
+    #expect(gate.firstSessionID == "trusted-current-session")
+
+    // Duplicate, later-sequence and stale same-document messages cannot
+    // retroactively replace a previously accepted first-scene milestone.
+    let duplicate = gate.record(
+        valid, expectedGameID: "published-game", currentDocumentNonce: nonce,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true
+    )
+    #expect(!duplicate)
+    var later = valid
+    later["sequence"] = 100_000
+    later["ms"] = 400
+    let replaced = gate.record(
+        later, expectedGameID: "published-game", currentDocumentNonce: nonce,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true
+    )
+    #expect(!replaced)
+    #expect(gate.firstMilliseconds == 27)
+
+    // A genuinely new document / credential epoch can clear this pure gate,
+    // but callers must also use a newly prepared native document challenge.
+    gate.reset()
+    #expect(gate.firstMilliseconds == nil)
+    #expect(gate.firstSequence == nil)
+    #expect(gate.firstSessionID == nil)
+    let freshNonce = String(repeating: "b", count: 32)
+    later["documentNonce"] = freshNonce
+    let fresh = gate.record(
+        later, expectedGameID: "published-game", currentDocumentNonce: freshNonce,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true
+    )
+    #expect(fresh)
+    #expect(gate.firstMilliseconds == 400)
+    #expect(gate.firstSequence == 100_000)
+}
+
+@Test func prewarmV2SceneMetricGateRejectsSpoofingBeforeConsumingFirstSequence() {
+    let nonce = String(repeating: "a", count: 32)
+    let valid: [String: Any] = [
+        "schema": 2, "type": "player_metric",
+        "sessionId": "session-one", "gameId": "published-game",
+        "documentNonce": nonce, "metric": "first_scene_render_submit",
+        "sequence": 1, "ms": 24,
+    ]
+
+    var malformed: [[String: Any]] = []
+    func replaced(_ key: String, _ value: Any) -> [String: Any] {
+        var body = valid
+        body[key] = value
+        return body
+    }
+    malformed.append(replaced("schema", 1)) // Legacy must not claim prewarm ownership.
+    malformed.append(replaced("schema", true)) // NSNumber/CFBoolean integer alias.
+    malformed.append(replaced("schema", "2"))
+    malformed.append(replaced("documentNonce", String(repeating: "B", count: 32)))
+    malformed.append(replaced("documentNonce", "old-epoch"))
+    malformed.append(replaced("gameId", "foreign-game"))
+    malformed.append(replaced("sessionId", ""))
+    malformed.append(replaced("sessionId", String(repeating: "s", count: 129)))
+    malformed.append(replaced("sessionId", 72))
+    malformed.append(replaced("sequence", true))
+    malformed.append(replaced("sequence", 100_001))
+    malformed.append(replaced("sequence", "1"))
+    malformed.append(replaced("ms", true))
+    malformed.append(replaced("ms", -1))
+    malformed.append(replaced("ms", 86_400_001))
+    malformed.append(replaced("ms", "24"))
+    malformed.append(replaced("metric", "first_input"))
+    malformed.append(replaced("type", "verified_run_available"))
+    malformed.append(replaced("ms", NSNull()))
+    var extra = valid
+    extra["privateDebug"] = "secret-field"
+    malformed.append(extra)
+    var missing = valid
+    missing.removeValue(forKey: "documentNonce")
+    malformed.append(missing)
+    missing = valid
+    missing.removeValue(forKey: "ms")
+    malformed.append(missing)
+
+    for body in malformed {
+        var gate = PlayerPrewarmV2SceneMetricGate()
+        let refused = gate.record(
+            body, expectedGameID: "published-game", currentDocumentNonce: nonce,
+            isTrustedMainFrame: true, isSameOrigin: true,
+            navigationStarted: true, credentialScopeCurrent: true
+        )
+        #expect(!refused)
+        #expect(gate.firstMilliseconds == nil)
+        #expect(gate.firstSequence == nil)
+        #expect(gate.firstSessionID == nil)
+        // A malformed large-sequence payload must not poison the later
+        // valid message, including cases with extra attacker-owned fields.
+        let trusted = gate.record(
+            valid, expectedGameID: "published-game", currentDocumentNonce: nonce,
+            isTrustedMainFrame: true, isSameOrigin: true,
+            navigationStarted: true, credentialScopeCurrent: true
+        )
+        #expect(trusted)
+        #expect(gate.firstMilliseconds == 24)
+    }
+
+    // All provenance facts are native-controlled WKScriptMessage metadata or
+    // pool lifecycle state; JavaScript must never supply these booleans.
+    for (mainFrame, origin, navigation, credential) in [
+        (false, true, true, true),
+        (true, false, true, true),
+        (true, true, false, true),
+        (true, true, true, false),
+    ] {
+        var gate = PlayerPrewarmV2SceneMetricGate()
+        let accepted = gate.record(
+            valid, expectedGameID: "published-game", currentDocumentNonce: nonce,
+            isTrustedMainFrame: mainFrame, isSameOrigin: origin,
+            navigationStarted: navigation, credentialScopeCurrent: credential
+        )
+        #expect(!accepted)
+        #expect(gate.firstMilliseconds == nil)
+    }
+
+    var gate = PlayerPrewarmV2SceneMetricGate()
+    let staleDocument = gate.record(
+        valid, expectedGameID: "published-game",
+        currentDocumentNonce: String(repeating: "b", count: 32),
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true
+    )
+    #expect(!staleDocument)
+    let revoked = gate.record(
+        valid, expectedGameID: "published-game", currentDocumentNonce: nil,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true
+    )
+    #expect(!revoked)
+    let foreignGame = gate.record(
+        valid, expectedGameID: "different-published-game", currentDocumentNonce: nonce,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true
+    )
+    #expect(!foreignGame)
+    #expect(gate.firstMilliseconds == nil)
+}
