@@ -10,6 +10,9 @@ struct ArcadePulseCreatorFollowRebaseTests {
         #expect(!CreatorFollowStatePolicy.offersFollow(viewerID: "", creatorID: "creator"))
         #expect(!CreatorFollowStatePolicy.offersFollow(viewerID: "owner", creatorID: "owner"))
         #expect(!CreatorFollowStatePolicy.offersFollow(viewerID: "owner", creatorID: ""))
+        #expect(!CreatorFollowStatePolicy.offersFollow(viewerID: "viewer", creatorID: " \t "))
+        #expect(!CreatorFollowStatePolicy.offersFollow(viewerID: " \n ", creatorID: "creator"))
+        #expect(!CreatorFollowStatePolicy.offersFollow(viewerID: "owner", creatorID: " owner "))
         #expect(CreatorFollowStatePolicy.offersFollow(viewerID: "viewer", creatorID: "creator"))
         #expect(CreatorFollowStatePolicy.canSubmit(
             viewerID: "viewer", creatorID: "creator",
