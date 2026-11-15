@@ -423,6 +423,82 @@ final class PlayerSmokeTests: XCTestCase {
         add(after)
     }
 
+    /// P0 #315: after a genuine slow live request, Library is available
+    /// without ever claiming an outage or making a fake playable game.
+    /// Only HTTP transport is DEBUG-stalled, never the backend game payload.
+    @MainActor
+    func testArcadePulseSlowLiveFeedCanOpenLibraryBeforeTimeout() throws {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        XCUIDevice.shared.orientation = isPad ? .landscapeLeft : .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-stalled-feed-early-hint")
+        app.launch()
+
+        let hint = app.descendants(matching: .any)["feed.loading.slow"].firstMatch
+        XCTAssertTrue(hint.waitForExistence(timeout: 16),
+                      "An actively pending public feed must offer honest early status.")
+        XCTAssertTrue(hint.label.contains("Still connecting"),
+                      "Slow loading is not a confirmed service outage.")
+        let retry = app.buttons["feed.retryLoading"].firstMatch
+        let library = app.buttons["feed.loading.library"].firstMatch
+        XCTAssertTrue(retry.waitForExistence(timeout: 8) && retry.isHittable)
+        XCTAssertTrue(library.waitForExistence(timeout: 8) && library.isHittable,
+                      "Library must be an actionable native exit during live loading.")
+        XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+        XCTAssertFalse(app.staticTexts["Couldn't load the feed"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
+                       "A pending transport never yields a fabricated game.")
+
+        let waiting = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        waiting.name = isPad ? "arcade-pulse-early-slow-ipad-landscape" :
+                               "arcade-pulse-early-slow-iphone-portrait"
+        waiting.lifetime = .keepAlways
+        add(waiting)
+
+        if !isPad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let window = app.windows.firstMatch
+            let rotationDeadline = Date().addingTimeInterval(12)
+            while window.frame.width <= window.frame.height &&
+                  Date() < rotationDeadline {
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+            XCTAssertGreaterThan(window.frame.width, window.frame.height)
+            XCTAssertTrue(library.waitForExistence(timeout: 8) && library.isHittable)
+            let tabs = app.tabBars.firstMatch
+            XCTAssertTrue(tabs.exists)
+            XCTAssertLessThan(library.frame.maxY, tabs.frame.minY + 1,
+                              "Compact iPhone Library escape must fit above the tab bar.")
+            let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            compact.name = "arcade-pulse-early-slow-iphone-landscape"
+            compact.lifetime = .keepAlways
+            add(compact)
+        }
+
+        library.tap()
+        let destination = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(destination.waitForExistence(timeout: 12),
+                      "Library must be the real saved/recent native destination.")
+        XCTAssertTrue(app.frame.intersects(destination.frame),
+                      "The Library destination must be visible, not behind old feed.")
+        let signIn = app.buttons["library.signIn"].firstMatch
+        if signIn.exists {
+            XCTAssertTrue(signIn.isHittable,
+                          "The actual signed-out Library must have a working Profile route.")
+            XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        }
+        XCTAssertFalse(library.isHittable,
+                       "The old loading stage must no longer intercept taps.")
+        let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        arrived.name = isPad ? "arcade-pulse-early-ipad-library-arrived" :
+                               "arcade-pulse-early-iphone-library-arrived"
+        arrived.lifetime = .keepAlways
+        add(arrived)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// Stall the actual public-feed transport only; never inject or approve
     /// a fake game. The production watchdog is 45s; this opt-in native test
     /// uses 3s and must expose the same truthful Retry/Library recovery.
