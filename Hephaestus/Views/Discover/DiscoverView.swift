@@ -1030,14 +1030,15 @@ struct DiscoverView: View {
             isSlowLoading = true
         }
 
-        // Real production feeds have a 45s bounded loading budget. A
-        // deliberately stalled native UITest uses 3s to prove the identical
-        // recovery state without consuming the whole macOS test budget.
+        // Production retains the original 45s bounded transport budget.
+        // Native DEBUG-only terminal-stall tests get 10s per attempt:
+        // XCUITest sometimes needs several seconds to observe a freshly
+        // restarted real request; a 3s second deadline races that assertion.
         let watchdog = Task { @MainActor in
             do {
                 try await Task.sleep(for:
                     testingEarlySlowHint ? .seconds(70) :
-                    (testingStalledTransport ? .seconds(3) : .seconds(45)))
+                    (testingStalledTransport ? .seconds(10) : .seconds(45)))
             } catch { return }
             guard isLoading, games.isEmpty,
                   requestedScope == selectedFeed,
