@@ -4,7 +4,11 @@ import SwiftUI
 /// write must be reconciled by a real creator GET before a second tap.
 enum CreatorFollowStatePolicy {
     static func offersFollow(viewerID: String, creatorID: String) -> Bool {
-        !viewerID.isEmpty && !creatorID.isEmpty && viewerID != creatorID
+        // Match the existing For You identity guard: whitespace-only owner
+        // metadata is not a tappable or writable creator destination.
+        let viewer = viewerID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let creator = creatorID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !viewer.isEmpty && !creator.isEmpty && viewer != creator
     }
 
     static func canSubmit(viewerID: String, creatorID: String,
