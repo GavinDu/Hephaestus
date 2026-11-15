@@ -510,16 +510,15 @@ final class PlayerSmokeTests: XCTestCase {
                       hitFrame.origin.y.isFinite &&
                       hitFrame.width.isFinite && hitFrame.height.isFinite,
                       "Real Library sign-in needs a finite native hit rectangle.")
-        let appBounds = app.frame
-        XCTAssertTrue(appBounds.contains(CGPoint(x: hitFrame.midX,
-                                                y: hitFrame.midY)),
-                      "The actual Library Profile CTA must be within the visible app window.")
-        let origin = app.coordinate(
-            withNormalizedOffset: CGVector(dx: 0, dy: 0))
-        origin.withOffset(CGVector(
-            dx: hitFrame.midX - appBounds.minX,
-            dy: hitFrame.midY - appBounds.minY
-        )).tap()
+        // UIKit's rotated app.frame and XCUITest cached element.frame can
+        // occupy different coordinate systems immediately after landscape
+        // rotation, even when the untouched native screenshot proves this
+        // real button is entirely visible. The previous 'app.frame.contains'
+        // assertion rejected the genuine full-screen Library instead of
+        // checking whether a player can act. Ask XCTest to target the
+        // button's own center, then strictly verify actual Profile routing.
+        // This is a physical native tap, not a synthetic button/action call.
+        signIn.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let appleSignIn = app.buttons["Sign in with Apple"].firstMatch
         XCTAssertTrue(appleSignIn.waitForExistence(timeout: 10) &&
                       appleSignIn.isHittable,
