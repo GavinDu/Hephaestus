@@ -217,15 +217,6 @@ struct GameFeedCard: View {
             .frame(height: coverHeight)
             .clipped()
 
-            // Source-expression attribution is text, not a gameplay frame.
-            // Never crowd it into the clipped artwork/preview stage.
-            if let expression = game.playableExpression, expression.source_visibility == "public" {
-                playableExpressionSummary(expression)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 10)
-                    .padding(.bottom, 2)
-            }
-
             HStack(spacing: 10) {
                 if let creator = game.ownerID, !creator.isEmpty {
                     ArcadePulseCreatorIdentity(
@@ -297,6 +288,17 @@ struct GameFeedCard: View {
             // Warming happens inside Discover's Play action, not in a
             // zero-distance touch recognizer that can steal grid scrolling.
             .padding(14)
+
+            // Preserve immediate Play and social actions before potentially
+            // long source attribution at accessibility text sizes.
+            // Source-expression metadata is backend text, not a preview frame.
+            if let expression = game.playableExpression, expression.source_visibility == "public" {
+                playableExpressionSummary(expression)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 2)
+            }
+
         }
         .background(HephaestusDesign.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: HephaestusDesign.cardRadius, style: .continuous))
