@@ -61,6 +61,16 @@ struct LibraryView: View {
         )
     }
 
+    /// Show only a count confirmed for the active account and credential epoch.
+    /// Distinguish a true zero from a guest, pending, or failed request.
+    private var savedCountCaption: LibrarySavedCountCaption.Presentation {
+        LibrarySavedCountCaption.presentation(
+            confirmedCount: confirmedSavedCount,
+            signedIn: !BackendConfig.currentUserID.isEmpty,
+            loading: isLoadingSaved
+        )
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -182,17 +192,16 @@ struct LibraryView: View {
                     HStack {
                         Text("Saved games")
                         Spacer()
-                        if let count = confirmedSavedCount {
-                            Text("\(count)")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel("\(count) saved games")
-                        } else {
-                            Text("—")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel("Saved games count unavailable")
-                        }
+                        // Avoid a meaningless tiny dash. Never imply zero or a
+                        // saved collection before the current owner is verified.
+                        Text(savedCountCaption.visibleText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .multilineTextAlignment(.trailing)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("library.savedCount.status")
+                            .accessibilityLabel(savedCountCaption.accessibilityLabel)
                     }
                 }
 
@@ -393,6 +402,34 @@ struct LibraryView: View {
             ) else { return }
             errorMessage = "Couldn't remove saved game. Please try again."
         }
+    }
+}
+
+/// Accessible, truthful presentation of the current account's confirmed
+/// saved-game total. Display-only policy: no separate stale count cache.
+enum LibrarySavedCountCaption {
+    struct Presentation {
+        let visibleText: String
+        let accessibilityLabel: String
+    }
+
+    static func presentation(
+        confirmedCount: Int?, signedIn: Bool, loading: Bool
+    ) -> Presentation {
+        if let count = confirmedCount, signedIn, !loading {
+            return Presentation(visibleText: String(count),
+                                accessibilityLabel: "\(count) saved games")
+        }
+        if !signedIn {
+            return Presentation(visibleText: "Sign in",
+                                accessibilityLabel: "Sign in to see saved-game count")
+        }
+        if loading {
+            return Presentation(visibleText: "Loading",
+                                accessibilityLabel: "Loading saved-game count")
+        }
+        return Presentation(visibleText: "Unavailable",
+                            accessibilityLabel: "Saved games count unavailable")
     }
 }
 
