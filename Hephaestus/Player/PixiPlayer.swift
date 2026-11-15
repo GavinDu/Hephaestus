@@ -1364,6 +1364,13 @@ struct PixiPlayerSheet: View {
                             guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
+                            // A terminated document must not turn a known permanent
+                            // package/entitlement error into another recoverable error.
+                            // Keep its original failure and Return to feed available.
+                            guard PlayerLoadRetryPolicy.shouldOfferManualRetry(category: loadFailureCategory) else {
+                                isLoading = false
+                                return
+                            }
                             // The web content process died (usually
                             // memory pressure): the page is a white
                             // void unless we reload it ourselves.
