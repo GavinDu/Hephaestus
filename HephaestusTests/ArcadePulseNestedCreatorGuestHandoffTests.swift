@@ -8,18 +8,26 @@ struct ArcadePulseNestedCreatorGuestHandoffTests {
         var gate = CreatorNestedGuestSignInGate()
         // Normal Done on Creator Discovery must not open Profile.
         #expect(!gate.isAwaitingDirectoryDismiss)
-        #expect(!gate.consumeAfterDirectoryDismiss())
+        let step1 = gate.consumeAfterDirectoryDismiss()
+        #expect(!step1)
         // The child Creator sheet's onDismiss authorizes the outer closure.
-        #expect(gate.requestAfterInnerCreatorDismiss())
+        let step2 = gate.requestAfterInnerCreatorDismiss()
+        #expect(step2)
         #expect(gate.isAwaitingDirectoryDismiss)
         // Repeated callbacks cannot schedule a duplicate host navigation.
-        #expect(!gate.requestAfterInnerCreatorDismiss())
-        #expect(gate.consumeAfterDirectoryDismiss())
+        let step3 = gate.requestAfterInnerCreatorDismiss()
+        #expect(!step3)
+        let step4 = gate.consumeAfterDirectoryDismiss()
+        #expect(step4)
         #expect(!gate.isAwaitingDirectoryDismiss)
-        #expect(!gate.consumeAfterDirectoryDismiss())
+        let step5 = gate.consumeAfterDirectoryDismiss()
+        #expect(!step5)
         // A future real visitor can independently request sign-in again.
-        #expect(gate.requestAfterInnerCreatorDismiss())
-        #expect(gate.consumeAfterDirectoryDismiss())
-        #expect(!gate.consumeAfterDirectoryDismiss())
+        let step6 = gate.requestAfterInnerCreatorDismiss()
+        #expect(step6)
+        let step7 = gate.consumeAfterDirectoryDismiss()
+        #expect(step7)
+        let step8 = gate.consumeAfterDirectoryDismiss()
+        #expect(!step8)
     }
 }
