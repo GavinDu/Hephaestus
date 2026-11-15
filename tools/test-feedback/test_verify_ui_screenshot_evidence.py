@@ -53,7 +53,7 @@ class ScreenshotEvidenceTests(unittest.TestCase):
 
     def fixture(self, folder, corrupt_fullscreen=False, omit=None,
                 include_ipad_library=False, include_ipad_features=False,
-                include_ipad_details=False):
+                include_ipad_details=False, include_ipad_sidebar=False):
         attachments = []
         library = ((module.IPAD_LIBRARY_PORTRAIT, module.IPAD_LIBRARY_LANDSCAPE)
                    if include_ipad_library else ())
@@ -61,16 +61,23 @@ class ScreenshotEvidenceTests(unittest.TestCase):
                     if include_ipad_features else ())
         details = (module.IPAD_DETAIL_LANDSCAPE + module.IPAD_DETAIL_PORTRAIT
                    if include_ipad_details else ())
+        sidebar = (module.IPAD_SIDEBAR_LANDSCAPE + module.IPAD_SIDEBAR_PORTRAIT
+                   if include_ipad_sidebar else ())
         for name in (module.LANDSCAPE_PRIMARY +
                      module.LANDSCAPE_DIAGNOSTIC + module.PORTRAIT_PRIMARY +
-                     library + features + details):
+                     library + features + details + sidebar):
             if name == omit:
                 continue
             file = name + ".png"
             # Full screen raw portrait + EXIF 8 -> landscape displayed.
             # App-window raw landscape + EXIF 8 -> incorrect portrait displayed.
             rgb = b"\x50\x40\x20" if "after-swipe" in name else b"\x20\x50\x80"
-            if name in module.IPAD_DETAIL_LANDSCAPE:
+            if name in module.IPAD_SIDEBAR_LANDSCAPE:
+                index = module.IPAD_SIDEBAR_LANDSCAPE.index(name)
+                payload = png(10, 20, 8, rgb=bytes((35 + 80 * index, 80, 140)))
+            elif name in module.IPAD_SIDEBAR_PORTRAIT:
+                payload = png(10, 20, 1, rgb=bytes((85, 125, 165)))
+            elif name in module.IPAD_DETAIL_LANDSCAPE:
                 payload = png(10, 20, 8, rgb=bytes((64, 96, 128)))
             elif name in module.IPAD_DETAIL_PORTRAIT:
                 payload = png(10, 20, 1, rgb=bytes((96, 64, 32)))
@@ -93,6 +100,59 @@ class ScreenshotEvidenceTests(unittest.TestCase):
             attachments.append({"exportedFileName": file,
                                 "suggestedHumanReadableName": name + "_0_TEST.png"})
         (folder / "manifest.json").write_text(json.dumps([{"attachments": attachments}]))
+
+    def test_ipad_sidebar_evidence_requires_real_landscape_portrait_and_changed_route(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            folder.mkdir()
+            self.fixture(folder, include_ipad_library=True, include_ipad_sidebar=True)
+            report = module.verify_and_copy(
+                folder, Path(directory) / "review",
+                require_ipad_library=True, require_ipad_sidebar=True)
+            self.assertTrue(report["ipad_sidebar_required"])
+            names = module.IPAD_SIDEBAR_LANDSCAPE + module.IPAD_SIDEBAR_PORTRAIT
+            self.assertTrue(all(name in report["verified"] for name in names))
+            self.assertTrue(all(report["verified"][name]["preferred_for_visual_review"]
+                                for name in names))
+
+    def test_ipad_sidebar_missing_or_wrong_orientation_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            folder.mkdir()
+            self.fixture(folder, include_ipad_library=True, include_ipad_sidebar=True)
+            missing = module.IPAD_SIDEBAR_PORTRAIT[0]
+            (folder / (missing + ".png")).unlink()
+            with self.assertRaises((KeyError, ValueError, FileNotFoundError)):
+                module.verify_and_copy(folder, Path(directory) / "review",
+                                       require_ipad_library=True, require_ipad_sidebar=True)
+            self.fixture(folder, include_ipad_library=True, include_ipad_sidebar=True)
+            wrong = module.IPAD_SIDEBAR_LANDSCAPE[0]
+            (folder / (wrong + ".png")).write_bytes(png(10, 20, 1))
+            with self.assertRaisesRegex(ValueError, "does not display in landscape"):
+                module.verify_and_copy(folder, Path(directory) / "review",
+                                       require_ipad_library=True, require_ipad_sidebar=True)
+
+    def test_ipad_sidebar_app_window_crop_and_reused_after_frame_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "source"
+            folder.mkdir()
+            self.fixture(folder, include_ipad_library=True, include_ipad_sidebar=True)
+            before, after = module.IPAD_SIDEBAR_LANDSCAPE
+            (folder / (after + ".png")).write_bytes(png(5, 20, 8))
+            with self.assertRaisesRegex(ValueError, "does not match same-run"):
+                module.verify_and_copy(folder, Path(directory) / "review",
+                                       require_ipad_library=True, require_ipad_sidebar=True)
+            self.fixture(folder, include_ipad_library=True, include_ipad_sidebar=True)
+            (folder / (after + ".png")).write_bytes((folder / (before + ".png")).read_bytes())
+            with self.assertRaisesRegex(ValueError, "duplicate raw screenshot bytes"):
+                module.verify_and_copy(folder, Path(directory) / "review",
+                                       require_ipad_library=True, require_ipad_sidebar=True)
+            self.fixture(folder, include_ipad_library=True, include_ipad_sidebar=True)
+            (folder / (after + ".png")).write_bytes(
+                png(10, 20, 8, rgb=bytes((35, 80, 140)), level=9, filter_type=1))
+            with self.assertRaisesRegex(ValueError, "duplicate decoded screenshot pixels"):
+                module.verify_and_copy(folder, Path(directory) / "review",
+                                       require_ipad_library=True, require_ipad_sidebar=True)
 
     def test_preferred_landscape_screen_is_verifiable_and_raw_bytes_are_unchanged(self):
         with tempfile.TemporaryDirectory() as directory:
