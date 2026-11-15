@@ -90,8 +90,7 @@ struct DiscoverView: View {
             Label("Try again", systemImage: "arrow.clockwise")
                 .frame(maxWidth: .infinity, minHeight: 48)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(ArcadePulseTheme.electricViolet)
+        .buttonStyle(ArcadePulseRecoveryButtonStyle())
         .accessibilityIdentifier("feed.error.retry")
     }
 
@@ -353,7 +352,7 @@ struct DiscoverView: View {
                                 Label("Retry loading", systemImage: "arrow.clockwise")
                                     .frame(minHeight: 44)
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(ArcadePulseRecoveryButtonStyle())
                             .accessibilityIdentifier("feed.retryLoading")
 
                             LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: HephaestusDesign.sectionSpacing) {
