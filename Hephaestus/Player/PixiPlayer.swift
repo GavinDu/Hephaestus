@@ -1167,6 +1167,11 @@ enum PlayerWebViewPool {
     private static func routeWebKitMessage(
         _ controller: WKUserContentController, message: WKScriptMessage
     ) {
+        // Keychain may rotate synchronously before its asynchronous session
+        // notification arrives. A queued WebKit callback is another entry
+        // point into the same credential epoch: purge the old view/receiver
+        // before routing any script data to a now-retired Coordinator.
+        ensureCurrentCredentialScope()
         guard message.webView === pooledView else { return }
         switch PlayerPrewarmMessageOwnershipPolicy.recipient(
             isAttached: isAttached, transferringLease: transferringLease,
