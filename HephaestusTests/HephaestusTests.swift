@@ -2362,6 +2362,45 @@ struct HephaestusTests {
 }
 
 
+
+@Test func attachedPlayerWebKitOriginNormalizesOnlyStandardHTTPPorts() {
+    let https = URL(string: "https://games.example.test/player?game=one")!
+    let http = URL(string: "http://games.example.test/player?game=one")!
+    let privateHTTPS = URL(string: "https://games.example.test:8443/player")!
+    let privateHTTP = URL(string: "http://games.example.test:8123/player")!
+
+    func admitted(_ url: URL, _ scheme: String, _ host: String, _ port: Int) -> Bool {
+        PlayerWebKitOriginPolicy.matches(
+            expectedURL: url, frameScheme: scheme, frameHost: host, framePort: port
+        )
+    }
+
+    // WKSecurityOrigin may use port 0 for the default HTTPS/HTTP port.
+    #expect(admitted(https, "https", "games.example.test", 0))
+    #expect(admitted(https, "https", "games.example.test", 443))
+    #expect(admitted(http, "http", "games.example.test", 0))
+    #expect(admitted(http, "http", "games.example.test", 80))
+
+    // Explicit custom backend ports must be present and exact.
+    #expect(admitted(privateHTTPS, "https", "games.example.test", 8443))
+    #expect(admitted(privateHTTP, "http", "games.example.test", 8123))
+    #expect(!admitted(privateHTTPS, "https", "games.example.test", 0))
+    #expect(!admitted(privateHTTP, "http", "games.example.test", 0))
+    #expect(!admitted(privateHTTPS, "https", "games.example.test", 443))
+    #expect(!admitted(privateHTTP, "http", "games.example.test", 80))
+
+    // No origin downgrade, foreign host, unrelated port, or invalid scheme.
+    #expect(!admitted(https, "http", "games.example.test", 0))
+    #expect(!admitted(https, "https", "foreign.example.test", 0))
+    #expect(!admitted(https, "https", "games.example.test", 80))
+    #expect(!admitted(https, "https", "games.example.test", -1))
+    #expect(!admitted(https, "https", "games.example.test", 65536))
+    #expect(!admitted(URL(string: "file:///tmp/player")!, "file", "", 0))
+    #expect(!admitted(URL(string: "https://name:pass@games.example.test/player")!,
+                      "https", "games.example.test", 0))
+}
+
+
 @Test func prewarmV2SceneMetricGateAdmitsExactlyOneCurrentTrustedSceneSubmission() {
     let nonce = String(repeating: "a", count: 32)
     let valid: [String: Any] = [
