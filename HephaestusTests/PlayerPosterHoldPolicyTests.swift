@@ -42,21 +42,26 @@ private func posterAttempt(
     var poster = PlayerPosterHoldPolicy(attempt: current)
     // Prewarmed WebKit can submit its first scene before didFinish or
     // before SwiftUI attachment; a validated exact-once transfer is needed.
-    #expect(!poster.acceptTrustedSceneSubmission(
-        for: current, validatedByNativeGate: false, ownsCurrentAttachment: true))
-    #expect(!poster.acceptTrustedSceneSubmission(
-        for: current, validatedByNativeGate: true, ownsCurrentAttachment: false))
+    let observedPosterTransition1 = !poster.acceptTrustedSceneSubmission(
+        for: current, validatedByNativeGate: false, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition1)
+    let observedPosterTransition2 = !poster.acceptTrustedSceneSubmission(
+        for: current, validatedByNativeGate: true, ownsCurrentAttachment: false)
+    #expect(observedPosterTransition2)
     #expect(poster.mustHoldPoster)
-    #expect(poster.acceptTrustedSceneSubmission(
-        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true))
+    let observedPosterTransition3 = poster.acceptTrustedSceneSubmission(
+        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition3)
     #expect(poster.state == .sceneSubmitted)
     #expect(poster.mayBeginSceneSubmittedCrossfade)
-    #expect(!poster.acceptTrustedSceneSubmission(
-        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true))
+    let observedPosterTransition4 = !poster.acceptTrustedSceneSubmission(
+        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition4)
     poster.noteNavigationFinish(for: current)
     #expect(!poster.navigationFinished)
     // The first scene milestone is *not* compositor presentation.
-    #expect(!poster.markTimeout(for: current, ownsCurrentAttachment: true))
+    let observedPosterTransition5 = !poster.markTimeout(for: current, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition5)
     #expect(poster.mayBeginSceneSubmittedCrossfade)
 }
 
@@ -73,38 +78,50 @@ private func posterAttempt(
     var poster = PlayerPosterHoldPolicy(attempt: current)
     for wrong in foreign {
         poster.noteNavigationFinish(for: wrong)
-        #expect(!poster.acceptTrustedSceneSubmission(
-            for: wrong, validatedByNativeGate: true, ownsCurrentAttachment: true))
-        #expect(!poster.markTimeout(for: wrong, ownsCurrentAttachment: true))
-        #expect(!poster.markFailure(for: wrong, ownsCurrentAttachment: true))
+        let observedPosterTransition6 = !poster.acceptTrustedSceneSubmission(
+            for: wrong, validatedByNativeGate: true, ownsCurrentAttachment: true)
+        #expect(observedPosterTransition6)
+        let observedPosterTransition7 = !poster.markTimeout(for: wrong, ownsCurrentAttachment: true)
+        #expect(observedPosterTransition7)
+        let observedPosterTransition8 = !poster.markFailure(for: wrong, ownsCurrentAttachment: true)
+        #expect(observedPosterTransition8)
         #expect(poster.state == .holding)
         #expect(!poster.navigationFinished)
     }
-    #expect(poster.acceptTrustedSceneSubmission(
-        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true))
+    let observedPosterTransition9 = poster.acceptTrustedSceneSubmission(
+        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition9)
 }
 
 @Test func playerPosterTimeoutFailureAndRetirementCannotBeResurrected() {
     let current = posterAttempt()
     var timedOut = PlayerPosterHoldPolicy(attempt: current)
-    #expect(!timedOut.markTimeout(for: current, ownsCurrentAttachment: false))
-    #expect(timedOut.markTimeout(for: current, ownsCurrentAttachment: true))
+    let observedPosterTransition10 = !timedOut.markTimeout(for: current, ownsCurrentAttachment: false)
+    #expect(observedPosterTransition10)
+    let observedPosterTransition11 = timedOut.markTimeout(for: current, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition11)
     #expect(timedOut.mustShowRecovery)
     #expect(!timedOut.mayBeginSceneSubmittedCrossfade)
-    #expect(!timedOut.acceptTrustedSceneSubmission(
-        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true))
-    #expect(!timedOut.markTimeout(for: current, ownsCurrentAttachment: true))
+    let observedPosterTransition12 = !timedOut.acceptTrustedSceneSubmission(
+        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition12)
+    let observedPosterTransition13 = !timedOut.markTimeout(for: current, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition13)
 
     var failed = PlayerPosterHoldPolicy(attempt: current)
-    #expect(failed.acceptTrustedSceneSubmission(
-        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true))
-    #expect(failed.markFailure(for: current, ownsCurrentAttachment: true))
+    let observedPosterTransition14 = failed.acceptTrustedSceneSubmission(
+        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition14)
+    let observedPosterTransition15 = failed.markFailure(for: current, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition15)
     #expect(failed.mustShowRecovery)
-    #expect(!failed.acceptTrustedSceneSubmission(
-        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true))
+    let observedPosterTransition16 = !failed.acceptTrustedSceneSubmission(
+        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition16)
     failed.retire()
     #expect(failed.state == .retired)
-    #expect(!failed.markFailure(for: current, ownsCurrentAttachment: true))
+    let observedPosterTransition17 = !failed.markFailure(for: current, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition17)
     failed.noteNavigationFinish(for: current)
     #expect(!failed.navigationFinished)
     #expect(!failed.mayBeginSceneSubmittedCrossfade)
@@ -122,8 +139,9 @@ private func posterAttempt(
         #expect(!invalid.isValid)
         var policy = PlayerPosterHoldPolicy(attempt: invalid)
         #expect(policy.state == .retired)
-        #expect(!policy.acceptTrustedSceneSubmission(
-            for: invalid, validatedByNativeGate: true, ownsCurrentAttachment: true))
+        let observedPosterTransition18 = !policy.acceptTrustedSceneSubmission(
+            for: invalid, validatedByNativeGate: true, ownsCurrentAttachment: true)
+        #expect(observedPosterTransition18)
     }
 
     let valid = posterAttempt(documentNonce: String(repeating: "f", count: 32))
@@ -132,11 +150,13 @@ private func posterAttempt(
         let nonce = String(format: "%032x", index)
         let stale = posterAttempt(documentNonce: nonce)
         #expect(stale != valid)
-        #expect(!active.acceptTrustedSceneSubmission(
-            for: stale, validatedByNativeGate: true, ownsCurrentAttachment: true))
+        let observedPosterTransition19 = !active.acceptTrustedSceneSubmission(
+            for: stale, validatedByNativeGate: true, ownsCurrentAttachment: true)
+        #expect(observedPosterTransition19)
         #expect(active.mustHoldPoster)
     }
     active.retire()
-    #expect(!active.acceptTrustedSceneSubmission(
-        for: valid, validatedByNativeGate: true, ownsCurrentAttachment: true))
+    let observedPosterTransition20 = !active.acceptTrustedSceneSubmission(
+        for: valid, validatedByNativeGate: true, ownsCurrentAttachment: true)
+    #expect(observedPosterTransition20)
 }
