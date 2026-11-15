@@ -30,10 +30,13 @@ def public_game(**overrides):
 def valid_package(game_id="sample-rainbow-bear"):
     return {
         "gameId": game_id,
-        "packageFormatVersion": "1.0",
+        "packageFormatVersion": "2.0",
         "minRuntimeVersion": "2026.10.23.2",
         "irVersion": "1.2",
         "ir": {"irVersion": "1.2", "game": {"id": game_id}},
+        "irSha256": "a" * 64,
+        "irHash": "a" * 12,
+        "assets": [],
     }
 
 
@@ -192,11 +195,20 @@ class LiveGameFixtureTests(unittest.TestCase):
             ({}, "game_id_mismatch"),
             ({**valid_package(), "gameId": "other-private-game"}, "game_id_mismatch"),
             ({**valid_package(), "packageFormatVersion": ""}, "missing_package_format"),
+            ({**valid_package(), "packageFormatVersion": "1.0"}, "unsupported_package_format"),
+            ({**valid_package(), "packageFormatVersion": "3.0"}, "unsupported_package_format"),
+            ({**valid_package(), "packageFormatVersion": None}, "missing_package_format"),
             ({**valid_package(), "minRuntimeVersion": None}, "missing_min_runtime"),
             ({**valid_package(), "irVersion": ""}, "missing_ir_version"),
             ({**valid_package(), "ir": {}}, "missing_ir"),
             ({**valid_package(), "ir": {"game": {}}}, "missing_ir_ir_version"),
             ({**valid_package(), "ir": {"irVersion": "1.1"}}, "ir_version_mismatch"),
+            ({**valid_package(), "irSha256": ""}, "missing_full_ir_sha"),
+            ({**valid_package(), "irSha256": "a" * 12}, "missing_full_ir_sha"),
+            ({**valid_package(), "irSha256": "A" * 64}, "missing_full_ir_sha"),
+            ({**valid_package(), "irHash": "b" * 12}, "short_ir_hash_mismatch"),
+            ({**valid_package(), "assets": None}, "missing_assets_array"),
+            ({**valid_package(), "assets": {}}, "missing_assets_array"),
         ]
         for payload, category in cases:
             with self.subTest(category=category):
