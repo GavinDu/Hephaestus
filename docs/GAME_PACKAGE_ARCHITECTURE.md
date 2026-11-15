@@ -6,7 +6,7 @@ Hephaestus is the social app; Game Inventory is the creation and publishing syst
 
 - Inventory service: creator inputs, AI pipeline, asset provenance, GameSpec, Game IR, validation, immutable versions, moderation, visibility and package delivery.
 - Hephaestus: capture/import UI, creator flow, feed, profiles, play, share, remix, reporting/blocking, permissions and native application lifecycle.
-- Runtime: the current PixiJS + Rapier interpreter/renderer served by the backend and hosted in a bridgeless iOS `WKWebView`. It exposes no native API bridge to game content.
+- Runtime: the installed PixiJS + Rapier interpreter/renderer served by the trusted backend and hosted in a scoped iOS `WKWebView`. Its narrow result/telemetry `WKScriptMessageHandler` is not a general-purpose native command API and must never accept arbitrary creator-executable code.
 
 Backend: https://github.com/GavinDu/html5-game-generator  
 Contract: [Game Package / Game IR v1](https://github.com/GavinDu/html5-game-generator/blob/main/docs/game-package-ir-v1.md).  
@@ -16,7 +16,7 @@ Current delivery contract: `GET /v1/games/{id}/package` returns package format `
 
 The shipped player uses **PixiJS + Rapier** in a backend-served page hosted in `WKWebView`. The app and backend share a versioned, engine-independent Game IR / Game Package contract. The previous native Swift interpreter and Defold target were retired during the single-runtime consolidation; do not restore either as a second runtime without an explicit architecture decision and a conformance plan.
 
-The Game IR is declarative data, not arbitrary downloaded JavaScript, Lua, native libraries, or unrestricted imports. The app owns device permissions and native services. The WebView remains bridgeless: no `WKScriptMessageHandler`, user scripts, or `evaluateJavaScript` control channel. Runtime quality is selected through a URL parameter, and native telemetry leaves through ordinary HTTPS requests.
+The Game IR is declarative data, not arbitrary downloaded JavaScript, Lua, native libraries, or unrestricted imports. The app owns device permissions and native services. The production WebView is **narrowly bridged**, not literally bridgeless: its validated `WKScriptMessageHandler` receives only known runtime-result and performance metric notices from the expected trusted main-frame origin, with game/session/lease checks and no general-purpose native command API. The host independently fetches verified-result status from the backend; opaque IDs and client scores are never attestation. Runtime quality is selected through a URL parameter, and native telemetry leaves through ordinary HTTPS requests. No `evaluateJavaScript` general control channel is used. Review the limited message channel explicitly under App Review Guideline 4.7.2 before release; do not expand it to expose native platform APIs without Apple permission.
 
 ## Runtime boundary
 

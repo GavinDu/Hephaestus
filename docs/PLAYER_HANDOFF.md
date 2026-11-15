@@ -1,5 +1,19 @@
 # Preview-to-game handoff design (Hephaestus #58)
 
+> **Historical design note (October 2026), superseded for runtime readiness
+> by Epic #202.** Shipping `PixiPlayer.swift` now has a narrow,
+> origin/main-frame/session/attachment-validated `WKScriptMessageHandler`
+> for runtime result and performance notices. The trusted runtime reports
+> `first_scene_render_submit` and `first_input` separately. Neither
+> `WKNavigationDelegate.didFinish` nor renderer submission alone proves
+> the first *GPU-composited* frame. For current authoritative semantics,
+> see [PLAYER_HOST_LAUNCH_REDUCER.md](./PLAYER_HOST_LAUNCH_REDUCER.md),
+> [PLAYER_NATIVE_METRIC_GATE.md](./PLAYER_NATIVE_METRIC_GATE.md) and
+> [runtime Epic #202](https://github.com/GavinDu/Hephaestus/issues/202).
+> Proposed navigation-finish crossfade and readiness statements below
+> describe the original #58 design; do not implement them as new truth.
+
+
 Design proposal for making Play feel like the clip turning into the
 game, confirmed by Gavin 2026-10-26 and implemented on PR #86
 (see "Implementation" below). The remaining follow-ups are a
