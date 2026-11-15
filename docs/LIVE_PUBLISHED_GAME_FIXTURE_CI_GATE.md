@@ -18,3 +18,9 @@ A missing/empty feed, missing owner, rejected/moderated/nonpublic game, bad JSON
 - Merge #345 only after **all seven exact-head native Xcode/unit, player smoke, iPad evaluator and backend/presentation jobs pass**. The new preflight must not be treated as proof of deterministic game execution, first GPU compositor frame, WebKit memory/thermal, trust score or physical iPhone/iPad hardware. These remain open in Epic #202.
 
 Rollback reverts only the preflight module/tests, workflow prerequisite and this documentation.
+
+### 2026-11-14 live-package failure classification
+
+A real required [iPad evaluator run #43652844928](https://github.com/GavinDu/Hephaestus/actions/runs/43652844928) found `feed_count=3, eligible_count=3` but none of the three public games passed the same-origin package contract. The previous preflight swallowed all per-package reasons, so the result could not distinguish a missing public package from invalid HTML/JSON or a versioned envelope mismatch. The subsequent narrow source improvement records only **bounded category counts** (`http_404`, `http_403`, `transport`, `redirect`, `not_json`, `invalid_json`, `too_large`, `invalid_envelope`, `unavailable`). It never emits raw upstream error text, creator/game identities, package URLs or response bodies, and still fails the job if no real package qualifies. Extra offline negative tests verify categories and privacy.
+
+This categorization is observability **only**: it does not create or repair a game package, mark a game moderated, or remove the required player smoke; keep fixture owner #288 and runtime Epic #202 OPEN until real published content and native CI are verified. Source-only review is not proof of live deployment health.
