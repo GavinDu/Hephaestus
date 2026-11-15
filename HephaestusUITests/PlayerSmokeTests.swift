@@ -492,40 +492,43 @@ final class PlayerSmokeTests: XCTestCase {
         // require a fabricated table or pretend merely seeing text passes.
         // Physically tap the real onscreen 44pt CTA and verify the real host
         // Profile destination accepts the action.
-        let signIn = app.buttons["library.signIn"].firstMatch
-        XCTAssertTrue(signIn.waitForExistence(timeout: 8),
-                      "This signed-out recovery fixture must expose the actual Library Profile CTA.")
-        let hitFrame = signIn.frame
-            XCTAssertGreaterThanOrEqual(hitFrame.width, 44)
-            XCTAssertGreaterThanOrEqual(hitFrame.height, 44)
-            XCTAssertTrue(hitFrame.origin.x.isFinite &&
-                          hitFrame.origin.y.isFinite &&
-                          hitFrame.width.isFinite && hitFrame.height.isFinite,
-                          "Real Library sign-in needs a finite native hit rectangle.")
-            let appBounds = app.frame
-            XCTAssertTrue(appBounds.contains(CGPoint(x: hitFrame.midX,
-                                                    y: hitFrame.midY)),
-                          "The actual Library Profile CTA must be within the visible app window.")
-            let origin = app.coordinate(
-                withNormalizedOffset: CGVector(dx: 0, dy: 0))
-            origin.withOffset(CGVector(
-                dx: hitFrame.midX - appBounds.minX,
-                dy: hitFrame.midY - appBounds.minY
-            )).tap()
-            let appleSignIn = app.buttons["Sign in with Apple"].firstMatch
-            XCTAssertTrue(appleSignIn.waitForExistence(timeout: 10) &&
-                          appleSignIn.isHittable,
-                          "Physical native Library CTA tap must open genuine Apple Profile sign-in.")
-            let profile = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            profile.name = isPad ? "arcade-pulse-early-ipad-profile-arrived" :
-                                   "arcade-pulse-early-iphone-profile-arrived"
-            profile.lifetime = .keepAlways
-            add(profile)
+        // Capture the ACTUAL Library screen before tapping Profile.
+        // Do not mislabel a later Profile screenshot as Library evidence.
         let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         arrived.name = isPad ? "arcade-pulse-early-ipad-library-arrived" :
                                "arcade-pulse-early-iphone-library-arrived"
         arrived.lifetime = .keepAlways
         add(arrived)
+
+        let signIn = app.buttons["library.signIn"].firstMatch
+        XCTAssertTrue(signIn.waitForExistence(timeout: 8),
+                      "This signed-out recovery fixture must expose the actual Library Profile CTA.")
+        let hitFrame = signIn.frame
+        XCTAssertGreaterThanOrEqual(hitFrame.width, 44)
+        XCTAssertGreaterThanOrEqual(hitFrame.height, 44)
+        XCTAssertTrue(hitFrame.origin.x.isFinite &&
+                      hitFrame.origin.y.isFinite &&
+                      hitFrame.width.isFinite && hitFrame.height.isFinite,
+                      "Real Library sign-in needs a finite native hit rectangle.")
+        let appBounds = app.frame
+        XCTAssertTrue(appBounds.contains(CGPoint(x: hitFrame.midX,
+                                                y: hitFrame.midY)),
+                      "The actual Library Profile CTA must be within the visible app window.")
+        let origin = app.coordinate(
+            withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        origin.withOffset(CGVector(
+            dx: hitFrame.midX - appBounds.minX,
+            dy: hitFrame.midY - appBounds.minY
+        )).tap()
+        let appleSignIn = app.buttons["Sign in with Apple"].firstMatch
+        XCTAssertTrue(appleSignIn.waitForExistence(timeout: 10) &&
+                      appleSignIn.isHittable,
+                      "Physical native Library CTA tap must open genuine Apple Profile sign-in.")
+        let profile = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        profile.name = isPad ? "arcade-pulse-early-ipad-profile-arrived" :
+                               "arcade-pulse-early-iphone-profile-arrived"
+        profile.lifetime = .keepAlways
+        add(profile)
         XCUIDevice.shared.orientation = .portrait
     }
 
