@@ -110,6 +110,32 @@ struct DiscoverView: View {
         }
     }
 
+    /// Genuine Retry and Library routes while a live request is slow.
+    /// Never misreport informational waiting as an outage or a playable game.
+    private var feedLoadingRetry: some View {
+        Button {
+            Task { await load() }
+        } label: {
+            Label("Retry loading", systemImage: "arrow.clockwise")
+                .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(ArcadePulseRecoveryButtonStyle())
+        .accessibilityIdentifier("feed.retryLoading")
+    }
+
+    @ViewBuilder private var feedSlowLibrary: some View {
+        if let onOpenLibrary {
+            Button(action: onOpenLibrary) {
+                Label("Open Library", systemImage: "bookmark")
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(.bordered)
+            .tint(ArcadePulseTheme.neonMagenta)
+            .accessibilityIdentifier("feed.loading.library")
+        }
+    }
+
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.scenePhase) private var scenePhase
@@ -127,6 +153,7 @@ struct DiscoverView: View {
     @State private var socialMutationGate = FeedSocialMutationGate()
     @State private var socialMutationEpoch = 0
     @State private var isLoading = false
+    @State private var isSlowLoading = false
     @State private var searchText = ""
     @State private var savedGameIDs = Set<String>()
     @State private var followedCreatorIDs = Set<String>()
@@ -347,17 +374,29 @@ struct DiscoverView: View {
                             }
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel("Loading games")
-                            // A slow or suspended network request must not trap the
-                            // player behind an unclickable skeleton. This retries
-                            // with a NEW request, cancelling the previous one.
-                            Button {
-                                Task { await load() }
-                            } label: {
-                                Label("Retry loading", systemImage: "arrow.clockwise")
-                                    .frame(minHeight: 44)
+                            // A delayed response is not necessarily an
+                            // outage. Retain real transport while offering
+                            // a genuine Library escape after the early hint.
+                            if isSlowLoading {
+                                Text(onOpenLibrary == nil
+                                     ? "Still connecting to the live feed. You can retry."
+                                     : "Still connecting to the live feed. You can retry or open Library.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .accessibilityIdentifier("feed.loading.slow")
                             }
-                            .buttonStyle(ArcadePulseRecoveryButtonStyle())
-                            .accessibilityIdentifier("feed.retryLoading")
+                            if verticalSizeClass == .compact {
+                                HStack(spacing: 12) {
+                                    feedLoadingRetry
+                                    if isSlowLoading { feedSlowLibrary }
+                                }
+                            } else {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    feedLoadingRetry
+                                    if isSlowLoading { feedSlowLibrary }
+                                }
+                            }
 
                             LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: HephaestusDesign.sectionSpacing) {
                                 ForEach(0..<(horizontalSizeClass == .regular ? 4 : 2), id: \.self) { _ in
@@ -955,10 +994,13 @@ struct DiscoverView: View {
         // Native tests can stall only the HTTP transport, never inject a
         // success response, game card, creator, screenshot or media asset.
         #if DEBUG
-        let testingStalledTransport = ProcessInfo.processInfo.arguments.contains(
-            "--ui-test-stalled-feed"
+        let testingEarlySlowHint = ProcessInfo.processInfo.arguments.contains(
+            "--ui-test-stalled-feed-early-hint"
         )
+        let testingStalledTransport = testingEarlySlowHint ||
+            ProcessInfo.processInfo.arguments.contains("--ui-test-stalled-feed")
         #else
+        let testingEarlySlowHint = false
         let testingStalledTransport = false
         #endif
         let (generation, request) = feedRequestCoordinator.begin {
@@ -969,26 +1011,48 @@ struct DiscoverView: View {
             return try await BackendAPI.shared.fetchFeed(scope: requestedScope)
         }
         isLoading = true
+        isSlowLoading = false
         errorMessage = nil
+
+        // Nonterminal hint: keep the genuine request running to its own
+        // hard deadline. Scope and request ownership prevent stale callbacks.
+        let slowHint = Task { @MainActor in
+            do {
+                try await Task.sleep(for:
+                    testingStalledTransport ? .milliseconds(650) : .seconds(15))
+            } catch { return }
+            guard FeedSlowLoadingPolicy.canShowLibrary(
+                isLoading: isLoading,
+                hasGames: !games.isEmpty,
+                ownsRequest: feedRequestCoordinator.isCurrent(generation),
+                matchesScope: requestedScope == selectedFeed
+            ) else { return }
+            isSlowLoading = true
+        }
+
         // Real production feeds have a 45s bounded loading budget. A
         // deliberately stalled native UITest uses 3s to prove the identical
         // recovery state without consuming the whole macOS test budget.
         let watchdog = Task { @MainActor in
             do {
                 try await Task.sleep(for:
-                    testingStalledTransport ? .seconds(3) : .seconds(45))
+                    testingEarlySlowHint ? .seconds(35) :
+                    (testingStalledTransport ? .seconds(3) : .seconds(45)))
             } catch { return }
             guard isLoading, games.isEmpty,
                   requestedScope == selectedFeed,
                   feedRequestCoordinator.expireIfCurrent(generation) else { return }
             isLoading = false
+            isSlowLoading = false
             errorMessage =
                 "The game feed is taking too long to load. Try again or open Library."
         }
         defer {
+            slowHint.cancel()
             watchdog.cancel()
             if feedRequestCoordinator.isCurrent(generation) {
                 isLoading = false
+                isSlowLoading = false
                 feedRequestCoordinator.finishIfCurrent(generation)
             }
         }
@@ -1009,6 +1073,7 @@ struct DiscoverView: View {
             // do not keep the entire feed behind its loading skeleton while those
             // secondary endpoints respond or recover from a transient outage.
             isLoading = false
+            isSlowLoading = false
 
             let hasServerViewerState = loadedGames.games.contains {
                 $0.viewerLiked != nil || $0.viewerSaved != nil || $0.viewerFollowing != nil
@@ -1035,6 +1100,17 @@ struct DiscoverView: View {
                 errorMessage = FeedErrorPresentation.message(for: error)
             }
         }
+    }
+}
+
+/// A slow-loading Library escape is presentational only: never create a
+/// new game, authorize a media preview or alter request ownership.
+enum FeedSlowLoadingPolicy {
+    static func canShowLibrary(
+        isLoading: Bool, hasGames: Bool,
+        ownsRequest: Bool, matchesScope: Bool
+    ) -> Bool {
+        isLoading && !hasGames && ownsRequest && matchesScope
     }
 }
 
