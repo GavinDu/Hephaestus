@@ -579,6 +579,11 @@ final class PlayerSmokeTests: XCTestCase {
         let signIn = app.buttons["library.signIn"].firstMatch
         // Clean native CI is signed out; fail if the real CTA is absent.
         XCTAssertTrue(signIn.waitForExistence(timeout: 10))
+        let savedCaption = app.staticTexts["library.savedCount.status"].firstMatch
+        XCTAssertTrue(savedCaption.waitForExistence(timeout: 8),
+                      "Saved-count status must name its current account state.")
+        XCTAssertEqual(savedCaption.label, "Sign in to see saved-game count",
+                       "A signed-out Library must never imply saved count zero.")
         if signIn.exists {
             XCTAssertTrue(signIn.isHittable)
             XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
@@ -655,6 +660,11 @@ final class PlayerSmokeTests: XCTestCase {
                       "A clean unauthenticated simulator must show the real saved-game sign-in route.")
         XCTAssertTrue(signIn.isHittable)
         XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        let savedCaption = app.staticTexts["library.savedCount.status"].firstMatch
+        XCTAssertTrue(savedCaption.waitForExistence(timeout: 8))
+        XCTAssertEqual(savedCaption.label, "Sign in to see saved-game count")
+        XCTAssertTrue(app.frame.intersects(savedCaption.frame),
+                      "Library count state must be visible on actual iPad portrait.")
         let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         portrait.name = "arcade-pulse-library-ipad-portrait"
         portrait.lifetime = .keepAlways
@@ -671,6 +681,9 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(library.waitForExistence(timeout: 10))
         XCTAssertTrue(signIn.isHittable,
                       "iPad landscape Library sign-in must not be hidden by the sidebar.")
+        XCTAssertEqual(savedCaption.label, "Sign in to see saved-game count")
+        XCTAssertTrue(app.frame.intersects(savedCaption.frame),
+                      "Account status must remain visible after iPad rotation.")
         let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         landscape.name = "arcade-pulse-library-ipad-landscape"
         landscape.lifetime = .keepAlways
