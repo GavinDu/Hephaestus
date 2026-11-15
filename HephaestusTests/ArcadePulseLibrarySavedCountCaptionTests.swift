@@ -1,3 +1,4 @@
+import SwiftUI
 import Testing
 @testable import Hephaestus
 
@@ -34,6 +35,18 @@ struct ArcadePulseLibrarySavedCountCaptionTests {
             confirmedCount: 8, signedIn: true, loading: true).visibleText == "Loading")
         // An unknown total must remain distinct from confirmed zero.
         #expect(failed.visibleText != trueEmpty.visibleText)
+    }
+
+    @Test func libraryCountStacksAtAccessibilitySizesAndCompactXXL() {
+        for size in [DynamicTypeSize.accessibility1, .accessibility2, .accessibility3,
+                     .accessibility4, .accessibility5] {
+            #expect(LibrarySavedCountLayout.stacks(for: size, compact: true))
+            #expect(LibrarySavedCountLayout.stacks(for: size, compact: false))
+        }
+        #expect(LibrarySavedCountLayout.stacks(for: .xxLarge, compact: true))
+        #expect(LibrarySavedCountLayout.stacks(for: .xxxLarge, compact: true))
+        #expect(!LibrarySavedCountLayout.stacks(for: .large, compact: true))
+        #expect(!LibrarySavedCountLayout.stacks(for: .xxLarge, compact: false))
     }
 
 }
