@@ -3,6 +3,15 @@ import SwiftUI
 /// Backend-grounded Creator Discovery rows — never substitute a fake creator
 /// or synthetic engagement metrics when the directory endpoint is unavailable.
 enum CreatorDirectoryRowLayout {
+    /// A native UI test may address a real server row by the same genuine
+    /// public ID used to load CreatorProfile. No index, invented user or
+    /// guessed row count may substitute for a malformed backend identity.
+    static func rowAccessibilityIdentifier(for creatorID: String) -> String? {
+        let trimmed = creatorID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed == creatorID else { return nil }
+        return "creator.discovery.row.\(creatorID)"
+    }
+
     static func stacksHeader(isRegularWidth: Bool, textSize: DynamicTypeSize) -> Bool {
         textSize.isAccessibilitySize ||
             (!isRegularWidth && textSize >= .xxLarge)
