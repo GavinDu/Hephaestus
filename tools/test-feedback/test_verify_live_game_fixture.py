@@ -173,7 +173,7 @@ class LiveGameFixtureTests(unittest.TestCase):
             (fixture.FixtureError("unexpected host/path"), "unavailable:1"),
             ((b"<html>no package</html>", "text/html"), "not_json:1"),
             ((b"{not-json", "application/json"), "invalid_json:1"),
-            ({}, "invalid_envelope:1"),
+            ({}, "invalid_envelope_game_id_mismatch:1"),
         ]
         for response, expected in failures:
             with self.subTest(category=expected):
@@ -185,6 +185,28 @@ class LiveGameFixtureTests(unittest.TestCase):
                 self.assertNotIn("sample-rainbow-bear", message)
                 self.assertNotIn("published-creator", message)
                 self.assertNotIn(self.PACKAGE, message)
+
+    def test_package_envelope_failures_have_safe_fixed_field_categories(self):
+        cases = [
+            (None, "not_object"),
+            ({}, "game_id_mismatch"),
+            ({**valid_package(), "gameId": "other-private-game"}, "game_id_mismatch"),
+            ({**valid_package(), "packageFormatVersion": ""}, "missing_package_format"),
+            ({**valid_package(), "minRuntimeVersion": None}, "missing_min_runtime"),
+            ({**valid_package(), "irVersion": ""}, "missing_ir_version"),
+            ({**valid_package(), "ir": {}}, "missing_ir"),
+            ({**valid_package(), "ir": {"game": {}}}, "missing_ir_ir_version"),
+            ({**valid_package(), "ir": {"irVersion": "1.1"}}, "ir_version_mismatch"),
+        ]
+        for payload, category in cases:
+            with self.subTest(category=category):
+                self.assertEqual(
+                    fixture.package_invalid_reason(payload, "sample-rainbow-bear"),
+                    category,
+                )
+                self.assertFalse(fixture.package_is_playable(payload, "sample-rainbow-bear"))
+        self.assertIsNone(fixture.package_invalid_reason(valid_package(), "sample-rainbow-bear"))
+        self.assertTrue(fixture.package_is_playable(valid_package(), "sample-rainbow-bear"))
 
     def test_package_error_classifier_never_echoes_arbitrary_exception_strings(self):
         self.assertEqual(fixture.package_failure_category("endpoint returned HTTP 404"), "http_404")
