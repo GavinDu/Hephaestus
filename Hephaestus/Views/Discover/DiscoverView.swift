@@ -2634,7 +2634,11 @@ private struct ReportGameSheet: View {
                 }
                 if let errorMessage {
                     Section {
-                        Text(errorMessage).foregroundStyle(.red)
+                        Label(errorMessage, systemImage: "exclamationmark.triangle")
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("report.error")
                     }
                 }
                 if submitted {
@@ -2649,10 +2653,22 @@ private struct ReportGameSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
+                        .frame(minWidth: 44, minHeight: 44)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Submit") { Task { await submit() } }
-                        .disabled(isSubmitting || submitted)
+                    Button {
+                        Task { await submit() }
+                    } label: {
+                        if isSubmitting {
+                            ProgressView()
+                                .accessibilityLabel("Submitting report")
+                        } else {
+                            Text("Submit")
+                        }
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .disabled(isSubmitting || submitted)
+                    .accessibilityIdentifier("report.submit")
                 }
             }
         }
@@ -2661,6 +2677,7 @@ private struct ReportGameSheet: View {
     private func submit() async {
         guard !isSubmitting, !submitted else { return }
         isSubmitting = true
+        errorMessage = nil
         defer { isSubmitting = false }
         let trimmedDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
         let reason = trimmedDetails.isEmpty ? selectedReason : "\(selectedReason): \(trimmedDetails)"
@@ -2675,7 +2692,9 @@ private struct ReportGameSheet: View {
             submitted = true
             errorMessage = nil
         } catch {
-            errorMessage = "Couldn't submit report: \(error.localizedDescription)"
+            // A lost moderation POST response is not confirmed rejection.
+            // Preserve the user's original reason and detailed report.
+            errorMessage = ReportGameErrorPresentation.message(for: error)
         }
     }
 }
