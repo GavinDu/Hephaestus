@@ -6,14 +6,13 @@ import Testing
 /// Full screenshot/VoiceOver acceptance remains Epic #172 issue #269.
 struct ArcadePulsePlayableExpressionLayoutTests {
     @Test func ordinaryDynamicTypeKeepsCompactProvenanceBadges() {
-        for size: DynamicTypeSize in [.xSmall, .small, .medium, .large, .xLarge, .xxLarge, .xxxLarge] {
+        for size in [DynamicTypeSize.xSmall, .small, .medium, .large, .xLarge, .xxLarge, .xxxLarge] {
             #expect(!PlayableExpressionLayout.stacksMetadata(for: size))
         }
     }
 
     @Test func everyAccessibilityTextSizeStacksProvenanceBadges() {
-        for size: DynamicTypeSize in [
-            .accessibility1, .accessibility2, .accessibility3,
+        for size in [DynamicTypeSize.accessibility1, .accessibility2, .accessibility3,
             .accessibility4, .accessibility5
         ] {
             #expect(PlayableExpressionLayout.stacksMetadata(for: size))
