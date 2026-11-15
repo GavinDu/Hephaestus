@@ -10,10 +10,10 @@ import WebKit
 //
 // The player is the PixiJS + Rapier Game IR runtime — the single runtime
 // since the 2026-10-20 consolidation. The runtime is served by the backend
-// at /player and embedded here in a constrained WKWebView: the only native
-// message is a verified-run notification; there is no evaluateJavaScript
-// control channel and no arbitrary native API exposure (App Store Guideline
-// 4.7 posture). Everything this
+// at /player and embedded here in a constrained WKWebView: the sole narrow
+// message name carries validated runtime metrics and opaque run-result
+// notifications, never arbitrary native control. There is no evaluateJavaScript
+// control channel or general native API (App Store Guideline 4.7). Everything this
 // shell does for resource control, performance, and telemetry respects
 // that boundary:
 //   - performance reaches the page only as a URL parameter (?quality=),
@@ -924,10 +924,12 @@ enum PlayerWebViewPool {
         guard !isAttached, let url = playerURL(gameID: gameID) else { return }
         let view = pooledView ?? makeWebView()
         pooledView = view
-        // A recycled sheet removed its coordinator handler. Reinstall exactly
-        // one narrow pool handler before a new speculative navigation.
-        installPrewarmMetricHandler(view)
+        // An existing prewarm already has its listener; do not briefly
+        // unregister it while a first-scene message may be in flight.
         if currentURL == url && (view.isLoading || loadedURL == url) { return }
+        // A recycled sheet removed its coordinator handler. Reinstall exactly
+        // one narrow pool handler before the *new* speculative navigation.
+        installPrewarmMetricHandler(view)
 
         view.stopLoading()
         currentURL = url
