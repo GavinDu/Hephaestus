@@ -31,13 +31,25 @@ struct ArcadePulseIPadGameDetailsLayoutTests {
             #expect(media + metadata + 24 <= content)
         }
         #expect(ForYouPageLayout.gameDetailsPreviewWidth(containerWidth: 20) == 0)
-        // Landscape Game Details must use the available safe viewport height
-        // rather than the previous hard 520pt media ceiling. This expands
-        // genuine artwork or an honest no-preview fallback identically.
-        #expect(ForYouPageLayout.gameDetailsPreviewHeight(containerHeight: 1_000) == 640)
-        #expect(ForYouPageLayout.gameDetailsPreviewHeight(containerHeight: 760) >= 550)
-        #expect(ForYouPageLayout.gameDetailsPreviewHeight(containerHeight: 620) >= 450)
-        #expect(ForYouPageLayout.gameDetailsPreviewHeight(containerHeight: 0) == 0)
+        // Landscape must only expand genuinely decoded source artwork;
+        // a failed/loading/missing image must stay compact and truthful.
+        #expect(ForYouPageLayout.gameDetailsPreviewHeight(
+            containerHeight: 1_000, hasDecodedPoster: true) == 640)
+        #expect(ForYouPageLayout.gameDetailsPreviewHeight(
+            containerHeight: 760, hasDecodedPoster: true) >= 550)
+        #expect(ForYouPageLayout.gameDetailsPreviewHeight(
+            containerHeight: 620, hasDecodedPoster: true) >= 450)
+        #expect(ForYouPageLayout.gameDetailsPreviewHeight(
+            containerHeight: 1_000, hasDecodedPoster: false) == 335)
+        #expect(ForYouPageLayout.gameDetailsPreviewHeight(
+            containerHeight: 620, hasDecodedPoster: false) <= 250)
+        #expect(ForYouPageLayout.gameDetailsPreviewHeight(
+            containerHeight: 0, hasDecodedPoster: false) == 0)
+        #expect(ForYouPageLayout.gameDetailsPreviewHeight(
+            containerHeight: 0, hasDecodedPoster: true) == 0)
+        // Native Share is now black on solid violet, never low-contrast
+        // violet on purple in the actual iPad details view.
+        #expect(ArcadePulseTheme.electricVioletContrastWithBlack >= 4.5)
         // Genuine decoded artwork can use the otherwise wasted portrait iPad
         // viewport. Missing posters stay compact, never upscale fake media.
         let largePoster = ForYouPageLayout.gameDetailsSingleColumnPreviewHeight(
