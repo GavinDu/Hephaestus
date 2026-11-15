@@ -80,18 +80,31 @@ def candidates_in_feed(payload):
     return eligible
 
 
-def package_is_playable(payload, expected_game_id):
-    # Match the concrete backend GamePackage envelope, not an arbitrary
-    # nonempty JSON object that only happens to have a matching ID.
-    if not isinstance(payload, dict) or payload.get("gameId") != expected_game_id:
-        return False
-    if not all(isinstance(payload.get(k), str) and payload[k].strip()
-               for k in ("packageFormatVersion", "minRuntimeVersion", "irVersion")):
-        return False
+def package_invalid_reason(payload, expected_game_id):
+    """Return only a fixed diagnostic category, never any input data."""
+    if not isinstance(payload, dict):
+        return "not_object"
+    if payload.get("gameId") != expected_game_id:
+        return "game_id_mismatch"
+    for key, category in (
+        ("packageFormatVersion", "missing_package_format"),
+        ("minRuntimeVersion", "missing_min_runtime"),
+        ("irVersion", "missing_ir_version"),
+    ):
+        if not isinstance(payload.get(key), str) or not payload[key].strip():
+            return category
     ir = payload.get("ir")
-    return (isinstance(ir, dict) and bool(ir)
-            and isinstance(ir.get("irVersion"), str)
-            and ir["irVersion"] == payload["irVersion"])
+    if not isinstance(ir, dict) or not ir:
+        return "missing_ir"
+    if not isinstance(ir.get("irVersion"), str) or not ir["irVersion"].strip():
+        return "missing_ir_ir_version"
+    if ir["irVersion"] != payload["irVersion"]:
+        return "ir_version_mismatch"
+    return None
+
+
+def package_is_playable(payload, expected_game_id):
+    return package_invalid_reason(payload, expected_game_id) is None
 
 
 def package_failure_category(message):
@@ -136,7 +149,7 @@ def check_once(opener, feed_url, timeout):
             continue
         if package_is_playable(package, game_id):
             return game_id, total, len(eligible)
-        failure_reasons["invalid_envelope"] += 1
+        failure_reasons["invalid_envelope_" + package_invalid_reason(package, game_id)] += 1
     # Only categorical bounded counts; never the raw URL, response or ID.
     breakdown = ",".join(f"{key}:{failure_reasons[key]}" for key in sorted(failure_reasons))
     raise FixtureError(
