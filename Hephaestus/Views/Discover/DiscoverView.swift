@@ -2238,7 +2238,11 @@ private struct CreatorDiscoverySheet: View {
                     HStack { Spacer(); ProgressView("Finding creators…"); Spacer() }
                         .accessibilityIdentifier("creator.discovery.searching")
                 } else if creators.isEmpty {
-                    if errorMessage == nil {
+                    if CreatorDiscoveryResultsPolicy.showsEmptyMessage(
+                        isLoading: isLoading,
+                        hasResults: !creators.isEmpty,
+                        hasError: errorMessage != nil
+                    ) {
                         ContentUnavailableView(
                             "No creators found",
                             systemImage: "person.2",
@@ -2287,7 +2291,11 @@ private struct CreatorDiscoverySheet: View {
                             .accessibilityLabel("View creator \(creator.creator_id), \(creator.post_count) public games")
                         }
                     }
-                    if nextCursor != nil && resultsMatchCurrentSearch {
+                    if CreatorDiscoveryResultsPolicy.allowsNextPage(
+                        resultsMatchCurrentSearch: resultsMatchCurrentSearch,
+                        hasNextCursor: nextCursor != nil,
+                        isLoading: isLoading
+                    ) {
                         Section {
                             Button {
                                 Task { await load(reset: false) }
