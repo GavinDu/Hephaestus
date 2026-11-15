@@ -16,6 +16,23 @@ enum CreatorFollowStatePolicy {
             !isUpdating && !needsConfirmation
     }
 
+    /// A POST acknowledgement requests a specific relationship state.
+    /// A following GET with the previous value is a *real* server read but
+    /// NOT confirmation of that acknowledged write. Do not unlock an
+    /// opposite mutation until the server visibly reflects the target.
+    /// nil is used only when no acknowledged target exists (ordinary GET or
+    /// POST with an ambiguous/lost response); its consistency still depends
+    /// on the producer's authoritative relationship-version contract.
+    static func confirmsAcknowledgedTarget(
+        expectedFollowing: Bool?, observedFollowing: Bool
+    ) -> Bool {
+        guard let expectedFollowing else { return true }
+        return expectedFollowing == observedFollowing
+    }
+
+    static let syncPendingMessage =
+        "Follow status has not reflected your change yet. Refresh status before trying again."
+
     /// A stale GET, changed viewer or GET started during another mutation
     /// cannot certify the current account's following relationship.
     static func mayApplyCreatorRead(
