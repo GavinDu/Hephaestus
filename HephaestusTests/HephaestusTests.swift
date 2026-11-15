@@ -2332,3 +2332,73 @@ struct HephaestusTests {
     fresh.request.cancel()
     coordinator.finishIfCurrent(fresh.generation)
 }
+
+
+@Test func nativeRunResultNeverPromotesLegacyBrowserVerdicts() {
+    // The browser once supplied its own verified/actualScore fields.
+    // Even a server-returned status string cannot establish independent
+    // semantic replay without explicit server-only provenance metadata.
+    let trusted: [String: Any] = [
+        "runId": "server-run-1",
+        "gameId": "published-game",
+        "status": "verified",
+        "result": ["won": true, "score": 12, "durationMs": 780],
+        "attested": true,
+        "rankingScope": "verified_only",
+        "evidenceStatus": "verified"
+    ]
+    func admitted(_ json: [String: Any]) -> Bool {
+        guard let bytes = try? JSONSerialization.data(withJSONObject: json),
+              let result = try? JSONDecoder().decode(
+                  VerifiedRunResult.self, from: bytes
+              ) else { return false }
+        return result.isVerified
+    }
+    #expect(admitted(trusted))
+
+    let legacy: [String: Any] = [
+        "runId": "legacy-client-score",
+        "gameId": "published-game",
+        "status": "verified",
+        "result": ["won": true, "score": 99, "durationMs": 100],
+        "rank": ["scope": "week", "position": 1],
+    ]
+    #expect(!admitted(legacy))
+    for field in ["attested", "rankingScope", "evidenceStatus"] {
+        var absent = trusted
+        absent.removeValue(forKey: field)
+        #expect(!admitted(absent))
+        absent[field] = NSNull()
+        #expect(!admitted(absent))
+    }
+
+    let disallowed: [(String, Any)] = [
+        ("attested", false),
+        ("attested", "true"),
+        ("rankingScope", "provisional"),
+        ("rankingScope", "all"),
+        ("rankingScope", true),
+        ("evidenceStatus", "unverified"),
+        ("evidenceStatus", "legacy_unverified"),
+        ("evidenceStatus", true),
+        ("status", "unverified"),
+        ("status", "pending")
+    ]
+    for (field, value) in disallowed {
+        var altered = trusted
+        altered[field] = value
+        #expect(!admitted(altered))
+    }
+    var missingResult = trusted
+    missingResult.removeValue(forKey: "result")
+    #expect(!admitted(missingResult))
+    var nullResult = trusted
+    nullResult["result"] = NSNull()
+    #expect(!admitted(nullResult))
+    var spoofedProvisional = legacy
+    spoofedProvisional["verified"] = true
+    spoofedProvisional["attested"] = true
+    spoofedProvisional["rankingScope"] = "provisional"
+    spoofedProvisional["evidenceStatus"] = "verified"
+    #expect(!admitted(spoofedProvisional))
+}
