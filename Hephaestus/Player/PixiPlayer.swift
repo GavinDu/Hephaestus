@@ -229,6 +229,31 @@ struct PlayerPrewarmV2SceneMetricGate {
     }
 }
 
+/// Pure native-side provenance policy for speculative WebKit callbacks.
+/// The caller supplies identity/frame/origin from WKScriptMessage itself, not
+/// from browser JSON. URL equality includes the exact game and quality query.
+enum PlayerPrewarmMessageOriginPolicy {
+    static func allows(
+        isCurrentPooledView: Bool,
+        isAttached: Bool,
+        expectedURL: URL?,
+        actualURL: URL?,
+        isMainFrame: Bool,
+        originScheme: String,
+        originHost: String,
+        originPort: Int,
+        backendURL: URL
+    ) -> Bool {
+        guard isCurrentPooledView, !isAttached, isMainFrame,
+              let expectedURL, actualURL == expectedURL,
+              let scheme = backendURL.scheme, let host = backendURL.host
+        else { return false }
+        let expectedPort = backendURL.port ?? (scheme == "https" ? 443 : 80)
+        return originScheme == scheme && originHost == host &&
+            originPort == expectedPort
+    }
+}
+
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
@@ -1122,24 +1147,27 @@ enum PlayerWebViewPool {
     // native frame/origin and credential fingerprint, and the one current
     // nonce-bound schema-v2 metric before storing a bounded observation.
     private static func collectPrewarmMetric(_ message: WKScriptMessage) {
-        guard !isAttached, message.name == prewarmMetricName,
-              let view = pooledView, message.webView === view,
-              let url = currentURL, view.url == url,
+        guard message.name == prewarmMetricName,
+              let view = pooledView, let url = currentURL,
               let expectedGameID = URLComponents(
                   url: url, resolvingAgainstBaseURL: false
               )?.queryItems?.first(where: { $0.name == "game" })?.value,
               let body = message.body as? [String: Any] else { return }
         let source = message.frameInfo.securityOrigin
-        let backendURL = BackendConfig.baseURL
-        let scheme = backendURL.scheme ?? ""
-        let port = backendURL.port ?? (scheme == "https" ? 443 : 80)
-        let sameOrigin = source.protocol == scheme &&
-            source.host == backendURL.host && source.port == port
+        let trustedProvenance = PlayerPrewarmMessageOriginPolicy.allows(
+            isCurrentPooledView: message.webView === view,
+            isAttached: isAttached,
+            expectedURL: currentURL, actualURL: view.url,
+            isMainFrame: message.frameInfo.isMainFrame,
+            originScheme: source.protocol, originHost: source.host,
+            originPort: source.port, backendURL: BackendConfig.baseURL
+        )
+        guard trustedProvenance else { return }
         _ = prewarmSceneGate.record(
             body, expectedGameID: expectedGameID,
             currentDocumentNonce: documentEpochGate.currentNonce,
             isTrustedMainFrame: message.frameInfo.isMainFrame,
-            isSameOrigin: sameOrigin,
+            isSameOrigin: trustedProvenance,
             navigationStarted: documentEpochGate.navigationStarted,
             credentialScopeCurrent: sessionFingerprint == credentialFingerprint()
         )
