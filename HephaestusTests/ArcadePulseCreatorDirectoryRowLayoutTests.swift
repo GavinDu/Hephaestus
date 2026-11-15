@@ -30,6 +30,24 @@ struct ArcadePulseCreatorDirectoryRowLayoutTests {
         }
     }
 
+    @Test func accessibilityRowIdentityUsesOnlyGenuineNonemptyBackendID() {
+        #expect(CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
+            for: "doodlequest") == "creator.discovery.row.doodlequest")
+        #expect(CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
+            for: "creator-123") == "creator.discovery.row.creator-123")
+        #expect(CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
+            for: "创作者") == "creator.discovery.row.创作者")
+        for invalid in ["", " ", "\t", " creator ", "\ncreator", "creator\n"] {
+            #expect(CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
+                for: invalid) == nil)
+        }
+        // No order/index-based synthetic identifier, no fabricated account.
+        #expect(CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
+            for: "doodlequest") ==
+                CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
+                    for: "doodlequest"))
+    }
+
     @Test func realPublicGameCountsHaveCorrectSingularPlural() {
         #expect(CreatorDirectoryRowLayout.publicGameCount(0).contains("public games"))
         #expect(CreatorDirectoryRowLayout.publicGameCount(1) == "1 public game")
