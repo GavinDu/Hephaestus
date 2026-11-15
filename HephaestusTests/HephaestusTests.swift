@@ -2833,3 +2833,75 @@ struct HephaestusTests {
         #expect(ledger.candidate == nil)
     }
 }
+
+
+@Test func prewarmPermanentWebKitHandlerRoutesBothSidesOfAttachmentWithoutGap() {
+    typealias Policy = PlayerPrewarmMessageOwnershipPolicy
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: nil, currentLease: 9,
+        hasAttachedReceiver: false
+    ) == .speculative)
+    // A message delivered after take() but before the Coordinator's lease
+    // acknowledgement still reaches the strict pool-owned v2 collector.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 10, currentLease: 10,
+        hasAttachedReceiver: false
+    ) == .speculative)
+    // A retired lease cannot turn into a message capture window.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 10, currentLease: 11,
+        hasAttachedReceiver: false
+    ) == .drop)
+    // Once the Coordinator is installed, all later WKScriptMessage
+    // callbacks use the same handler but arrive at the attached owner.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: true
+    ) == .attached)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: false
+    ) == .drop)
+}
+
+@Test func prewarmSceneHandoffTransfersOnlyOnceToCurrentLease() {
+    typealias Ledger = PlayerPrewarmSceneMilestoneLedger
+    let identity = Ledger.Identity(
+        gameID: "test-game",
+        playerURL: URL(string: "https://games.example.test/player?game=test-game&quality=high")!,
+        documentNonce: String(repeating: "a", count: 32),
+        credentialFingerprint: "current-credential-hash",
+        runtimeSessionID: "current-session"
+    )
+    var ledger = Ledger()
+    let recorded = ledger.record(
+        identity: identity, expected: identity, sequence: 7,
+        milliseconds: 12, isMainFrame: true,
+        isSpeculative: true, navigationStarted: true
+    )
+    #expect(recorded)
+    let duplicate = ledger.record(
+        identity: identity, expected: identity, sequence: 8,
+        milliseconds: 13, isMainFrame: true,
+        isSpeculative: true, navigationStarted: true
+    )
+    #expect(!duplicate)
+    let stale = ledger.consume(
+        expected: identity, offeredLease: 19, currentLease: 20,
+        isCurrentPooledView: true, isAttached: true
+    )
+    #expect(stale == nil)
+    let accepted = ledger.consume(
+        expected: identity, offeredLease: 20, currentLease: 20,
+        isCurrentPooledView: true, isAttached: true
+    )
+    #expect(accepted?.milliseconds == 12)
+    #expect(accepted?.sequence == 7)
+    let repeated = ledger.consume(
+        expected: identity, offeredLease: 20, currentLease: 20,
+        isCurrentPooledView: true, isAttached: true
+    )
+    #expect(repeated == nil)
+    ledger.invalidate()
+    #expect(ledger.candidate == nil)
+}
