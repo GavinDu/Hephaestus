@@ -2511,6 +2511,16 @@ struct HephaestusTests {
         backendURL: backend
     )
     #expect(accepted)
+    // WebKit's WKSecurityOrigin.port reports 0 for the default HTTPS port,
+    // not necessarily 443. The valid current game must still be admitted.
+    let implicitHTTPSDefault = PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: expected, actualURL: expected,
+        isMainFrame: true, originScheme: "https",
+        originHost: "games.example.test", originPort: 0,
+        backendURL: backend
+    )
+    #expect(implicitHTTPSDefault)
 
     typealias Source = (Bool, Bool, URL?, URL?, Bool, String, String, Int, URL)
     let rejected: [Source] = [
@@ -2556,4 +2566,36 @@ struct HephaestusTests {
         backendURL: localBackend
     )
     #expect(!wrongPort)
+    #expect(!PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: localPlayer, actualURL: localPlayer,
+        isMainFrame: true, originScheme: "http",
+        originHost: "localhost", originPort: 0,
+        backendURL: localBackend
+    ))
+    let implicitHTTPBackend = URL(string: "http://localhost")!
+    let implicitHTTPPlayer = URL(string: "http://localhost/player?game=test")!
+    #expect(PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: implicitHTTPPlayer, actualURL: implicitHTTPPlayer,
+        isMainFrame: true, originScheme: "http",
+        originHost: "localhost", originPort: 0,
+        backendURL: implicitHTTPBackend
+    ))
+    let customHTTPSBackend = URL(string: "https://games.example.test:8443")!
+    let customHTTPSPlayer = URL(string: "https://games.example.test:8443/player?game=test")!
+    #expect(PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: customHTTPSPlayer, actualURL: customHTTPSPlayer,
+        isMainFrame: true, originScheme: "https",
+        originHost: "games.example.test", originPort: 8443,
+        backendURL: customHTTPSBackend
+    ))
+    #expect(!PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: customHTTPSPlayer, actualURL: customHTTPSPlayer,
+        isMainFrame: true, originScheme: "https",
+        originHost: "games.example.test", originPort: 0,
+        backendURL: customHTTPSBackend
+    ))
 }
