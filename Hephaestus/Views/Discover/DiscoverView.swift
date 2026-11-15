@@ -2492,6 +2492,7 @@ private struct CreatorProfileSheet: View {
                                         needsConfirmation: followStatusNeedsRefresh
                                     ))
                                     .accessibilityIdentifier("creator.profile.follow")
+                                }
                             }
                             .padding(18)
                             .background(ArcadePulseTheme.surface,
