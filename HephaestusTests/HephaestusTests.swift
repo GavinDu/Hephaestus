@@ -330,6 +330,19 @@ struct HephaestusTests {
         #expect(ArcadePulseTheme.electricVioletContrastWithBlack > 5)
     }
 
+    @Test func gridCardUsesOnlyValidatedBackendPosterURLs() {
+        // Source gate only; native screenshot acceptance still requires
+        // decoded real image pixels and true AVPlayer first-frame evidence.
+        #expect(GameFeedCard.validatedPosterURL(nil) == nil)
+        #expect(GameFeedCard.validatedPosterURL("") == nil)
+        #expect(GameFeedCard.validatedPosterURL("  \n  ") == nil)
+        #expect(GameFeedCard.validatedPosterURL("/posters/image.png") == nil)
+        #expect(GameFeedCard.validatedPosterURL("file:///private/image.png") == nil)
+        #expect(GameFeedCard.validatedPosterURL("javascript:alert(1)") == nil)
+        #expect(GameFeedCard.validatedPosterURL("https://example.org/real.webp")?.host == "example.org")
+        #expect(GameFeedCard.validatedPosterURL(" http://localhost:3000/preview.png ")?.scheme == "http")
+    }
+
     @Test func arcadePulseFoundationUsesSinglePaletteAndAccessibleTargetSizes() {
         #expect(ArcadePulseTheme.fallbackPalettes.count == 5)
         #expect(ArcadePulseTheme.minimumTarget >= 44)
