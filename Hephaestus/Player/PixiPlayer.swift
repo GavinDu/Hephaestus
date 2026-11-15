@@ -266,8 +266,10 @@ enum PlayerPrewarmMessageOwnershipPolicy {
     enum Recipient: Equatable { case speculative, attached, drop }
     static func recipient(
         isAttached: Bool, transferringLease: UInt64?,
-        currentLease: UInt64, hasAttachedReceiver: Bool
+        currentLease: UInt64, hasAttachedReceiver: Bool,
+        credentialScopeCurrent: Bool
     ) -> Recipient {
+        guard credentialScopeCurrent else { return .drop }
         if !isAttached { return .speculative }
         if let transferringLease {
             return transferringLease != 0 && transferringLease == currentLease
@@ -1176,7 +1178,8 @@ enum PlayerWebViewPool {
         switch PlayerPrewarmMessageOwnershipPolicy.recipient(
             isAttached: isAttached, transferringLease: transferringLease,
             currentLease: attachmentLease,
-            hasAttachedReceiver: attachedMessageReceiver != nil
+            hasAttachedReceiver: attachedMessageReceiver != nil,
+            credentialScopeCurrent: sessionFingerprint == credentialFingerprint()
         ) {
         case .speculative:
             collectPrewarmMetric(message)
