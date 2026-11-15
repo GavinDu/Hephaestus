@@ -311,6 +311,17 @@ struct HephaestusTests {
             for: URLError(.timedOut)).contains("too long"))
     }
 
+    @Test func arcadePulseRetryControlsMeetNormalTextAAContrast() {
+        // This shared style is used by the real loading and terminal error
+        // Retry buttons, not a mock overlay or invented feed response.
+        #expect(ArcadePulseRecoveryButtonStyle.minimumHeight >= 44)
+        #expect(ArcadePulseRecoveryButtonStyle.minimumHeight >= ArcadePulseTheme.minimumTarget)
+        #expect(ArcadePulseRecoveryButtonStyle.foregroundContrastRatio >= 4.5)
+        // Automatic white-on-violet and tinted .bordered on dark surfaces
+        // are insufficient for normal-sized recovery text.
+        #expect(ArcadePulseTheme.electricVioletContrastWithWhite < 4.5)
+    }
+
     @Test func arcadePulseElectricVioletUsesAAReadableCTAForeground() {
         // WCAG relative-sRGB luminance; the real design token is the source
         // of truth for both native Library and Studio sign-in controls.

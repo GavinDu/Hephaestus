@@ -98,6 +98,39 @@ enum HephaestusDesign {
 
 // MARK: - Shared native primitives
 
+// Native recovery actions are normal-sized text on dark feed surfaces.
+// SwiftUI's default .bordered tint can render violet text on deep violet at
+// ~3.65:1; default white on this solid violet also misses AA normal text.
+// Keep the actual button target and semantic label while using the existing
+// >5:1 black-on-electric-violet design token.
+struct ArcadePulseRecoveryButtonStyle: ButtonStyle {
+    static let minimumHeight: CGFloat = 48
+    static var foregroundContrastRatio: Double {
+        ArcadePulseTheme.electricVioletContrastWithBlack
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .multilineTextAlignment(.center)
+            .foregroundStyle(ArcadePulseTheme.onElectricViolet)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: Self.minimumHeight)
+            .background(
+                ArcadePulseTheme.electricViolet,
+                in: RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius, style: .continuous)
+                    .strokeBorder(configuration.isPressed ? Color.white : Color.clear, lineWidth: 2)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius))
+    }
+}
+
 /// A real action; never mount a zero-distance DragGesture here. In a
 /// swipe-to-browse feed that would steal the pager's vertical contact.
 struct ArcadePulsePlayCTA: View {
