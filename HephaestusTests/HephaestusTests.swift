@@ -2362,6 +2362,42 @@ struct HephaestusTests {
 }
 
 
+
+@Test @MainActor func discoverRetryAttemptCounterOnlyChangesOnTransportBegin() {
+    var attempts = FeedRequestAttemptCounter()
+    let coordinator = FeedRequestCoordinator()
+    #expect(attempts.count == 0)
+    #expect(attempts.accessibilityValue == "Attempt 0")
+
+    let first = coordinator.begin {
+        try await Task.sleep(for: .seconds(30))
+        throw URLError(.timedOut)
+    }
+    attempts.didBeginRequest()
+    #expect(attempts.count == 1)
+    #expect(attempts.accessibilityValue == "Attempt 1")
+
+    // A watchdog revokes the epoch, but is not another transport start.
+    #expect(coordinator.expireIfCurrent(first.generation))
+    #expect(!coordinator.expireIfCurrent(first.generation))
+    #expect(attempts.count == 1)
+
+    let second = coordinator.begin {
+        try await Task.sleep(for: .seconds(30))
+        throw URLError(.timedOut)
+    }
+    attempts.didBeginRequest()
+    #expect(attempts.count == 2)
+    #expect(attempts.accessibilityValue == "Attempt 2")
+    coordinator.finishIfCurrent(first.generation)
+    #expect(coordinator.isCurrent(second.generation))
+    #expect(attempts.count == 2)
+    second.request.cancel()
+    coordinator.finishIfCurrent(second.generation)
+    #expect(attempts.count == 2)
+}
+
+
 @Test func prewarmV2SceneMetricGateAdmitsExactlyOneCurrentTrustedSceneSubmission() {
     let nonce = String(repeating: "a", count: 32)
     let valid: [String: Any] = [
