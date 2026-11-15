@@ -2079,9 +2079,10 @@ private struct ArcadePulseGameDetailsSheet: View {
         .frame(height: height)
         .clipShape(RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(game.previewPosterURL == nil
-                            ? "Gameplay preview unavailable"
-                            : "Game artwork or unavailable preview for \(game.title)")
+        .accessibilityLabel(hasDecodedPoster
+                            ? "Game artwork for \(game.title)"
+                            : "Gameplay preview unavailable for \(game.title)")
+        .accessibilityValue(hasDecodedPoster ? "Poster displayed" : "Preview unavailable")
         .accessibilityIdentifier("game.details.preview")
     }
 
@@ -2121,10 +2122,19 @@ private struct ArcadePulseGameDetailsSheet: View {
             ShareLink(item: shareURL) {
                 Label("Share game", systemImage: "square.and.arrow.up")
                     .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .foregroundStyle(ArcadePulseTheme.onElectricViolet)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(
+                        ArcadePulseTheme.electricViolet,
+                        in: RoundedRectangle(
+                            cornerRadius: ArcadePulseTheme.pillRadius,
+                            style: .continuous
+                        )
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius))
             }
-            .buttonStyle(.bordered)
-            .tint(ArcadePulseTheme.electricViolet)
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the native system sharing options")
             if let caption = game.caption, !caption.isEmpty {
                 Text(caption)
                     .font(.body)
@@ -2165,7 +2175,8 @@ private struct ArcadePulseGameDetailsSheet: View {
         if twoColumn {
             HStack(alignment: .top, spacing: 24) {
                 preview(height: ForYouPageLayout.gameDetailsPreviewHeight(
-                    containerHeight: size.height))
+                    containerHeight: size.height,
+                    hasDecodedPoster: hasDecodedPoster))
                     .frame(width: ForYouPageLayout.gameDetailsPreviewWidth(
                         containerWidth: size.width))
                 metadataAndActions
