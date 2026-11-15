@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// Public expression provenance is backend text, not a cover overlay.
+/// Accessibility text requires a vertical metadata and counts layout.
+enum PlayableExpressionLayout {
+    static func stacksMetadata(for size: DynamicTypeSize) -> Bool {
+        size.isAccessibilitySize
+    }
+}
+
 /// A game-first social card. Until the API returns real preview assets and creator
 /// metadata, the cover is a branded visual rather than fabricated artwork.
 struct GameFeedCardSkeleton: View {
@@ -35,6 +43,7 @@ struct GameFeedCard: View {
     @ScaledMetric(relativeTo: .largeTitle) private var coverHeight: CGFloat = 220
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject private var previewPlayback = FeedPreviewPlayback.shared
     let game: FeedGame
     let isSaved: Bool
@@ -67,7 +76,8 @@ struct GameFeedCard: View {
 
     private func expressionTag(_ title: String, count: Int) -> some View {
         Text("\(title) · \(count)")
-            .font(.system(size: 10, weight: .semibold))
+            .font(.caption.weight(.semibold))
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 7)
             .padding(.vertical, 5)
             .background(.white.opacity(0.16), in: Capsule())
@@ -89,33 +99,46 @@ struct GameFeedCard: View {
     }
 
     private func playableExpressionSummary(_ expression: FeedPlayableExpression) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        // Ordinary sizes stay compact; accessibility text stacks genuine
+        // classifications rather than shrinking them inside the poster.
+        let metadataLayout = PlayableExpressionLayout.stacksMetadata(for: dynamicTypeSize)
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(spacing: 6))
+        return VStack(alignment: .leading, spacing: 8) {
+            metadataLayout {
                 Label("PLAYABLE EXPRESSION", systemImage: "sparkles")
-                    .font(.caption2.weight(.bold))
-                    .tracking(0.8)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
                 Text("SOURCE SHARED")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.caption2.weight(.bold))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
                     .background(.white.opacity(0.18), in: Capsule())
             }
             if let intent = expression.intent, !intent.isEmpty {
-                Text(intent).font(.subheadline.weight(.medium)).lineLimit(2)
+                Text(intent)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let interpretation = expression.chosen_interpretation, !interpretation.isEmpty {
                 Text("Interpretation · " + interpretation)
-                    .font(.caption).foregroundStyle(.white.opacity(0.9)).lineLimit(2)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 6) {
+            metadataLayout {
                 expressionTag("Preserved", count: expression.preserved?.count ?? 0)
                 expressionTag("Invented", count: expression.invented?.count ?? 0)
                 expressionTag("Uncertain", count: expression.uncertain?.count ?? 0)
             }
         }
-        .padding(10)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.black.opacity(0.72),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .foregroundStyle(.white)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(expressionAccessibilityLabel(expression))
     }
@@ -232,10 +255,6 @@ struct GameFeedCard: View {
                             .lineLimit(1)
                             .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
                     }
-                    if let expression = game.playableExpression, expression.source_visibility == "public" {
-                        playableExpressionSummary(expression)
-                    }
-
                 }
                 .padding(18)
             }
@@ -313,6 +332,15 @@ struct GameFeedCard: View {
             // Warming happens inside Discover's Play action, not in a
             // zero-distance touch recognizer that can steal grid scrolling.
             .padding(14)
+
+            // Render classification and intent AFTER real Play/Share/social
+            // controls, OUTSIDE the poster/video clipped media stage.
+            if let expression = game.playableExpression, expression.source_visibility == "public" {
+                playableExpressionSummary(expression)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 2)
+            }
         }
         .background(HephaestusDesign.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: HephaestusDesign.cardRadius, style: .continuous))
