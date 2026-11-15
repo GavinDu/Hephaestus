@@ -2332,3 +2332,115 @@ struct HephaestusTests {
     fresh.request.cancel()
     coordinator.finishIfCurrent(fresh.generation)
 }
+
+
+@Test func posterSceneReadinessRequiresCurrentSubmissionBeforeReveal() {
+    let nonce = String(repeating: "a", count: 32)
+    var gate = PlayerPosterSceneReadinessGate(
+        gameID: "rainbow-game", documentNonce: nonce, attempt: 2
+    )!
+    #expect(gate.phase == .holding)
+    #expect(!gate.consumeReveal(attempt: 2))
+    #expect(gate.recordNavigationFinish(attempt: 2))
+    #expect(gate.navigationFinished)
+    #expect(gate.phase == .holding)
+    #expect(!gate.consumeReveal(attempt: 2))
+    let submitted = gate.recordSceneSubmission(
+        gameID: "rainbow-game", documentNonce: nonce, attempt: 2,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        credentialScopeCurrent: true, ownsCurrentAttachment: true
+    )
+    #expect(submitted)
+    #expect(gate.phase == .sceneSubmitted)
+    #expect(!gate.recordSceneSubmission(
+        gameID: "rainbow-game", documentNonce: nonce, attempt: 2,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        credentialScopeCurrent: true, ownsCurrentAttachment: true
+    ))
+    #expect(!gate.consumeReveal(attempt: 1))
+    #expect(gate.consumeReveal(attempt: 2))
+    #expect(gate.phase == .revealed)
+    #expect(!gate.consumeReveal(attempt: 2))
+    #expect(!gate.expireHold(attempt: 2))
+}
+
+@Test func posterSceneReadinessRejectsStaleNativeProvenanceAndRecovery() {
+    let nonce = String(repeating: "b", count: 32)
+    let valid = (
+        gameID: "game-one", documentNonce: nonce, attempt: 4,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        credentialScopeCurrent: true, ownsCurrentAttachment: true
+    )
+    var badBodies: [(String, String, Int, Bool, Bool, Bool, Bool)] = [
+        ("different-game", nonce, 4, true, true, true, true),
+        ("game-one", String(repeating: "c", count: 32), 4, true, true, true, true),
+        ("game-one", nonce, 3, true, true, true, true),
+        ("game-one", nonce, 5, true, true, true, true),
+        ("game-one", nonce, 4, false, true, true, true),
+        ("game-one", nonce, 4, true, false, true, true),
+        ("game-one", nonce, 4, true, true, false, true),
+        ("game-one", nonce, 4, true, true, true, false),
+    ]
+    for (game, document, epoch, frame, origin, credential, attachment) in badBodies {
+        var gate = PlayerPosterSceneReadinessGate(
+            gameID: "game-one", documentNonce: nonce, attempt: 4
+        )!
+        #expect(!gate.recordSceneSubmission(
+            gameID: game, documentNonce: document, attempt: epoch,
+            isTrustedMainFrame: frame, isSameOrigin: origin,
+            credentialScopeCurrent: credential, ownsCurrentAttachment: attachment
+        ))
+        #expect(gate.phase == .holding)
+        #expect(!gate.consumeReveal(attempt: 4))
+        // An invalid high-sequence/foreign message cannot poison a valid
+        // current trusted submission arriving later in the same document.
+        #expect(gate.recordSceneSubmission(
+            gameID: valid.gameID, documentNonce: valid.documentNonce,
+            attempt: valid.attempt,
+            isTrustedMainFrame: valid.isTrustedMainFrame,
+            isSameOrigin: valid.isSameOrigin,
+            credentialScopeCurrent: valid.credentialScopeCurrent,
+            ownsCurrentAttachment: valid.ownsCurrentAttachment
+        ))
+        #expect(gate.consumeReveal(attempt: 4))
+    }
+
+    var timedOut = PlayerPosterSceneReadinessGate(
+        gameID: "game-one", documentNonce: nonce, attempt: 4
+    )!
+    #expect(!timedOut.expireHold(attempt: 3))
+    #expect(timedOut.expireHold(attempt: 4))
+    #expect(timedOut.phase == .recovery)
+    #expect(!timedOut.consumeReveal(attempt: 4))
+    #expect(!timedOut.recordSceneSubmission(
+        gameID: "game-one", documentNonce: nonce, attempt: 4,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        credentialScopeCurrent: true, ownsCurrentAttachment: true
+    ))
+    var retired = PlayerPosterSceneReadinessGate(
+        gameID: "game-one", documentNonce: nonce, attempt: 4
+    )!
+    retired.retire()
+    #expect(retired.phase == .retired)
+    #expect(!retired.recordNavigationFinish(attempt: 4))
+    #expect(!retired.recordSceneSubmission(
+        gameID: "game-one", documentNonce: nonce, attempt: 4,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        credentialScopeCurrent: true, ownsCurrentAttachment: true
+    ))
+    #expect(!retired.consumeReveal(attempt: 4))
+    let newAttempt = PlayerPosterSceneReadinessGate(
+        gameID: "game-one", documentNonce: String(repeating: "d", count: 32),
+        attempt: 5
+    )
+    #expect(newAttempt?.phase == .holding)
+    #expect(PlayerPosterSceneReadinessGate(
+        gameID: "game-one", documentNonce: "not-an-epoch", attempt: 5
+    ) == nil)
+    #expect(PlayerPosterSceneReadinessGate(
+        gameID: "", documentNonce: nonce, attempt: 5
+    ) == nil)
+    #expect(PlayerPosterSceneReadinessGate(
+        gameID: "game-one", documentNonce: nonce, attempt: -1
+    ) == nil)
+}
