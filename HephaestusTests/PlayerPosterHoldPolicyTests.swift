@@ -161,3 +161,59 @@ private func posterAttempt(
         for: valid, validatedByNativeGate: true, ownsCurrentAttachment: true)
     #expect(observedPosterTransition20)
 }
+
+
+@Test func playerPosterTrustedRevealConsumesExactlyOnce() {
+    let current = posterAttempt()
+    var poster = PlayerPosterHoldPolicy(attempt: current)
+    let noSceneReveal = poster.consumeReveal(for: current, ownsCurrentAttachment: true)
+    #expect(!noSceneReveal)
+    let valid = poster.acceptTrustedSceneSubmission(
+        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true
+    )
+    #expect(valid)
+    let noRetiredLease = poster.consumeReveal(
+        for: posterAttempt(lease: 19), ownsCurrentAttachment: true
+    )
+    #expect(!noRetiredLease)
+    let notAttached = poster.consumeReveal(for: current, ownsCurrentAttachment: false)
+    #expect(!notAttached)
+    #expect(poster.mayBeginSceneSubmittedCrossfade)
+    let firstReveal = poster.consumeReveal(for: current, ownsCurrentAttachment: true)
+    #expect(firstReveal)
+    #expect(poster.state == .revealed)
+    #expect(!poster.mayBeginSceneSubmittedCrossfade)
+    let doubleReveal = poster.consumeReveal(for: current, ownsCurrentAttachment: true)
+    #expect(!doubleReveal)
+    let postRevealScene = poster.acceptTrustedSceneSubmission(
+        for: current, validatedByNativeGate: true, ownsCurrentAttachment: true
+    )
+    #expect(!postRevealScene)
+    // An actual post-display WebContent failure still enters honest
+    // recovery; reveal cannot be resurrected from the old attempt.
+    let failed = poster.markFailure(for: current, ownsCurrentAttachment: true)
+    #expect(failed)
+    #expect(poster.mustShowRecovery)
+    #expect(!poster.consumeReveal(for: current, ownsCurrentAttachment: true))
+}
+
+@Test func playerPosterMustBindGameIDToExactCanonicalPlayerURL() {
+    let invalid = [
+        posterAttempt(gameID: "other-game"),
+        posterAttempt(playerURL: "https://games.example.test/player?game=other-game"),
+        posterAttempt(playerURL: "https://games.example.test/player?game=published-game&game=other"),
+        posterAttempt(playerURL: "https://games.example.test/player?quality=high"),
+        posterAttempt(playerURL: "https://games.example.test/other?game=published-game"),
+        posterAttempt(playerURL: "https://games.example.test/player?game=published-game#unexpected"),
+    ]
+    for attempt in invalid {
+        #expect(!attempt.isValid)
+        var reducer = PlayerPosterHoldPolicy(attempt: attempt)
+        #expect(reducer.state == .retired)
+        let accepted = reducer.acceptTrustedSceneSubmission(
+            for: attempt, validatedByNativeGate: true, ownsCurrentAttachment: true
+        )
+        #expect(!accepted)
+        #expect(!reducer.consumeReveal(for: attempt, ownsCurrentAttachment: true))
+    }
+}
