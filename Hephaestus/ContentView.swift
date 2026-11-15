@@ -37,10 +37,20 @@ private enum AppSection: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+/// iPad sidebar rows must not shrink text to fit a fixed one-line slot.
+enum ArcadePulseSidebarLabelPolicy {
+    static func visibleLineLimit(for size: DynamicTypeSize) -> Int {
+        size >= .xxLarge ? 2 : 1
+    }
+
+    static let minimumHitHeight: CGFloat = 44
+}
+
 /// One navigation model with compact and expanded presentations. Width size class
 /// is used rather than device identity so Split View and resizable windows adapt too.
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     // UI-only simulator entry for capturing the actual Create screen on iPad.
     // No fake projects, media or backend responses are injected.
     @State private var selection: AppSection? =
@@ -49,7 +59,8 @@ struct ContentView: View {
          (ProcessInfo.processInfo.arguments.contains("--ui-test-library-entry") ? .library : .discover))
     // On regular-width iPads, enter the full-screen playable feed first.
     // The system sidebar button still lets people reveal navigation.
-    @State private var sidebarVisibility: NavigationSplitViewVisibility = .detailOnly
+    @State private var sidebarVisibility: NavigationSplitViewVisibility =
+        ProcessInfo.processInfo.arguments.contains("--ui-test-sidebar-open") ? .all : .detailOnly
 
     var body: some View {
         Group {
@@ -138,10 +149,10 @@ struct ContentView: View {
             navigate(to: section, fromSidebar: true)
         } label: {
             Label(section.title, systemImage: section.symbol)
-                .lineLimit(1)
-                .minimumScaleFactor(0.9)
+                .lineLimit(ArcadePulseSidebarLabelPolicy.visibleLineLimit(for: dynamicTypeSize))
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(minHeight: ArcadePulseTheme.minimumTarget)
+                .frame(minHeight: ArcadePulseSidebarLabelPolicy.minimumHitHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
