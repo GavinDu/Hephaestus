@@ -719,6 +719,34 @@ struct HephaestusTests {
     }
 
 
+@Test func playerPermanentPackageAndAuthorizationErrorsDoNotRetry() {
+    for status in [400, 401, 403, 404, 409, 410, 413, 422, 426] {
+        let category = PlayerLoadFailure.category(
+            for: PlayerLoadFailure.httpError(statusCode: status)
+        )
+        #expect(!PlayerLoadRetryPolicy.shouldOfferManualRetry(category: category))
+        #expect(!PlayerLoadRetryPolicy.shouldRetryOnForeground(category: category))
+        // The same pure policy guards both the visible Retry button and
+        // the WebContent-crash path, which must preserve this permanent error.
+        #expect(!PlayerLoadFailure.userMessage(
+            for: PlayerLoadFailure.httpError(statusCode: status)
+        ).isEmpty)
+    }
+    for status in [408, 425, 429, 500, 502, 503, 504] {
+        let category = PlayerLoadFailure.category(
+            for: PlayerLoadFailure.httpError(statusCode: status)
+        )
+        #expect(category == .network)
+        #expect(PlayerLoadRetryPolicy.shouldOfferManualRetry(category: category))
+        #expect(PlayerLoadRetryPolicy.shouldRetryOnForeground(category: category))
+    }
+    // Unexpected WebContent failures may be manually retried, never looped.
+    #expect(PlayerLoadRetryPolicy.shouldOfferManualRetry(category: .unknown))
+    #expect(!PlayerLoadRetryPolicy.shouldRetryOnForeground(category: .unknown))
+    #expect(PlayerLoadRetryPolicy.shouldOfferManualRetry(category: nil))
+    #expect(!PlayerLoadRetryPolicy.shouldRetryOnForeground(category: nil))
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
