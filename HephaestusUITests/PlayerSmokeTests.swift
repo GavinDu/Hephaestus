@@ -493,9 +493,9 @@ final class PlayerSmokeTests: XCTestCase {
         // Physically tap the real onscreen 44pt CTA and verify the real host
         // Profile destination accepts the action.
         let signIn = app.buttons["library.signIn"].firstMatch
-        if signIn.exists {
-            XCTAssertTrue(signIn.waitForExistence(timeout: 8))
-            let hitFrame = signIn.frame
+        XCTAssertTrue(signIn.waitForExistence(timeout: 8),
+                      "This signed-out recovery fixture must expose the actual Library Profile CTA.")
+        let hitFrame = signIn.frame
             XCTAssertGreaterThanOrEqual(hitFrame.width, 44)
             XCTAssertGreaterThanOrEqual(hitFrame.height, 44)
             XCTAssertTrue(hitFrame.origin.x.isFinite &&
@@ -521,7 +521,6 @@ final class PlayerSmokeTests: XCTestCase {
                                    "arcade-pulse-early-iphone-profile-arrived"
             profile.lifetime = .keepAlways
             add(profile)
-        }
         let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         arrived.name = isPad ? "arcade-pulse-early-ipad-library-arrived" :
                                "arcade-pulse-early-iphone-library-arrived"
