@@ -68,7 +68,10 @@ class FakeOpener:
         self.urls.append(req.full_url)
         if req.full_url not in self.pages:
             raise fixture.FixtureError("unexpected host/path")
-        return FakeResponse(self.pages[req.full_url])
+        value = self.pages[req.full_url]
+        if isinstance(value, Exception):
+            raise value
+        return FakeResponse(value)
 
 
 class LiveGameFixtureTests(unittest.TestCase):
@@ -160,6 +163,35 @@ class LiveGameFixtureTests(unittest.TestCase):
                 with self.assertRaisesRegex(fixture.FixtureError, "no retrievable"):
                     fixture.check_once(opener, self.FEED, 1)
                 self.assertEqual(opener.urls, [self.FEED, self.PACKAGE])
+
+
+    def test_package_failure_breakdown_is_bounded_and_never_reveals_identity(self):
+        feed = {"games": [public_game()]}
+        failures = [
+            (fixture.FixtureError("endpoint returned HTTP 404"), "http_404:1"),
+            (fixture.FixtureError("endpoint returned HTTP 403"), "http_403:1"),
+            (fixture.FixtureError("unexpected host/path"), "unavailable:1"),
+            ((b"<html>no package</html>", "text/html"), "not_json:1"),
+            ((b"{not-json", "application/json"), "invalid_json:1"),
+            ({}, "invalid_envelope:1"),
+        ]
+        for response, expected in failures:
+            with self.subTest(category=expected):
+                opener = FakeOpener({self.FEED: feed, self.PACKAGE: response})
+                with self.assertRaises(fixture.FixtureError) as raised:
+                    fixture.check_once(opener, self.FEED, 1)
+                message = str(raised.exception)
+                self.assertIn("package_failure_breakdown=" + expected, message)
+                self.assertNotIn("sample-rainbow-bear", message)
+                self.assertNotIn("published-creator", message)
+                self.assertNotIn(self.PACKAGE, message)
+
+    def test_package_error_classifier_never_echoes_arbitrary_exception_strings(self):
+        self.assertEqual(fixture.package_failure_category("endpoint returned HTTP 404"), "http_404")
+        self.assertEqual(fixture.package_failure_category("endpoint returned HTTP 200 see /secret"), "unavailable")
+        self.assertEqual(fixture.package_failure_category("private endpoint user=creator"), "unavailable")
+        self.assertEqual(fixture.package_failure_category("endpoint returned HTTP 500"), "http_500")
+
 
 
 if __name__ == "__main__":
