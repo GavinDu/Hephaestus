@@ -20,6 +20,11 @@ struct PlayerPosterHoldPolicy {
                   playerURL.scheme?.lowercased() == "https",
                   let host = playerURL.host, !host.isEmpty,
                   playerURL.user == nil, playerURL.password == nil,
+                  playerURL.fragment == nil,
+                  let components = URLComponents(url: playerURL, resolvingAgainstBaseURL: false),
+                  components.path == "/player",
+                  let gameItems = components.queryItems?.filter({ $0.name == "game" }),
+                  gameItems.count == 1, gameItems[0].value == gameID,
                   documentNonce.utf8.count == 32 else { return false }
             return documentNonce.utf8.allSatisfy {
                 ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102)
@@ -30,6 +35,7 @@ struct PlayerPosterHoldPolicy {
     enum State: Equatable {
         case holding
         case sceneSubmitted
+        case revealed
         case recovery
         case retired
     }
@@ -63,6 +69,17 @@ struct PlayerPosterHoldPolicy {
               attempt.isValid, offered == attempt,
               validatedByNativeGate, ownsCurrentAttachment else { return false }
         state = .sceneSubmitted
+        return true
+    }
+
+    /// Consume the accepted scene exactly once for poster crossfade.
+    /// A second caller or a successor attachment cannot restart the reveal.
+    /// Reduced motion may skip animation only *after* this trusted admission.
+    @discardableResult
+    mutating func consumeReveal(for offered: Attempt, ownsCurrentAttachment: Bool) -> Bool {
+        guard state == .sceneSubmitted, attempt == offered,
+              ownsCurrentAttachment else { return false }
+        state = .revealed
         return true
     }
 
