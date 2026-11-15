@@ -1416,9 +1416,10 @@ final class PlayerSmokeTests: XCTestCase {
                 }
             }
             print("UI EVALUATOR pager frame orientation=\(profile.1): \(pagerFrame)")
-            if expectedLandscape {
-                // A one-card, scroll-disabled pager is driven by its own
-                // DragGesture, not the UIScrollView's content scrolling.
+            if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
+                // A compact iPhone landscape one-card pager requires the
+                // physical touch trace. iPad landscape uses the same genuine
+                // native accessibility scroll action that advanced portrait.
                 // Use a real touch trace inside its content area in compact
                 // landscape, where XCTest's generic scroll gesture may be
                 // routed to the disabled scroll view and never reach the card.
@@ -1428,6 +1429,7 @@ final class PlayerSmokeTests: XCTestCase {
                 print("UI_EVALUATOR_PHYSICAL_DRAG orientation=landscape start=0.50,0.82 end=0.50,0.18")
                 start.press(forDuration: 0.1, thenDragTo: end)
             } else {
+                print("UI_EVALUATOR_NATIVE_ACCESSIBLE_SWIPE orientation=\(profile.1) idiom=\(UIDevice.current.userInterfaceIdiom) source=real_pager")
                 pager.swipeUp()
             }
 
