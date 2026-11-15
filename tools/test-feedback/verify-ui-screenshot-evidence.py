@@ -36,6 +36,12 @@ IPAD_LIBRARY_PORTRAIT = "arcade-pulse-library-ipad-portrait"
 IPAD_LIBRARY_LANDSCAPE = "arcade-pulse-library-ipad-landscape"
 IPAD_DETAIL_LANDSCAPE = ("arcade-pulse-ipad-game-details-landscape-two-column",)
 IPAD_DETAIL_PORTRAIT = ("arcade-pulse-ipad-game-details-portrait-single-column",)
+# Real iPad Accessibility5 sidebar test captures, not illustrative mockups.
+IPAD_SIDEBAR_LANDSCAPE = (
+    "arcade-pulse-ipad-sidebar-xxl-landscape-before-profile",
+    "arcade-pulse-ipad-sidebar-xxl-landscape-after-profile",
+)
+IPAD_SIDEBAR_PORTRAIT = ("arcade-pulse-ipad-sidebar-xxl-portrait-profile",)
 
 # The iPad evaluator already exercises these real native interaction states.
 # Opt in only on that workflow: the iPhone player smoke and limited fixture
@@ -215,7 +221,8 @@ def exported_attachment(attachments, logical_name):
 
 def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False,
                     require_ipad_arcade_features=False,
-                    require_ipad_details=False):
+                    require_ipad_details=False,
+                    require_ipad_sidebar=False):
     manifest = json.loads((attachments_dir / "manifest.json").read_text())
     attachments = [x for entry in manifest for x in entry.get("attachments", [])]
     validated = {}
@@ -226,16 +233,18 @@ def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False,
                      if require_ipad_arcade_features else ())
     detail_names = (IPAD_DETAIL_LANDSCAPE + IPAD_DETAIL_PORTRAIT
                     if require_ipad_details else ())
+    sidebar_names = (IPAD_SIDEBAR_LANDSCAPE + IPAD_SIDEBAR_PORTRAIT
+                     if require_ipad_sidebar else ())
     for logical in (LANDSCAPE_PRIMARY + LANDSCAPE_DIAGNOSTIC +
-                    PORTRAIT_PRIMARY + library_names + feature_names + detail_names):
+                    PORTRAIT_PRIMARY + library_names + feature_names + detail_names + sidebar_names):
         src = attachments_dir / exported_attachment(attachments, logical)
         if not src.is_file():
             raise ValueError(f"{logical}: missing raw screenshot PNG")
         info = read_png_metadata(src)
         display_landscape = info["display_width"] > info["display_height"]
-        if logical in LANDSCAPE_PRIMARY + (IPAD_LIBRARY_LANDSCAPE,) + IPAD_DETAIL_LANDSCAPE and not display_landscape:
+        if logical in LANDSCAPE_PRIMARY + (IPAD_LIBRARY_LANDSCAPE,) + IPAD_DETAIL_LANDSCAPE + IPAD_SIDEBAR_LANDSCAPE and not display_landscape:
             raise ValueError(f"{logical}: full-screen capture does not display in landscape")
-        if logical in PORTRAIT_PRIMARY + (IPAD_LIBRARY_PORTRAIT,) + IPAD_DETAIL_PORTRAIT and display_landscape:
+        if logical in PORTRAIT_PRIMARY + (IPAD_LIBRARY_PORTRAIT,) + IPAD_DETAIL_PORTRAIT + IPAD_SIDEBAR_PORTRAIT and display_landscape:
             raise ValueError(f"{logical}: portrait evidence displays in landscape")
         if logical in IPAD_ARCADE_FEATURES:
             expected = IPAD_ARCADE_FEATURES[logical]
@@ -244,7 +253,7 @@ def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False,
             if expected == "portrait" and display_landscape:
                 raise ValueError(f"{logical}: full-screen capture does not display in portrait")
         preferred = logical in (LANDSCAPE_PRIMARY + PORTRAIT_PRIMARY +
-                                library_names + feature_names + detail_names)
+                                library_names + feature_names + detail_names + sidebar_names)
         target = output_dir / (logical + ".raw.png")
         shutil.copyfile(src, target)
         validated[logical] = {**info, "file": target.name,
@@ -340,6 +349,36 @@ def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False,
         b = portrait["raster_scanlines_sha256"]
         if a is not None and a == b:
             raise ValueError("iPad Game Details portrait/landscape: duplicate decoded screenshot pixels")
+    if require_ipad_sidebar:
+        # Original native iPad sidebar captures must be full-screen and
+        # actually show before/after Profile navigation, not a reused frame
+        # or a portrait crop carrying a forged landscape EXIF tag.
+        for name in sidebar_names:
+            landscape = name in IPAD_SIDEBAR_LANDSCAPE
+            reference_name = (
+                IPAD_LIBRARY_LANDSCAPE if require_ipad_library else LANDSCAPE_PRIMARY[0]
+            ) if landscape else (
+                IPAD_LIBRARY_PORTRAIT if require_ipad_library else PORTRAIT_PRIMARY[0]
+            )
+            actual = validated[name]
+            reference = validated[reference_name]
+            actual_size = (actual["display_width"], actual["display_height"])
+            required_size = (reference["display_width"], reference["display_height"])
+            if actual_size != required_size:
+                raise ValueError(
+                    f"{name}: sidebar evidence does not match same-run "
+                    f"full-screen dimensions {required_size}; actual {actual_size}")
+        pairs = (
+            (IPAD_SIDEBAR_LANDSCAPE[0], IPAD_SIDEBAR_LANDSCAPE[1]),
+            (IPAD_SIDEBAR_LANDSCAPE[1], IPAD_SIDEBAR_PORTRAIT[0]),
+        )
+        for before, after in pairs:
+            first, last = validated[before], validated[after]
+            if first["sha256"] == last["sha256"]:
+                raise ValueError(f"{before} and {after}: duplicate raw screenshot bytes")
+            a, b = first["raster_scanlines_sha256"], last["raster_scanlines_sha256"]
+            if a is not None and a == b:
+                raise ValueError(f"{before} and {after}: duplicate decoded screenshot pixels")
     report = {
         "status": "screen-orientation-verified",
         "capture_source": "native XCTest xcresulttool export attachments",
@@ -349,6 +388,7 @@ def verify_and_copy(attachments_dir, output_dir, require_ipad_library=False,
         "verified": validated,
         "ipad_library_required": require_ipad_library,
         "ipad_details_required": require_ipad_details,
+        "ipad_sidebar_required": require_ipad_sidebar,
         "ipad_arcade_features_required": require_ipad_arcade_features,
         "ipad_arcade_feature_names": list(feature_names),
         "media_ready": False,
@@ -366,6 +406,8 @@ def main():
                         help="Fail if real iPad Library portrait/landscape screenshots are missing")
     parser.add_argument("--require-ipad-details", action="store_true",
                         help="Require native iPad Game Details portrait/landscape captures")
+    parser.add_argument("--require-ipad-sidebar", action="store_true",
+                        help="Require native iPad Accessibility5 sidebar before/after and rotated Profile")
     parser.add_argument("--require-ipad-arcade-features", action="store_true",
                         help="Require real iPad Create, Studio, Preferences and recovery screenshot captures")
     args = parser.parse_args()
@@ -374,7 +416,8 @@ def main():
             args.input, args.out,
             require_ipad_library=args.require_ipad_library,
             require_ipad_arcade_features=args.require_ipad_arcade_features,
-            require_ipad_details=args.require_ipad_details)
+            require_ipad_details=args.require_ipad_details,
+            require_ipad_sidebar=args.require_ipad_sidebar)
         print(json.dumps({"status": report["status"], "verified_count": len(report["verified"])}))
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
         parser.exit(1, f"UI screenshot evidence failed: {error}\n")
