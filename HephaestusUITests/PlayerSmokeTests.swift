@@ -998,6 +998,16 @@ final class PlayerSmokeTests: XCTestCase {
                       "The real Library must be available at accessibility text size.")
         XCTAssertTrue(library.label.contains("Library"))
         XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+        // Assert every genuine section destination exists at accessibility
+        // text sizes; do not infer route quality from a decorative sidebar.
+        for name in ["Discover", "Create", "Studio", "Library", "Profile"] {
+            let destination = app.buttons["nav.sidebar.\(name.lowercased())"].firstMatch
+            XCTAssertTrue(destination.waitForExistence(timeout: 10),
+                          "All five real destinations must exist in the iPad sidebar.")
+            XCTAssertTrue(destination.label.contains(name),
+                          "Sidebar VoiceOver name must preserve the full destination.")
+            XCTAssertGreaterThanOrEqual(destination.frame.height, 44)
+        }
         let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         before.name = "arcade-pulse-ipad-sidebar-xxl-landscape-before-profile"
         before.lifetime = .keepAlways
