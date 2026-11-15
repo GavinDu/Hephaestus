@@ -147,7 +147,8 @@ private func posterAttempt(
     let valid = posterAttempt(documentNonce: String(repeating: "f", count: 32))
     var active = PlayerPosterHoldPolicy(attempt: valid)
     for index in 0..<160 {
-        let nonce = String(format: "%032x", index)
+        let suffix = String(index, radix: 16)
+        let nonce = String(repeating: "0", count: 32 - suffix.count) + suffix
         let stale = posterAttempt(documentNonce: nonce)
         #expect(stale != valid)
         let observedPosterTransition19 = !active.acceptTrustedSceneSubmission(
