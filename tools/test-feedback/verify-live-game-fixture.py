@@ -11,6 +11,7 @@ import json
 import re
 import sys
 import time
+from collections import Counter
 from urllib import error, parse, request
 
 MAX_JSON_BYTES = 2_000_000
@@ -93,6 +94,25 @@ def package_is_playable(payload, expected_game_id):
             and ir["irVersion"] == payload["irVersion"])
 
 
+def package_failure_category(message):
+    """Safe finite diagnostic vocabulary: never echo game IDs/URLs/profile data."""
+    if message.startswith("endpoint returned HTTP "):
+        status = message.removeprefix("endpoint returned HTTP ")
+        if len(status) == 3 and status.isascii() and status.isdecimal():
+            return "http_" + status
+    if message == "public fixture endpoint is not JSON content":
+        return "not_json"
+    if message == "public fixture response is not valid JSON":
+        return "invalid_json"
+    if message == "public fixture JSON exceeds 2 MB bound":
+        return "too_large"
+    if message == "live fixture endpoint redirected; same-origin contract not established":
+        return "redirect"
+    if message == "public fixture endpoint unreachable or timed out":
+        return "transport"
+    return "unavailable"
+
+
 def check_once(opener, feed_url, timeout):
     feed = read_public_json(opener, feed_url, timeout)
     eligible = candidates_in_feed(feed)
@@ -103,6 +123,7 @@ def check_once(opener, feed_url, timeout):
             f"(feed_count={total}); fixture #288 not ready"
         )
     origin = parse.urlsplit(feed_url)
+    failure_reasons = Counter()
     for game_id in eligible[:5]:
         package_url = parse.urlunsplit(
             (origin.scheme, origin.netloc,
@@ -110,13 +131,18 @@ def check_once(opener, feed_url, timeout):
         )
         try:
             package = read_public_json(opener, package_url, timeout)
-        except FixtureError:
+        except FixtureError as exc:
+            failure_reasons[package_failure_category(str(exc))] += 1
             continue
         if package_is_playable(package, game_id):
             return game_id, total, len(eligible)
+        failure_reasons["invalid_envelope"] += 1
+    # Only categorical bounded counts; never the raw URL, response or ID.
+    breakdown = ",".join(f"{key}:{failure_reasons[key]}" for key in sorted(failure_reasons))
     raise FixtureError(
         f"feed has owner-linked game(s) but no retrievable matching playable package "
-        f"(feed_count={total}, eligible_count={len(eligible)}); fixture #288 not ready"
+        f"(feed_count={total}, eligible_count={len(eligible)}, "
+        f"package_failure_breakdown={breakdown}); fixture #288 not ready"
     )
 
 
