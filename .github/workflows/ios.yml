@@ -217,6 +217,7 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedUnavailableRecoveryToLibrary \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStalledTransportReachesHonestRecovery \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadSidebarXXLDestinationsAndProfileRoute \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorGuestSignInRoutesToProfileAfterDismiss \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadGameDetailsAdaptiveLayout \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
@@ -257,7 +258,8 @@ jobs:
             --out /tmp/ipad-feed-ui-review \
             --require-ipad-library \
             --require-ipad-arcade-features \
-            --require-ipad-details
+            --require-ipad-details \
+            --require-ipad-sidebar
       - name: Upload iPad UI evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
