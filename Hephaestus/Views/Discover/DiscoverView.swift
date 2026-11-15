@@ -2567,6 +2567,9 @@ private struct CreatorProfileSheet: View {
                                               systemImage: profile.is_following ?
                                                 "person.fill.checkmark" : "person.badge.plus")
                                             .font(.headline.weight(.semibold))
+                                            // White-on-violet misses AA for normal text;
+                                            // preserve the shared >4.5:1 foreground.
+                                            .foregroundStyle(ArcadePulseTheme.onElectricViolet)
                                             .frame(maxWidth: .infinity, minHeight: 48)
                                     }
                                     .buttonStyle(.borderedProminent)
@@ -2599,7 +2602,7 @@ private struct CreatorProfileSheet: View {
                                               systemImage: "arrow.clockwise")
                                             .frame(maxWidth: .infinity, minHeight: 48)
                                     }
-                                    .buttonStyle(.bordered)
+                                    .buttonStyle(ArcadePulseRecoveryButtonStyle())
                                     .accessibilityIdentifier("creator.profile.retryLoad")
                                 }
                                 .padding(14)
