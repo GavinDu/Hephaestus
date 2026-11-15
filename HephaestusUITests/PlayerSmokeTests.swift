@@ -977,6 +977,75 @@ final class PlayerSmokeTests: XCTestCase {
         add(arrived)
     }
 
+    /// P1 #425: old 250pt sidebar at Accessibility5 broke real destination
+    /// names *inside words* despite green route smoke. Inspect the untouched
+    /// full-screen native frame; do not accept the XCUI label string alone.
+    @MainActor
+    func testArcadePulseIPadAccessibilityFiveSidebarHasRoomForWholeWords() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Expanded sidebar sizing is iPad-only.")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "--ui-test-sidebar-open", "--ui-test-library-entry",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+        let window = app.windows.firstMatch
+        let landscapeDeadline = Date().addingTimeInterval(15)
+        while window.frame.width <= window.frame.height &&
+              Date() < landscapeDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height)
+
+        for (section, name) in [
+            ("discover", "Discover"), ("create", "Create"),
+            ("studio", "Studio"), ("library", "Library"),
+            ("profile", "Profile")
+        ] {
+            let destination = app.buttons["nav.sidebar.\(section)"].firstMatch
+            XCTAssertTrue(destination.waitForExistence(timeout: 10),
+                          "The actual \(name) sidebar action must exist at Accessibility5.")
+            XCTAssertTrue(destination.label.contains(name),
+                          "Never substitute an abbreviated or fake destination title.")
+            XCTAssertGreaterThanOrEqual(destination.frame.height, 44)
+            XCTAssertGreaterThanOrEqual(destination.frame.width, 260,
+                          "The actual Accessibility5 sidebar row must not be squeezed into a narrow broken-word column.")
+        }
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "arcade-pulse-ipad-sidebar-a5-full-words-landscape"
+        before.lifetime = .keepAlways
+        add(before)
+
+        let profile = app.buttons["nav.sidebar.profile"].firstMatch
+        XCTAssertTrue(profile.isHittable, "Profile must be reachable without cutting off its row.")
+        profile.tap()
+        let signIn = app.buttons["Sign in with Apple"].firstMatch
+        XCTAssertTrue(signIn.waitForExistence(timeout: 12) && signIn.isHittable,
+                      "Native sidebar must route to the real Profile Apple sign-in.")
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "arcade-pulse-ipad-sidebar-a5-real-profile-landscape"
+        after.lifetime = .keepAlways
+        add(after)
+
+        XCUIDevice.shared.orientation = .portrait
+        let portraitDeadline = Date().addingTimeInterval(15)
+        while window.frame.width >= window.frame.height &&
+              Date() < portraitDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.height, window.frame.width)
+        XCTAssertTrue(signIn.waitForExistence(timeout: 12) && signIn.isHittable)
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-ipad-sidebar-a5-real-profile-portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+    }
+
     /// Independent source iPad accessibility gate (#336); screenshot pixels
     /// and button routing are real native UI, no mock backend game/creator.
     @MainActor
