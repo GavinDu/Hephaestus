@@ -69,6 +69,25 @@ private struct FeedSearchVisibilityModifier: ViewModifier {
     }
 }
 
+/// Host-owned one-way nested Creator sign-in. The inner Creator sheet must
+/// dismiss first; only the outer directory's onDismiss can navigate Profile.
+struct CreatorNestedGuestSignInGate {
+    private(set) var isAwaitingDirectoryDismiss = false
+
+    @discardableResult
+    mutating func requestAfterInnerCreatorDismiss() -> Bool {
+        guard !isAwaitingDirectoryDismiss else { return false }
+        isAwaitingDirectoryDismiss = true
+        return true
+    }
+
+    mutating func consumeAfterDirectoryDismiss() -> Bool {
+        guard isAwaitingDirectoryDismiss else { return false }
+        isAwaitingDirectoryDismiss = false
+        return true
+    }
+}
+
 /// Backend-backed social feeds use the verified bearer session when present.
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
@@ -144,6 +163,7 @@ struct DiscoverView: View {
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
     @State private var openProfileAfterCreatorDismiss = false
+    @State private var nestedGuestSignInGate = CreatorNestedGuestSignInGate()
     @State private var settledForYouGameID: String?
     @State private var resultPresentation: PlayerResultPresentation?
 
@@ -721,8 +741,21 @@ struct DiscoverView: View {
                         profileRequest = nil
                     })
             }
-            .sheet(isPresented: $isCreatorDiscoveryPresented) {
-                CreatorDiscoverySheet()
+            .sheet(isPresented: $isCreatorDiscoveryPresented, onDismiss: {
+                // Never change host navigation while either native sheet
+                // still owns taps or accessibility focus.
+                if nestedGuestSignInGate.consumeAfterDirectoryDismiss() {
+                    onOpenProfile?()
+                }
+            }) {
+                CreatorDiscoverySheet(
+                    onRequestSignIn: onOpenProfile == nil ? nil : {
+                        // Only invoked after inner Creator sheet onDismiss.
+                        if nestedGuestSignInGate.requestAfterInnerCreatorDismiss() {
+                            isCreatorDiscoveryPresented = false
+                        }
+                    }
+                )
             }
             .sheet(isPresented: $isFeedPreferencesPresented) {
                 FeedPreferencesSheet(
@@ -2198,12 +2231,14 @@ enum CreatorDiscoveryErrorPresentation {
 }
 
 private struct CreatorDiscoverySheet: View {
+    let onRequestSignIn: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
     @State private var topicText = ""
     @State private var creators: [CreatorDiscoveryEntry] = []
     @State private var nextCursor: String?
     @State private var profileRequest: CreatorProfileRequest?
+    @State private var openProfileAfterNestedCreatorDismiss = false
     @State private var errorMessage: String?
     @State private var isLoading = false
     @State private var isLoadingMore = false
@@ -2308,8 +2343,21 @@ private struct CreatorDiscoverySheet: View {
             }
             .refreshable { await load(reset: true) }
             .task { await load(reset: true) }
-            .sheet(item: $profileRequest) { request in
-                CreatorProfileSheet(creatorID: request.id)
+            .sheet(item: $profileRequest, onDismiss: {
+                // Dismiss the real nested Creator sheet before retiring
+                // the outer Creator Discovery sheet.
+                if openProfileAfterNestedCreatorDismiss {
+                    openProfileAfterNestedCreatorDismiss = false
+                    onRequestSignIn?()
+                }
+            }) { request in
+                CreatorProfileSheet(
+                    creatorID: request.id,
+                    onRequestSignIn: onRequestSignIn == nil ? nil : {
+                        openProfileAfterNestedCreatorDismiss = true
+                        profileRequest = nil
+                    }
+                )
             }
         }
     }
