@@ -220,6 +220,36 @@ class LiveGameFixtureTests(unittest.TestCase):
         self.assertIsNone(fixture.package_invalid_reason(valid_package(), "sample-rainbow-bear"))
         self.assertTrue(fixture.package_is_playable(valid_package(), "sample-rainbow-bear"))
 
+    def test_missing_package_format_reports_only_allowlisted_wire_key_names(self):
+        payload = valid_package()
+        payload.pop("packageFormatVersion")
+        payload["private_creator_personal_profile"] = "private-creator-secret"
+        payload["tracking_token"] = "private-token-value"
+        self.assertEqual(
+            fixture.safe_package_field_presence(payload),
+            "gameId|minRuntimeVersion|irVersion|ir|irHash|irSha256|assets",
+        )
+        opener = FakeOpener({
+            self.FEED: {"games": [public_game()]},
+            self.PACKAGE: payload,
+        })
+        with self.assertRaises(fixture.FixtureError) as raised:
+            fixture.check_once(opener, self.FEED, 1.0)
+        message = str(raised.exception)
+        self.assertIn("invalid_envelope_missing_package_format:1", message)
+        self.assertIn(
+            "safe_package_keys=gameId|minRuntimeVersion|irVersion|ir|irHash|irSha256|assets:1",
+            message,
+        )
+        for secret in (
+            "sample-rainbow-bear", "published-creator", self.PACKAGE,
+            "tracking_token", "private_creator_personal_profile",
+            "private-creator-secret", "private-token-value",
+        ):
+            self.assertNotIn(secret, message)
+        self.assertEqual(fixture.safe_package_field_presence({}), "none")
+        self.assertEqual(fixture.safe_package_field_presence(None), "not_object")
+
     def test_package_error_classifier_never_echoes_arbitrary_exception_strings(self):
         self.assertEqual(fixture.package_failure_category("endpoint returned HTTP 404"), "http_404")
         self.assertEqual(fixture.package_failure_category("endpoint returned HTTP 200 see /secret"), "unavailable")
