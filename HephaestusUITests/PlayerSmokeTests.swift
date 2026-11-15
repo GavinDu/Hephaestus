@@ -1501,28 +1501,48 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(shareEntry.frame.height, 44,
                                    "Accessible native Share action must have a 44pt target.")
         shareEntry.tap()
-        // The system sheet must be attached to the mounted feed page, never
-        // to the just-dismissed actions sheet or a temporary Menu controller.
-        let shareActionsGone = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"),
-            object: app.buttons["feed.actions.dismiss"].firstMatch)
-        XCTAssertEqual(XCTWaiter.wait(for: [shareActionsGone], timeout: 8), .completed,
-                       "Actions must dismiss before presenting real system sharing.")
-        // An item visible inside the Menu does not prove the share UI works.
-        // Require an actual system sheet, iPad popover or activity-list view.
+        // A genuine UIActivityViewController can appear while SwiftUI still
+        // retains the dismissed Actions sheet's accessibility node. The
+        // original iPhone failed screenshot (run 43649888565) shows native
+        // Copy/Reminders/Reading List and the public game URL: sharing
+        // worked, but the old Done object's `exists` remained true.
+        //
+        // First prove real SYSTEM sharing, then that old controls are no
+        // longer INTERACTIVE. A stale, non-hittable node is not a second
+        // active sheet. Do not accept a menu that only contains "Share".
         let systemSheet = app.sheets.firstMatch
         let systemPopover = app.popovers.firstMatch
         let activityList = app.otherElements["ActivityListView"].firstMatch
-        XCTAssertTrue(
+        let systemSharingVisible =
             systemSheet.waitForExistence(timeout: 8) ||
-                systemPopover.waitForExistence(timeout: 3) ||
-                activityList.waitForExistence(timeout: 3),
-            "Share game must present a genuine system activity sheet after the menu dismisses."
-        )
+            systemPopover.waitForExistence(timeout: 3) ||
+            activityList.waitForExistence(timeout: 3)
+
+        // Always keep an untouched full-screen system frame, even when
+        // assertion below fails. This distinguishes UI failures from an
+        // XCTest hierarchy-lifetime mismatch on iPhone and iPad.
         let shareEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shareEvidence.name = "feed-accessibility-xxxl-native-share-sheet"
         shareEvidence.lifetime = .keepAlways
         add(shareEvidence)
+        XCTAssertTrue(systemSharingVisible,
+                      "Share game must present an actual system sheet, iPad popover or activity view.")
+
+        let oldActionsDone = app.buttons["feed.actions.dismiss"].firstMatch
+        let oldShareButton = app.buttons.matching(
+            NSPredicate(format: "label == %@", "Share game")).firstMatch
+        for (name, staleControl) in [
+            ("Done", oldActionsDone),
+            ("Share game", oldShareButton)
+        ] {
+            let noInteractiveOldAction = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false OR hittable == false"),
+                object: staleControl)
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [noInteractiveOldAction], timeout: 8),
+                .completed,
+                "Old Actions \(name) must be non-interactive while the genuine system share UI is presented.")
+        }
         print("UI_EVALUATOR_ACCESSIBILITY dynamic_type=accessibility-xxxl visible_primary_targets=2 menu_actions=6 native_share_attempt=true")
     }
 }
