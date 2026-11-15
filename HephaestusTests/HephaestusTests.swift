@@ -2472,3 +2472,65 @@ struct HephaestusTests {
     #expect(!foreignGame)
     #expect(gate.firstMilliseconds == nil)
 }
+
+
+@Test func prewarmWebKitMessageOriginPolicyRejectsForeignHostViewAndNavigation() {
+    let backend = URL(string: "https://games.example.test")!
+    let expected = URL(string: "https://games.example.test/player?game=fixture&quality=high&presentation=play")!
+    let changedGame = URL(string: "https://games.example.test/player?game=forged&quality=high&presentation=play")!
+    let changedQuality = URL(string: "https://games.example.test/player?game=fixture&quality=low&presentation=play")!
+
+    let accepted = PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: expected, actualURL: expected,
+        isMainFrame: true, originScheme: "https",
+        originHost: "games.example.test", originPort: 443,
+        backendURL: backend
+    )
+    #expect(accepted)
+
+    typealias Source = (Bool, Bool, URL?, URL?, Bool, String, String, Int, URL)
+    let rejected: [Source] = [
+        (false, false, expected, expected, true, "https", "games.example.test", 443, backend),
+        (true, true, expected, expected, true, "https", "games.example.test", 443, backend),
+        (true, false, expected, expected, false, "https", "games.example.test", 443, backend),
+        (true, false, nil, expected, true, "https", "games.example.test", 443, backend),
+        (true, false, expected, nil, true, "https", "games.example.test", 443, backend),
+        (true, false, expected, changedGame, true, "https", "games.example.test", 443, backend),
+        (true, false, expected, changedQuality, true, "https", "games.example.test", 443, backend),
+        (true, false, expected, expected, true, "http", "games.example.test", 443, backend),
+        (true, false, expected, expected, true, "https", "phish.example.test", 443, backend),
+        (true, false, expected, expected, true, "https", "games.example.test", 8443, backend),
+    ]
+    for (sameView, attached, expectedURL, actualURL, mainFrame,
+         scheme, host, port, backendURL) in rejected {
+        let pass = PlayerPrewarmMessageOriginPolicy.allows(
+            isCurrentPooledView: sameView, isAttached: attached,
+            expectedURL: expectedURL, actualURL: actualURL,
+            isMainFrame: mainFrame, originScheme: scheme,
+            originHost: host, originPort: port, backendURL: backendURL
+        )
+        #expect(!pass)
+    }
+
+    // Explicit development backend port must not accidentally be compared
+    // against the public HTTPS default; no alternate host is accepted.
+    let localBackend = URL(string: "http://localhost:8123")!
+    let localPlayer = URL(string: "http://localhost:8123/player?game=test")!
+    let localAccepted = PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: localPlayer, actualURL: localPlayer,
+        isMainFrame: true, originScheme: "http",
+        originHost: "localhost", originPort: 8123,
+        backendURL: localBackend
+    )
+    #expect(localAccepted)
+    let wrongPort = PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: localPlayer, actualURL: localPlayer,
+        isMainFrame: true, originScheme: "http",
+        originHost: "localhost", originPort: 80,
+        backendURL: localBackend
+    )
+    #expect(!wrongPort)
+}
