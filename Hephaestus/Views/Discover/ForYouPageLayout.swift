@@ -129,13 +129,17 @@ enum ForYouPageLayout {
         isRegular && width > height && width >= 960 && height >= 620 && !isLargeText
     }
 
-    /// The old iPad landscape detail card used a hard 520pt ceiling and
-    /// left a large black region beneath the media and the primary Play CTA.
-    /// Use the real current window height, retaining a bounded scrollable
-    /// details screen; original artwork remains aspect-fit, never stretched
-    /// into synthetic gameplay or cropped into unsupported previews.
-    static func gameDetailsPreviewHeight(containerHeight: CGFloat) -> CGFloat {
-        min(max(0, containerHeight) * 0.74, 640)
+    /// Expand landscape media only after an actual backend poster decodes.
+    /// A missing/loading/failed poster is a compact, truthful fallback —
+    /// not a giant gradient falsely suggesting recorded gameplay footage.
+    static func gameDetailsPreviewHeight(
+        containerHeight: CGFloat, hasDecodedPoster: Bool
+    ) -> CGFloat {
+        let availableHeight = max(0, containerHeight)
+        if hasDecodedPoster {
+            return min(availableHeight * 0.74, 640)
+        }
+        return min(availableHeight * 0.40, 335)
     }
 
     /// A decoded, real backend poster deserves room to breathe on a portrait
