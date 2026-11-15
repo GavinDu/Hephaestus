@@ -76,8 +76,11 @@ struct DiscoverView: View {
     // The host owns navigation, so this is an actual route to Library,
     // never a substitute game list or a fabricated preview.
     let onOpenLibrary: (() -> Void)?
-    init(onOpenLibrary: (() -> Void)? = nil) {
+    let onOpenProfile: (() -> Void)?
+    init(onOpenLibrary: (() -> Void)? = nil,
+         onOpenProfile: (() -> Void)? = nil) {
         self.onOpenLibrary = onOpenLibrary
+        self.onOpenProfile = onOpenProfile
     }
 
     // One functional set of recovery actions across all orientations.
@@ -140,6 +143,7 @@ struct DiscoverView: View {
     @State private var reportingGame: FeedGame?
     @State private var profileRequest: CreatorProfileRequest?
     @State private var isCreatorDiscoveryPresented = false
+    @State private var openProfileAfterCreatorDismiss = false
     @State private var settledForYouGameID: String?
     @State private var resultPresentation: PlayerResultPresentation?
 
@@ -702,8 +706,20 @@ struct DiscoverView: View {
             .sheet(item: $reportingGame) { game in
                 ReportGameSheet(game: game)
             }
-            .sheet(item: $profileRequest) { request in
-                CreatorProfileSheet(creatorID: request.id)
+            .sheet(item: $profileRequest, onDismiss: {
+                if openProfileAfterCreatorDismiss {
+                    openProfileAfterCreatorDismiss = false
+                    // Only the host owns native Profile navigation; never
+                    // replace it with an inert in-sheet authentication CTA.
+                    onOpenProfile?()
+                }
+            }) { request in
+                CreatorProfileSheet(
+                    creatorID: request.id,
+                    onRequestSignIn: onOpenProfile == nil ? nil : {
+                        openProfileAfterCreatorDismiss = true
+                        profileRequest = nil
+                    })
             }
             .sheet(isPresented: $isCreatorDiscoveryPresented) {
                 CreatorDiscoverySheet()
@@ -2342,6 +2358,13 @@ private struct CreatorDiscoverySheet: View {
 
 private struct CreatorProfileSheet: View {
     let creatorID: String
+    let onRequestSignIn: (() -> Void)?
+
+    init(creatorID: String, onRequestSignIn: (() -> Void)? = nil) {
+        self.creatorID = creatorID
+        self.onRequestSignIn = onRequestSignIn
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -2387,7 +2410,27 @@ private struct CreatorProfileSheet: View {
                                     creatorMetric("Followers", value: profile.follower_count)
                                     creatorMetric("Following", value: profile.following_count)
                                 }
-                                if profile.creator_id != BackendConfig.currentUserID {
+                                if BackendConfig.currentUserID.isEmpty {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text("Sign in from Profile to follow this creator.")
+                                            .font(.subheadline)
+                                            .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .accessibilityIdentifier("creator.profile.signInHint")
+                                        if let onRequestSignIn {
+                                            Button(action: onRequestSignIn) {
+                                                Label("Go to Profile to sign in",
+                                                      systemImage: "person.crop.circle")
+                                                    .font(.headline.weight(.semibold))
+                                                    .foregroundStyle(.black)
+                                                    .frame(maxWidth: .infinity, minHeight: 48)
+                                            }
+                                            .buttonStyle(.borderedProminent)
+                                            .tint(ArcadePulseTheme.electricViolet)
+                                            .accessibilityIdentifier("creator.profile.openProfile")
+                                        }
+                                    }
+                                } else if profile.creator_id != BackendConfig.currentUserID {
                                     Button {
                                         Task { await toggleFollow(profile.is_following) }
                                     } label: {
