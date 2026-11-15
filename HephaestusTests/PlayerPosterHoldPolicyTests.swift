@@ -194,7 +194,8 @@ private func posterAttempt(
     let failed = poster.markFailure(for: current, ownsCurrentAttachment: true)
     #expect(failed)
     #expect(poster.mustShowRecovery)
-    #expect(!poster.consumeReveal(for: current, ownsCurrentAttachment: true))
+    let noPostRecoveryReveal = poster.consumeReveal(for: current, ownsCurrentAttachment: true)
+    #expect(!noPostRecoveryReveal)
 }
 
 @Test func playerPosterMustBindGameIDToExactCanonicalPlayerURL() {
@@ -214,6 +215,7 @@ private func posterAttempt(
             for: attempt, validatedByNativeGate: true, ownsCurrentAttachment: true
         )
         #expect(!accepted)
-        #expect(!reducer.consumeReveal(for: attempt, ownsCurrentAttachment: true))
+        let noInvalidReveal = reducer.consumeReveal(for: attempt, ownsCurrentAttachment: true)
+        #expect(!noInvalidReveal)
     }
 }
