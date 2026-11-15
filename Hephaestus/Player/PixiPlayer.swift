@@ -261,6 +261,22 @@ enum PlayerPrewarmMessageOriginPolicy {
     }
 }
 
+/// One WebKit message handler routes across speculative/transfer/attached.
+enum PlayerPrewarmMessageOwnershipPolicy {
+    enum Recipient: Equatable { case speculative, attached, drop }
+    static func recipient(
+        isAttached: Bool, transferringLease: UInt64?,
+        currentLease: UInt64, hasAttachedReceiver: Bool
+    ) -> Recipient {
+        if !isAttached { return .speculative }
+        if let transferringLease {
+            return transferringLease != 0 && transferringLease == currentLease
+                ? .speculative : .drop
+        }
+        return hasAttachedReceiver ? .attached : .drop
+    }
+}
+
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
@@ -957,6 +973,8 @@ enum PlayerWebViewPool {
     private static var loadedURL: URL?
     private static var isAttached = false
     private static var attachmentLease: UInt64 = 0
+    private static var transferringLease: UInt64?
+    private static weak var attachedMessageReceiver: (any WKScriptMessageHandler)?
     private static var documentEpochGate = PlayerNativeDocumentEpochGate()
     private static var sessionFingerprint: String?
     private static let sessionObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
@@ -1036,6 +1054,7 @@ enum PlayerWebViewPool {
         guard pooledView === webView else { return }
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
+        transferringLease = nil
         _ = documentEpochGate.didStartNavigation()
     }
 
@@ -1108,6 +1127,10 @@ enum PlayerWebViewPool {
         // Every distinct interactive SwiftUI Coordinator owns a new lease,
         // even if it reuses the same prewarmed WKWebView after a retry.
         attachmentLease &+= 1
+        attachedMessageReceiver = nil
+        // Keep the shared prewarm receiver active until the Coordinator
+        // acknowledges the lease. New navigations cannot reuse old scenes.
+        transferringLease = shouldLoad ? nil : attachmentLease
         currentURL = url
         if shouldLoad {
             loadedURL = nil
@@ -1115,6 +1138,50 @@ enum PlayerWebViewPool {
         }
         view.navigationDelegate = nil
         return (view, shouldLoad, didFinish, attachmentLease)
+    }
+
+    /// A permanent, narrow pool handler avoids WebKit message loss between
+    /// take(url:) and coordinator installation. Match exact native identity.
+    static func attachMessageReceiver(
+        _ receiver: WKScriptMessageHandler, webView: WKWebView,
+        url: URL, lease: UInt64, gameID: String
+    ) -> PlayerPrewarmSceneMilestoneLedger.Submission? {
+        guard ownsAttachedNavigation(webView, url: url, lease: lease) else { return nil }
+        attachedMessageReceiver = receiver
+        defer { transferringLease = nil }
+        guard transferringLease == lease,
+              let pending = sceneMilestoneLedger.candidate,
+              let nonce = documentEpochGate.currentNonce else { return nil }
+        let expected = PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: gameID, playerURL: url, documentNonce: nonce,
+            credentialFingerprint: credentialFingerprint(),
+            runtimeSessionID: pending.identity.runtimeSessionID
+        )
+        return sceneMilestoneLedger.consume(
+            expected: expected, offeredLease: lease,
+            currentLease: attachmentLease,
+            isCurrentPooledView: pooledView === webView, isAttached: isAttached
+        )
+    }
+
+    private static func routeWebKitMessage(
+        _ controller: WKUserContentController, message: WKScriptMessage
+    ) {
+        guard message.webView === pooledView else { return }
+        switch PlayerPrewarmMessageOwnershipPolicy.recipient(
+            isAttached: isAttached, transferringLease: transferringLease,
+            currentLease: attachmentLease,
+            hasAttachedReceiver: attachedMessageReceiver != nil
+        ) {
+        case .speculative:
+            collectPrewarmMetric(message)
+        case .attached:
+            attachedMessageReceiver?.userContentController(
+                controller, didReceive: message
+            )
+        case .drop:
+            return
+        }
     }
 
     /// Only the currently attached navigation may be recovered. A previously
@@ -1157,6 +1224,7 @@ enum PlayerWebViewPool {
               responseURL == currentURL else { return }
         loadedURL = nil
         self.currentURL = nil
+        transferringLease = nil
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
@@ -1177,6 +1245,8 @@ enum PlayerWebViewPool {
         prewarmExpiryTask = nil
         prewarmEpoch &+= 1
         isAttached = false
+        transferringLease = nil
+        attachedMessageReceiver = nil
         currentURL = nil
         loadedURL = nil
         documentEpochGate.invalidate()
@@ -1216,6 +1286,8 @@ enum PlayerWebViewPool {
         prewarmEpoch &+= 1
         let stale = pooledView
         pooledView = nil
+        transferringLease = nil
+        attachedMessageReceiver = nil
         currentURL = nil
         loadedURL = nil
         isAttached = false
@@ -1241,6 +1313,8 @@ enum PlayerWebViewPool {
         prewarmEpoch &+= 1
         let stale = pooledView
         pooledView = nil
+        transferringLease = nil
+        attachedMessageReceiver = nil
         currentURL = nil
         loadedURL = nil
         documentEpochGate.invalidate()
@@ -1271,30 +1345,43 @@ enum PlayerWebViewPool {
         let source = message.frameInfo.securityOrigin
         let trustedProvenance = PlayerPrewarmMessageOriginPolicy.allows(
             isCurrentPooledView: message.webView === view,
-            isAttached: isAttached,
+            isAttached: isAttached && transferringLease == nil,
             expectedURL: currentURL, actualURL: view.url,
             isMainFrame: message.frameInfo.isMainFrame,
             originScheme: source.protocol, originHost: source.host,
             originPort: source.port, backendURL: BackendConfig.baseURL
         )
         guard trustedProvenance else { return }
-        _ = prewarmSceneGate.record(
+        guard prewarmSceneGate.record(
             body, expectedGameID: expectedGameID,
             currentDocumentNonce: documentEpochGate.currentNonce,
             isTrustedMainFrame: message.frameInfo.isMainFrame,
             isSameOrigin: trustedProvenance,
             navigationStarted: documentEpochGate.navigationStarted,
             credentialScopeCurrent: sessionFingerprint == credentialFingerprint()
+        ), let nonce = documentEpochGate.currentNonce,
+           let sequence = prewarmSceneGate.firstSequence,
+           let ms = prewarmSceneGate.firstMilliseconds,
+           let session = prewarmSceneGate.firstSessionID else { return }
+        let identity = PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: expectedGameID, playerURL: url,
+            documentNonce: nonce, credentialFingerprint: credentialFingerprint(),
+            runtimeSessionID: session
+        )
+        _ = sceneMilestoneLedger.record(
+            identity: identity, expected: identity,
+            sequence: sequence, milliseconds: ms,
+            isMainFrame: message.frameInfo.isMainFrame,
+            isSpeculative: !isAttached || transferringLease == attachmentLease,
+            navigationStarted: documentEpochGate.navigationStarted
         )
     }
 
-    // This separate handler owns no game state and cannot accidentally
-    // retain the pooled WebView. The sheet swaps its own handler by removing
-    // this same single name on attach. Future #352 owns snapshot transfer.
+    // The single handler remains installed; the attached receiver is weak.
     private final class PrewarmMetricListener: NSObject, WKScriptMessageHandler {
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
-            PlayerWebViewPool.collectPrewarmMetric(message)
+            PlayerWebViewPool.routeWebKitMessage(userContentController, message: message)
         }
     }
 
@@ -2069,19 +2156,6 @@ struct PlayerResultSheet: View {
 
 // MARK: - Verified-result WKWebView host
 
-private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
-    weak var delegate: WKScriptMessageHandler?
-
-    init(delegate: WKScriptMessageHandler) {
-        self.delegate = delegate
-    }
-
-    func userContentController(_ userContentController: WKUserContentController,
-                                didReceive message: WKScriptMessage) {
-        delegate?.userContentController(userContentController, didReceive: message)
-    }
-}
-
 private struct PlayerWebView: UIViewRepresentable {
     let url: URL
     let gameID: String
@@ -2111,11 +2185,14 @@ private struct PlayerWebView: UIViewRepresentable {
         let webView = handoff.webView
         context.coordinator.attachmentLease = handoff.lease
         context.coordinator.attachedWebView = webView
-        // A newer .id(attempt) may mount before the old coordinator's
-        // dismantle callback. Replace its script handler explicitly:
-        // registering a duplicate WebKit handler name otherwise throws.
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: Self.messageName)
-        webView.configuration.userContentController.add(context.coordinator.messageProxy, name: Self.messageName)
+        // Do not unregister WebKit's handler during the ownership change.
+        let transferred = PlayerWebViewPool.attachMessageReceiver(
+            context.coordinator, webView: webView, url: url,
+            lease: handoff.lease, gameID: gameID
+        )
+        if let transferred {
+            context.coordinator.acceptTransferredScene(transferred)
+        }
         webView.navigationDelegate = context.coordinator
         context.coordinator.observeProgress(of: webView)
         if handoff.shouldLoad {
@@ -2149,7 +2226,6 @@ private struct PlayerWebView: UIViewRepresentable {
         guard PlayerWebViewPool.ownsActiveAttachment(
             webView, lease: coordinator.attachmentLease
         ) else { return }
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: messageName)
         PlayerWebViewPool.recycle(webView, lease: coordinator.attachmentLease)
     }
 
@@ -2197,7 +2273,6 @@ private struct PlayerWebView: UIViewRepresentable {
         private var runtimeSessionID: String? { runtimeSessionGate.activeSessionID }
         private var isActive: Bool { launchLifecycle.isAttached }
         private var hasObservedTerminalNavigation: Bool { launchLifecycle.observedTerminalNavigation }
-        lazy var messageProxy = WeakScriptMessageHandler(delegate: self)
 
         init(gameID: String, expectedURL: URL,
              onProgress: @escaping (Double) -> Void,
@@ -2214,6 +2289,36 @@ private struct PlayerWebView: UIViewRepresentable {
             self.onTerminate = onTerminate
             self.onFirstInput = onFirstInput
             self.onVerifiedRun = onVerifiedRun
+        }
+
+        func acceptTransferredScene(
+            _ submission: PlayerPrewarmSceneMilestoneLedger.Submission
+        ) {
+            // Submitted by the current strict schema-v2 pool listener and
+            // consumed once on this exact native document/lease only.
+            guard acceptsCurrentHostCallbacks,
+                  submission.identity.gameID == expectedGameID,
+                  submission.identity.playerURL == expectedURL,
+                  let view = attachedWebView,
+                  PlayerWebViewPool.acceptsCurrentDocumentNonce(
+                    view, nonce: submission.identity.documentNonce
+                  ),
+                  nativeBridgeVersionGate.allows(2),
+                  runtimeSessionGate.bind(submission.identity.runtimeSessionID),
+                  metricSequenceGate.accept(
+                    metric: "first_scene_render_submit",
+                    sequence: submission.sequence
+                  ),
+                  firstSceneRenderSubmissionGate.accept(
+                    milliseconds: submission.milliseconds
+                  ),
+                  launchLifecycle.sceneSubmitted() else { return }
+            nativeBridgeVersionGate.didAccept(2)
+            PlayerTelemetry.report(
+                gameID: expectedGameID, kind: "perf",
+                name: "FirstSceneRenderSubmitted",
+                message: "prewarm-transferred-ms=\(submission.milliseconds); not GPU-present"
+            )
         }
 
         func userContentController(_ userContentController: WKUserContentController,
