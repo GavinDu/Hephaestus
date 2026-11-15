@@ -895,7 +895,12 @@ struct HephaestusTests {
     }
     """.data(using: .utf8)!
     let result = try JSONDecoder().decode(VerifiedRunResult.self, from: json)
-    #expect(result.isVerified)
+    // Legacy status-only records must still decode for diagnostics, but
+    // are not independently attested and must never open a verified sheet.
+    #expect(!result.isVerified)
+    #expect(result.attested == nil)
+    #expect(result.rankingScope == nil)
+    #expect(result.evidenceStatus == nil)
     #expect(result.runID == "run-1")
     #expect(result.gameID == "game-1")
     #expect(result.result?.score == 420)
