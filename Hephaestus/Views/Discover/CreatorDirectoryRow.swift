@@ -1,0 +1,65 @@
+import SwiftUI
+
+/// Backend-grounded Creator Discovery rows — never substitute a fake creator
+/// or synthetic engagement metrics when the directory endpoint is unavailable.
+enum CreatorDirectoryRowLayout {
+    static func stacksHeader(isRegularWidth: Bool, textSize: DynamicTypeSize) -> Bool {
+        textSize.isAccessibilitySize ||
+            (!isRegularWidth && textSize >= .xxLarge)
+    }
+
+    static func publicGameCount(_ count: Int) -> String {
+        let formatted = count.formatted()
+        return count == 1 ? "\(formatted) public game" : "\(formatted) public games"
+    }
+}
+
+struct CreatorDirectoryRow: View {
+    let creatorID: String
+    let publicGameCount: Int
+    let topics: [String]
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var stacksHeader: Bool {
+        CreatorDirectoryRowLayout.stacksHeader(
+            isRegularWidth: horizontalSizeClass == .regular,
+            textSize: dynamicTypeSize
+        )
+    }
+
+    private var headerLayout: AnyLayout {
+        stacksHeader
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 5))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            headerLayout {
+                Text(creatorID)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                if !stacksHeader {
+                    Spacer(minLength: 8)
+                }
+                Text(CreatorDirectoryRowLayout.publicGameCount(publicGameCount))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !topics.isEmpty {
+                Text(topics.prefix(5).map { "#\($0)" }.joined(separator: "  "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, 5)
+    }
+}
