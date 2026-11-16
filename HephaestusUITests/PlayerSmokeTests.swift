@@ -1618,6 +1618,8 @@ final class PlayerSmokeTests: XCTestCase {
                                  "Creator actions must announce real nonempty identity.")
             XCTAssertGreaterThanOrEqual(creator.frame.height, 44,
                                         "Large-type creator entry must remain a real 44pt target.")
+            XCTAssertGreaterThanOrEqual(creator.frame.width, 44,
+                                        "Even a short genuine Creator ID needs a 44pt minimum width.")
             XCTAssertLessThanOrEqual(creator.frame.maxY, play.frame.minY + 1,
                                      "Large-type creator identity must not obscure Play.")
             print("UI_EVALUATOR_CREATOR_LARGE_TEXT source=real_creator frame=" + String(describing: creator.frame))

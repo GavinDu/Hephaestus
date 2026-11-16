@@ -186,6 +186,11 @@ struct ArcadePulseCreatorIdentity: View {
         size.isAccessibilitySize ? 32 : 26
     }
 
+    /// A short legitimate account ID must not make the interactive Creator
+    /// target narrower than the accessibility minimum. The complete
+    /// authentic name still determines the natural width when longer.
+    static let minimumHitWidth: CGFloat = ArcadePulseTheme.minimumTarget
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
@@ -214,7 +219,9 @@ struct ArcadePulseCreatorIdentity: View {
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(minHeight: ArcadePulseTheme.minimumTarget)
+            .frame(minWidth: Self.minimumHitWidth,
+                   minHeight: ArcadePulseTheme.minimumTarget,
+                   alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
