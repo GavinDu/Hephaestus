@@ -216,6 +216,7 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateEntryConsentAndControls \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedUnavailableRecoveryToLibrary \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStalledTransportReachesHonestRecovery \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSlowLiveFeedCanOpenLibraryBeforeTimeout \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadSidebarXXLDestinationsAndProfileRoute \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorGuestSignInRoutesToProfileAfterDismiss \
