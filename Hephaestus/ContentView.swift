@@ -46,6 +46,27 @@ enum ArcadePulseSidebarLabelPolicy {
     static let minimumHitHeight: CGFloat = 44
 }
 
+/// Sidebar widths need to scale with Dynamic Type. The old fixed 250pt
+/// maximum broke legitimate navigation names mid-word at Accessibility5.
+/// Keep full semantic names, not artificially shortened UI-only aliases.
+enum ArcadePulseSidebarWidthPolicy {
+    struct Widths: Equatable {
+        let minimum: CGFloat
+        let ideal: CGFloat
+        let maximum: CGFloat
+    }
+
+    static func widths(for size: DynamicTypeSize) -> Widths {
+        if size.isAccessibilitySize {
+            return Widths(minimum: 320, ideal: 360, maximum: 400)
+        }
+        if size >= .xxLarge {
+            return Widths(minimum: 240, ideal: 280, maximum: 320)
+        }
+        return Widths(minimum: 180, ideal: 220, maximum: 250)
+    }
+}
+
 /// One navigation model with compact and expanded presentations. Width size class
 /// is used rather than device identity so Split View and resizable windows adapt too.
 struct ContentView: View {
@@ -123,7 +144,11 @@ struct ContentView: View {
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
             .background(ArcadePulseTheme.surface)
-            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 250)
+            .navigationSplitViewColumnWidth(
+                min: ArcadePulseSidebarWidthPolicy.widths(for: dynamicTypeSize).minimum,
+                ideal: ArcadePulseSidebarWidthPolicy.widths(for: dynamicTypeSize).ideal,
+                max: ArcadePulseSidebarWidthPolicy.widths(for: dynamicTypeSize).maximum
+            )
             .navigationTitle("Hephaestus")
         } detail: {
             destination(for: selection ?? .discover)
