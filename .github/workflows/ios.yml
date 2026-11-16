@@ -219,6 +219,7 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSlowLiveFeedCanOpenLibraryBeforeTimeout \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadSidebarXXLDestinationsAndProfileRoute \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadAccessibilityFiveSidebarHasRoomForWholeWords \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorGuestSignInRoutesToProfileAfterDismiss \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadGameDetailsAdaptiveLayout \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
