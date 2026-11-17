@@ -39,11 +39,18 @@ struct CreatorTopicFilterControls: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
-                .onSubmit(onApply)
+                // The Creator Discovery host owns ONE search submission
+                // action for both this field and the navigation search bar.
+                // A nested onSubmit plus outer onSubmit could reset twice,
+                // and the old inner handler ignored the disabled Apply state.
                 .frame(maxWidth: .infinity, minHeight: CreatorTopicFilterLayout.minimumTargetHeight)
                 .accessibilityIdentifier("creator.discovery.topicInput")
 
-            Button(action: onApply) {
+            Button {
+                if CreatorQuerySubmitPolicy.canSubmit(isLoading: isLoading) {
+                    onApply()
+                }
+            } label: {
                 Text(isLoading ? "Searching…" : "Apply")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.black)
