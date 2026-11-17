@@ -309,6 +309,11 @@ final class PlayerSmokeTests: XCTestCase {
         }
         XCTAssertTrue(analyze.exists && !analyze.isEnabled,
                       "Analyze must stay disabled until artwork and source consent exist.")
+        // Signed-out/empty Create must not offer fake preservation or a
+        // retry of an analysis request that was never sent.
+        XCTAssertFalse(app.buttons["create.failure.keepDrawing"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["create.failure.discard"].firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["create.pick.analysisRetryNotice"].firstMatch.exists)
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = isPad ? "arcade-pulse-create-entry-ipad" : "arcade-pulse-create-entry-iphone"
         screenshot.lifetime = .keepAlways
