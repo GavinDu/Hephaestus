@@ -1611,18 +1611,23 @@ final class PlayerSmokeTests: XCTestCase {
                 }
             }
             print("UI EVALUATOR pager frame orientation=\(profile.1): \(pagerFrame)")
-            if expectedLandscape {
-                // A one-card, scroll-disabled pager is driven by its own
-                // DragGesture, not the UIScrollView's content scrolling.
-                // Use a real touch trace inside its content area in compact
-                // landscape, where XCTest's generic scroll gesture may be
-                // routed to the disabled scroll view and never reach the card.
+            if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
+                // The scroll-disabled one-card pager uses a DragGesture on
+                // COMPACT IPHONE LANDSCAPE. A physical normalized drag is
+                // required here; do not transfer the workaround to iPad.
+                // The regular-width iPad offers a real accessible scroll
+                // action, and its genuine pager.swipeUp() must move the page.
                 // Only a changed LIVE game identity may pass the gate.
                 let start = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.82))
                 let end = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.18))
                 print("UI_EVALUATOR_PHYSICAL_DRAG orientation=landscape start=0.50,0.82 end=0.50,0.18")
                 start.press(forDuration: 0.1, thenDragTo: end)
             } else {
+                // Includes iPad portrait AND iPad landscape: use native
+                // accessibility paging, not a compact iPhone touch trace.
+                // Strict settled-game identity, two stable hit-test samples,
+                // pixel-change and media occupancy gates remain unchanged.
+                print("UI_EVALUATOR_ACCESSIBLE_SWIPE device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1)")
                 pager.swipeUp()
             }
 
