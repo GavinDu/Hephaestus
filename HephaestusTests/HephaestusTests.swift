@@ -2783,7 +2783,7 @@ struct HephaestusTests {
 }
 
 
-@Test func prewarmPermanentWebKitHandlerRoutesBothSidesOfAttachmentWithoutGap() {
+@Test func purePrewarmRecipientSpeculativeLeaseAndAttachedDecisionMatrix() {
     typealias Policy = PlayerPrewarmMessageOwnershipPolicy
     #expect(Policy.recipient(
         isAttached: false, transferringLease: nil, currentLease: 9,
