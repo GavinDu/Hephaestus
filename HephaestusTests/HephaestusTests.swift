@@ -2627,3 +2627,86 @@ struct HephaestusTests {
         backendURL: customHTTPSBackend
     ))
 }
+
+@Test func nativeRuntimeIdentityPolicyRejectsOversizedUnicodeAndUnsafeRunSegments() {
+    let session = PlayerNativeRuntimeIdentifierPolicy.validSessionID
+    let run = PlayerNativeRuntimeIdentifierPolicy.validRunID
+    #expect(PlayerNativeRuntimeIdentifierPolicy.maximumBytes == 128)
+
+    #expect(session("runtime-session_01~"))
+    #expect(session(String(repeating: "s", count: 128)))
+    #expect(!session(""))
+    #expect(!session(String(repeating: "s", count: 129)))
+    #expect(!session(String(repeating: "😀", count: 128)))
+    #expect(!session("e\u{301}"))
+    #expect(!session(" Session"))
+    #expect(!session("Session "))
+    #expect(!session("session\nnext"))
+    #expect(!session("session\u{0000}"))
+    #expect(!session("A\u{200B}B"))
+    #expect(session("runtime:session/with-visible-punctuation"))
+
+    #expect(run("70ab831b-9e2e-4cd6-a07c-19e713b76901"))
+    #expect(run("run_ABC-123.~"))
+    #expect(run(String(repeating: "r", count: 128)))
+    for bad in [
+        "", ".", "..", " ", "run with space", "run/other",
+        "run%2Fother", "run?limit=1", "run#fragment",
+        "é", "😀", "e\u{301}", "run\n", "\u{0000}",
+        String(repeating: "r", count: 129),
+        String(repeating: "😀", count: 128),
+    ] {
+        #expect(!run(bad), "unexpectedly admitted run identifier")
+    }
+}
+
+@Test func invalidWebKitRuntimeIdentitiesNeverClaimSessionOrFetchSlot() {
+    var session = PlayerRuntimeSessionBindingGate()
+    let badUnicode = String(repeating: "😀", count: 128)
+    // Swift Testing #expect captures expressions in a nonmutating closure.
+    // Invoke the real gate before the assertion, as other runtime tests do.
+    let rejectedUnicode = session.bind(badUnicode)
+    #expect(!rejectedUnicode)
+    #expect(session.activeSessionID == nil)
+    let rejectedWhitespace = session.bind("has space")
+    #expect(!rejectedWhitespace)
+    #expect(session.activeSessionID == nil)
+    let first = session.bind("valid-native-session")
+    #expect(first)
+    #expect(session.activeSessionID == "valid-native-session")
+    session.beginNavigation()
+    let retiredUnicode = session.bind(badUnicode)
+    let retiredPrior = session.bind("valid-native-session")
+    let newSession = session.bind("next-valid-session")
+    #expect(!retiredUnicode)
+    #expect(!retiredPrior)
+    #expect(newSession)
+
+    var runs = PlayerVerifiedRunNotificationGate()
+    let invalidTraversal = runs.offer("../other")
+    let invalidUnicode = runs.offer(badUnicode)
+    let invalidEncoding = runs.offer("run%2Fother")
+    #expect(invalidTraversal == nil)
+    #expect(invalidUnicode == nil)
+    #expect(invalidEncoding == nil)
+    #expect(runs.recentCount == 0)
+    #expect(runs.pendingCount == 0)
+    #expect(runs.deferredCount == 0)
+    let validRun = runs.offer("valid-run-01")
+    #expect(validRun == "valid-run-01")
+    #expect(runs.recentCount == 1)
+    #expect(runs.pendingCount == 1)
+    #expect(PlayerNativeRuntimeIdentifierPolicy.matchesRequestedRunID(
+        "run-01", response: "run-01"
+    ))
+    #expect(!PlayerNativeRuntimeIdentifierPolicy.matchesRequestedRunID(
+        "run-01", response: "run-02"
+    ))
+    #expect(!PlayerNativeRuntimeIdentifierPolicy.matchesRequestedRunID(
+        "run-01", response: "run/01"
+    ))
+    #expect(!PlayerNativeRuntimeIdentifierPolicy.matchesRequestedRunID(
+        String(repeating: "😀", count: 128), response: String(repeating: "😀", count: 128)
+    ))
+}
+
