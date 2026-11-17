@@ -830,7 +830,9 @@ final class PlayerSmokeTests: XCTestCase {
             original.name = "arcade-pulse-game-details-real-feed-unavailable"
             original.lifetime = .keepAlways
             add(original)
-            let library = app.buttons["feed.error.library"].firstMatch
+            let terminalLibrary = app.buttons["feed.error.library"].firstMatch
+            let slowLibrary = app.buttons["feed.loading.library"].firstMatch
+            let library = terminalLibrary.exists ? terminalLibrary : slowLibrary
             if library.exists && library.isHittable {
                 XCTAssertGreaterThanOrEqual(library.frame.height, 44)
                 library.tap()
