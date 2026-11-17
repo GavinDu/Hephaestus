@@ -779,6 +779,104 @@ final class PlayerSmokeTests: XCTestCase {
         add(evidence)
     }
 
+    /// P1 #439: an actual compact-landscape iPhone Library guest CTA must
+    /// scroll entirely above the floating system tabs at maximum text size.
+    /// The tester physically taps the real sign-in route, no mocked data.
+    @MainActor
+    func testArcadePulseLibraryCompactLandscapeSignInClearOfTabBar() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("Compact landscape floating tab regression is iPhone-only.")
+        }
+
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "--ui-test-library-entry",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+        let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 15),
+                      "Test must start inside the actual signed-out Library destination.")
+        let signIn = app.buttons["library.signIn"].firstMatch
+        // In an Accessibility5 List, the real sign-in cell is lazily laid
+        // out below the oversized genuine hero: it is NOT present in the
+        // initial portrait accessibility tree. Do not demand existence
+        // before physically scrolling the actual CollectionView.
+
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-library-a5-iphone-portrait-before-rotation"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let until = Date().addingTimeInterval(12)
+        while window.frame.width <= window.frame.height && Date() < until {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "A true native landscape frame is required for overlay evidence.")
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 8))
+        XCTAssertTrue(library.waitForExistence(timeout: 8),
+                      "Library must remain selected after physical rotation.")
+
+        // SwiftUI List is lazy: the genuine sign-in row can be absent from
+        // the accessibility tree until scrolled on-screen. Original failed
+        // screenshot 14283548914 showed the Accessibility5 hero occupying
+        // the initial screen with Saved Games only just entering view.
+        // Scroll physically, then require real row existence and full
+        // geometry clearance; do not fabricate or bypass the CTA.
+        // At Accessibility5 the Library's giant hero can occupy multiple
+        // viewports. A root-app swipe can hit the floating tab bar instead of
+        // the SwiftUI List. Target the genuine native scrolling container.
+        let collection = app.collectionViews.firstMatch
+        let table = app.tables.firstMatch
+        let scrollingList = collection.exists ? collection : table
+        XCTAssertTrue(scrollingList.exists,
+                      "Actual Library must expose a native scrollable List container.")
+        for _ in 0..<12 {
+            if signIn.exists && signIn.isHittable &&
+               signIn.frame.maxY <= tabs.frame.minY - 4 {
+                break
+            }
+            scrollingList.swipeUp()
+        }
+        print("LIBRARY_A5_NATIVE_SCROLL frame=\(window.frame) list=\(scrollingList.frame) tabs=\(tabs.frame) sign_in_exists=\(signIn.exists)")
+        let afterPhysicalScroll = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        afterPhysicalScroll.name = "arcade-pulse-library-a5-native-scroll-before-signin-assertion"
+        afterPhysicalScroll.lifetime = .keepAlways
+        add(afterPhysicalScroll)
+        XCTAssertTrue(signIn.exists,
+                      "Real Library sign-in must materialize after actual native scrolling.")
+        XCTAssertTrue(signIn.isHittable,
+                      "Real Library sign-in must be reachable at Accessibility5 in landscape.")
+        XCTAssertGreaterThanOrEqual(signIn.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        XCTAssertLessThanOrEqual(signIn.frame.maxY, tabs.frame.minY - 4,
+                                 "The full sign-in control must clear native floating tabs.")
+
+        let clear = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        clear.name = "arcade-pulse-library-a5-iphone-landscape-clear-of-tabs"
+        clear.lifetime = .keepAlways
+        add(clear)
+
+        // A genuine native hit must reach Profile; visibility alone does
+        // not prove the CTA is usable after rotation and scrolling.
+        signIn.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let apple = app.buttons["Sign in with Apple"].firstMatch
+        XCTAssertTrue(apple.waitForExistence(timeout: 10) && apple.isHittable,
+                      "After a physical tap, actual Apple sign-in must be usable.")
+        let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        arrived.name = "arcade-pulse-library-a5-iphone-landscape-profile-arrived"
+        arrived.lifetime = .keepAlways
+        add(arrived)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// Open the actual saved/recent Library stage in iPad portrait and landscape.
     /// No account, mock saved items or successful API response is injected.
     @MainActor
