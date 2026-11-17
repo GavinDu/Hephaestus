@@ -1674,22 +1674,9 @@ struct PixiPlayerSheet: View {
     @ToolbarContentBuilder
     private var playerToolbar: some ToolbarContent {
 
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        finishToFeed()
-                    } label: {
-                        // Toolbar items have their own layout. Expanding the
-                        // outer Button's frame did NOT expand its actual
-                        // accessibility hit box in native iPhone/iPad CI.
-                        // Size the interactive label itself, not its parent.
-                        Text("Done")
-                            .frame(minWidth: HephaestusDesign.minimumActionHeight,
-                                   minHeight: HephaestusDesign.minimumActionHeight)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityIdentifier("player.done")
-                    .accessibilityHint("Close this game and return to the feed")
-                }
+                // iOS UINavigationBar still clamps a ToolbarItem's real
+                // accessibility button to 36pt, even with a 44pt label.
+                // The single exit lives in the player-owned safe-area row.
                 ToolbarItemGroup(placement: .primaryAction) {
                     ShareLink(item: shareURL) {
                         Image(systemName: "square.and.arrow.up")
@@ -1753,6 +1740,34 @@ struct PixiPlayerSheet: View {
                         ],
                         startPoint: .topLeading, endPoint: .bottomTrailing)
                 )
+            }
+            // The platform toolbar measured a real 36pt Done hitbox on iPhone
+            // despite a 44pt inner label (#460). Reserve an app-owned safe
+            // area row so the one native exit remains fully hittable while
+            // WKWebView receives no touches under the control.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack {
+                    Button {
+                        finishToFeed()
+                    } label: {
+                        Text("Done")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(ArcadePulseTheme.textPrimary)
+                            .frame(minWidth: 72, minHeight: 48)
+                            .background(
+                                ArcadePulseTheme.surface,
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("player.done")
+                    .accessibilityHint("Close this game and return to the feed")
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .frame(minHeight: 56)
+                .background(ArcadePulseTheme.canvas)
             }
             .navigationTitle(title)
             .preferredColorScheme(.dark)
