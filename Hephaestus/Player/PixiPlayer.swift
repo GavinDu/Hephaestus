@@ -2193,10 +2193,17 @@ private struct PlayerWebView: UIViewRepresentable {
         context.coordinator.attachedWebView = webView
         // No remove/add gap: the pool keeps exactly one WebKit handler.
         // An old Coordinator can never displace this lease's receiver.
-        _ = PlayerWebViewPool.attachMessageReceiver(
+        guard PlayerWebViewPool.attachMessageReceiver(
             context.coordinator.messageProxy, webView: webView,
             url: url, lease: handoff.lease
-        )
+        ) else {
+            // The Keychain can rotate between take() and the receiver
+            // acknowledgement. Never navigate an already-retired player
+            // WebView after the pool has revoked its credential scope.
+            webView.stopLoading()
+            webView.loadHTMLString("", baseURL: nil)
+            return webView
+        }
         webView.navigationDelegate = context.coordinator
         context.coordinator.observeProgress(of: webView)
         if handoff.shouldLoad {
