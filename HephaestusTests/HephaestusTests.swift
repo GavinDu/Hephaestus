@@ -2684,5 +2684,17 @@ struct HephaestusTests {
     #expect(runs.offer("valid-run-01") == "valid-run-01")
     #expect(runs.recentCount == 1)
     #expect(runs.pendingCount == 1)
+    #expect(PlayerNativeRuntimeIdentifierPolicy.matchesRequestedRunID(
+        "run-01", response: "run-01"
+    ))
+    #expect(!PlayerNativeRuntimeIdentifierPolicy.matchesRequestedRunID(
+        "run-01", response: "run-02"
+    ))
+    #expect(!PlayerNativeRuntimeIdentifierPolicy.matchesRequestedRunID(
+        "run-01", response: "run/01"
+    ))
+    #expect(!PlayerNativeRuntimeIdentifierPolicy.matchesRequestedRunID(
+        String(repeating: "😀", count: 128), response: String(repeating: "😀", count: 128)
+    ))
 }
 
