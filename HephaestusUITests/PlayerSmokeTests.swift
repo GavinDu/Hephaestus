@@ -329,6 +329,55 @@ final class PlayerSmokeTests: XCTestCase {
         }
     }
 
+    /// Accessibility5 must not turn a readable dark Create prompt into an
+    /// unreachable decorative field. Preserve original actual native pixels
+    /// without picking a private photo, granting consent, or publishing.
+    @MainActor
+    func testArcadePulseCreateKeywordsAccessibility5ContrastAndInput() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            app.launchArguments.append("--ui-test-create-entry")
+        }
+        app.launch()
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let tab = app.tabBars.buttons["Create"].firstMatch
+            XCTAssertTrue(tab.waitForExistence(timeout: 15) && tab.isHittable)
+            tab.tap()
+        }
+        let keywords = app.textFields["create.pick.keywords"].firstMatch
+        XCTAssertTrue(keywords.waitForExistence(timeout: 15))
+        for _ in 0..<6 where !keywords.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(keywords.isHittable,
+                      "At Accessibility5 the genuine keyword prompt must be scroll-reachable.")
+        XCTAssertGreaterThanOrEqual(keywords.frame.height, 44)
+        let label = keywords.label
+        XCTAssertTrue(label.contains("Optional keywords"),
+                      "VoiceOver must describe the real input at Accessibility5.")
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "arcade-pulse-create-keywords-a5-native-prompt"
+        before.lifetime = .keepAlways
+        add(before)
+
+        keywords.tap()
+        keywords.typeText("puzzle")
+        XCTAssertEqual(keywords.value as? String, "puzzle")
+        let analyze = app.buttons["create.pick.analyze"].firstMatch
+        XCTAssertTrue(analyze.exists && !analyze.isEnabled,
+                      "Keywords alone must not bypass actual image upload consent.")
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "arcade-pulse-create-keywords-a5-native-typed"
+        after.lifetime = .keepAlways
+        add(after)
+    }
+
     /// The preferences modal may not claim a successful write until the
     /// backend confirms. Simulate a failed write without changing any user
     /// settings or generating fictitious game/creator data.
