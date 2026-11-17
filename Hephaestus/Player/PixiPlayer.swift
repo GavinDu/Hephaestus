@@ -1675,11 +1675,20 @@ struct PixiPlayerSheet: View {
     private var playerToolbar: some ToolbarContent {
 
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
+                    Button {
                         finishToFeed()
+                    } label: {
+                        // Toolbar items have their own layout. Expanding the
+                        // outer Button's frame did NOT expand its actual
+                        // accessibility hit box in native iPhone/iPad CI.
+                        // Size the interactive label itself, not its parent.
+                        Text("Done")
+                            .frame(minWidth: HephaestusDesign.minimumActionHeight,
+                                   minHeight: HephaestusDesign.minimumActionHeight)
+                            .contentShape(Rectangle())
                     }
-                    .frame(minHeight: HephaestusDesign.minimumActionHeight)
                     .accessibilityIdentifier("player.done")
+                    .accessibilityHint("Close this game and return to the feed")
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
                     ShareLink(item: shareURL) {
