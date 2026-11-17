@@ -609,8 +609,14 @@ final class BackendAPI: ObservableObject {
     }
 
     func fetchVerifiedRunResult(runID: String) async throws -> VerifiedRunResult {
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
-        guard let encodedRunID = runID.addingPercentEncoding(withAllowedCharacters: allowed), !encodedRunID.isEmpty else {
+        // The direct caller also validates: a Unicode/oversized or dot-segment
+        // identifier must never become a browser-controlled URL path.
+        guard PlayerNativeRuntimeIdentifierPolicy.validRunID(runID) else {
+            throw APIError.invalidInput("Invalid run identifier.")
+        }
+        let allowed = CharacterSet(charactersIn:
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        guard let encodedRunID = runID.addingPercentEncoding(withAllowedCharacters: allowed) else {
             throw APIError.invalidInput("Invalid run identifier.")
         }
         let req = try makeRequest("v1/runs/\(encodedRunID)/result")
