@@ -2,6 +2,17 @@ import AuthenticationServices
 import SwiftUI
 import UIKit
 
+/// Preserve native Apple authentication UI and the platform's minimum
+/// target while giving its visual surface more room at large text sizes.
+/// Do not substitute a fake Apple sign-in control or change its identity scope.
+enum ProfileAppleSignInLayout {
+    static func buttonHeight(for size: DynamicTypeSize) -> CGFloat {
+        if size.isAccessibilitySize { return 64 }
+        if size >= .xxLarge { return 56 }
+        return 44
+    }
+}
+
 // MARK: - Profile
 
 /// Native Profile actions can return sensitive AuthServices/URLSession errors.
@@ -56,6 +67,7 @@ enum ProfileErrorPresentation {
 }
 
 struct ProfileView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var backendOK = false
     @State private var checked = false
     @State private var logEntries = DevLog.shared.count
@@ -128,8 +140,9 @@ struct ProfileView: View {
                             }
                         }
                         .signInWithAppleButtonStyle(.black)
-                        .frame(height: 44)
+                        .frame(height: ProfileAppleSignInLayout.buttonHeight(for: dynamicTypeSize))
                         .accessibilityLabel("Sign in with Apple")
+                        .accessibilityHint("Authenticate securely with your Apple account")
                         Text("Sign in with Apple to publish, follow, and save. No name or email is requested; the backend only sees an opaque Apple identifier, and sessions last 30 days.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
