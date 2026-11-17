@@ -17,6 +17,63 @@ enum CreatePhotoSelectionPolicy {
     }
 }
 
+/// Public UI messages never interpolate raw generator responses, private
+/// image URLs, account tokens, status text or arbitrary job.error contents.
+/// A publish timeout is ambiguous and must never claim receipt or nonreceipt.
+enum CreateErrorPresentation {
+    enum Stage { case analyze, generate, poll, confirm, publish }
+
+    static func message(for error: Error, stage: Stage) -> String {
+        let operation: String
+        switch stage {
+        case .analyze: operation = "Drawing analysis"
+        case .generate: operation = "Game generation"
+        case .poll: operation = "Game progress"
+        case .confirm: operation = "Game confirmation"
+        case .publish: operation = "Public submission"
+        }
+        if let api = error as? APIError, case let .badStatus(status) = api {
+            switch status {
+            case 401:
+                return "Your session has expired. Sign in again from Profile, then retry."
+            case 403:
+                return "This account isn't permitted to complete this step."
+            case 429:
+                return "Too many requests. Try again in a little while."
+            default:
+                break
+            }
+        }
+        // Any transport interruption after tapping Publish can have reached
+        // the server even when no response was received. Require real project
+        // status reconciliation before suggesting another POST.
+        if case .publish = stage {
+            return "Couldn't confirm whether your game was submitted. Check its status in My Projects before trying again."
+        }
+        if let network = error as? URLError {
+            switch network.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "You're offline. Reconnect before trying again."
+            case .secureConnectionFailed, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .serverCertificateUntrusted,
+                 .serverCertificateHasUnknownRoot:
+                return "A secure connection couldn't be established. Check your network."
+            case .timedOut:
+                return operation + " is taking too long. Check your connection."
+            default:
+                break
+            }
+        }
+        return operation + " isn't available right now. Please try again."
+    }
+
+    /// A server-reported job failure is genuine, but its payload can contain
+    /// private implementation details. Never put job.error in native UI.
+    static func failedJobMessage() -> String {
+        "The game generator reported that this job failed. Return to Create to try again."
+    }
+}
+
 /// A failed image-analysis request may have reached the service. This
 /// policy only permits editing the existing local drawing; it never
 /// authorizes automatically sending another network write.
@@ -98,7 +155,7 @@ struct CreateView: View {
                 case .review(let result, let image):
                     reviewView(result: result, image: image)
                 case .generating(let job):
-                    ProgressView("Generating game… (\(job.status))")
+                    ProgressView("Generating game…")
                         .task(id: job.job_id) { await pollJob(job.job_id) }
                 case .confirming(let job):
                     confirmingView(job: job)
@@ -122,7 +179,7 @@ struct CreateView: View {
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                                 Button("Keep drawing and edit") {
-                                    // Return to local selection, never silently replay a POST.
+                                    // Return to the local editor, never replay an ingest POST.
                                     failedDrawingAnalysis = false
                                     phase = .pick
                                 }
@@ -556,7 +613,19 @@ struct CreateView: View {
                 Toggle("I agree to submit this game for public sharing and moderation", isOn: $hasPublicPublishConsent)
                     .accessibilityIdentifier("create.publicPublishConsent")
                 if let publishMessage {
-                    Text(publishMessage).font(.footnote).foregroundStyle(.secondary)
+                    Text(publishMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("create.publish.status")
+                    Button {
+                        showsProjects = true
+                    } label: {
+                        Label("Check My Projects", systemImage: "square.stack.3d.up")
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("create.publish.projects")
                 }
                 Button {
                     Task { await publish(gameID: gameID) }
@@ -582,7 +651,7 @@ struct CreateView: View {
             _ = try await BackendAPI.shared.publishPost(gameID: gameID, caption: publishCaption, topics: topics)
             publishMessage = "Submitted for moderation. The post appears in feeds after approval."
         } catch {
-            publishMessage = "Couldn't publish: \(error.localizedDescription)"
+            publishMessage = CreateErrorPresentation.message(for: error, stage: .publish)
         }
     }
 
@@ -632,12 +701,11 @@ struct CreateView: View {
         } catch {
             failedDrawingAnalysis = true
             priorAnalysisOutcomeUnconfirmed = true
-            phase = .failed(CreateDrawingRecoveryPolicy.safeAnalysisFailureMessage)
+            phase = .failed(CreateErrorPresentation.message(for: error, stage: .analyze))
         }
     }
 
     private func generate(result: IngestResult) async {
-        failedDrawingAnalysis = false
         do {
             let resp = try await BackendAPI.shared.createGame(
                 ingestID: result.ingest_id,
@@ -646,7 +714,7 @@ struct CreateView: View {
             )
             phase = .generating(resp.job)
         } catch {
-            phase = .failed(error.localizedDescription)
+            phase = .failed(CreateErrorPresentation.message(for: error, stage: .generate))
         }
     }
 
@@ -664,13 +732,13 @@ struct CreateView: View {
                     phase = .done(gameID: job.game_id)
                     return
                 case "failed":
-                    phase = .failed(job.error ?? "Generation failed.")
+                    phase = .failed(CreateErrorPresentation.failedJobMessage())
                     return
                 default:
                     phase = .generating(job)
                 }
             } catch {
-                phase = .failed(error.localizedDescription)
+                phase = .failed(CreateErrorPresentation.message(for: error, stage: .poll))
                 return
             }
         }
@@ -682,7 +750,7 @@ struct CreateView: View {
             try await BackendAPI.shared.confirmGame(id: job.game_id)
             phase = .generating(job)
         } catch {
-            phase = .failed(error.localizedDescription)
+            phase = .failed(CreateErrorPresentation.message(for: error, stage: .confirm))
         }
     }
 }
