@@ -292,6 +292,15 @@ enum PlayerPrewarmMessageOwnershipPolicy {
     }
 }
 
+/// A rejected old Coordinator must never stop or blank a WKWebView that
+/// a successor already retook under a newer native attachment lease.
+/// Only a truly retired, no-longer-pooled view can be neutralized.
+enum PlayerRejectedHandoffCleanupPolicy {
+    static func mayBlank(isCurrentPooledView: Bool) -> Bool {
+        !isCurrentPooledView
+    }
+}
+
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
@@ -1247,6 +1256,12 @@ enum PlayerWebViewPool {
         stale?.loadHTMLString("", baseURL: nil)
     }
 
+    static func mayNeutralizeRejectedHandoff(_ webView: WKWebView) -> Bool {
+        PlayerRejectedHandoffCleanupPolicy.mayBlank(
+            isCurrentPooledView: pooledView === webView
+        )
+    }
+
     /// Once mounted, the new Coordinator owns the current attachment lease.
     /// The pool's WKScriptMessageHandler itself remains installed throughout.
     @discardableResult
@@ -2197,11 +2212,14 @@ private struct PlayerWebView: UIViewRepresentable {
             context.coordinator.messageProxy, webView: webView,
             url: url, lease: handoff.lease
         ) else {
-            // The Keychain can rotate between take() and the receiver
-            // acknowledgement. Never navigate an already-retired player
-            // WebView after the pool has revoked its credential scope.
-            webView.stopLoading()
-            webView.loadHTMLString("", baseURL: nil)
+            // A credential rotation may have retired this exact WKWebView,
+            // but a newer sheet may also have RETAKEN the same pooled view
+            // under a successor lease. Only blank it when it is no longer
+            // the pool's live view; never stop the successor's navigation.
+            if PlayerWebViewPool.mayNeutralizeRejectedHandoff(webView) {
+                webView.stopLoading()
+                webView.loadHTMLString("", baseURL: nil)
+            }
             return webView
         }
         webView.navigationDelegate = context.coordinator
