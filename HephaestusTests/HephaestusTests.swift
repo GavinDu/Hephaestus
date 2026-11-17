@@ -2782,3 +2782,88 @@ struct HephaestusTests {
     ))
 }
 
+
+@Test func prewarmPermanentWebKitHandlerRoutesBothSidesOfAttachmentWithoutGap() {
+    typealias Policy = PlayerPrewarmMessageOwnershipPolicy
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: nil, currentLease: 9,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .speculative)
+    // A message delivered after take() but before the Coordinator's lease
+    // acknowledgement still reaches the strict pool-owned v2 collector.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 10, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .speculative)
+    // A retired lease cannot turn into a message capture window.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 10, currentLease: 11,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    // Once the Coordinator is installed, all later WKScriptMessage
+    // callbacks use the same handler but arrive at the attached owner.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: true, credentialScopeCurrent: true
+    ) == .attached)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    // A zero lease is never attached authorization. A detached owner
+    // cannot keep an old Coordinator receiver or a transfer lease.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 0,
+        hasAttachedReceiver: true, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 0, currentLease: 0,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: true, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: 10, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    // Even a current lease and live receiver cannot bypass a credential
+    // epoch that changed synchronously before the notification callback.
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: false
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 10, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: false
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: true, credentialScopeCurrent: false
+    ) == .drop)
+}
+
+@Test func purePrewarmOwnershipRejectsRetiredAndForeignLeaseAcross160Transfers() {
+    typealias Policy = PlayerPrewarmMessageOwnershipPolicy
+    for lease in UInt64(1)...UInt64(160) {
+        let stale = lease + 1
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: stale, currentLease: lease,
+            hasAttachedReceiver: false, credentialScopeCurrent: true
+        ) == .drop)
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: lease, currentLease: lease,
+            hasAttachedReceiver: false, credentialScopeCurrent: true
+        ) == .speculative)
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: nil, currentLease: lease,
+            hasAttachedReceiver: true, credentialScopeCurrent: true
+        ) == .attached)
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: nil, currentLease: lease,
+            hasAttachedReceiver: true, credentialScopeCurrent: false
+        ) == .drop)
+    }
+}
+
