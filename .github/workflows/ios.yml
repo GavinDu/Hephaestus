@@ -220,6 +220,7 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadSidebarXXLDestinationsAndProfileRoute \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorGuestSignInRoutesToProfileAfterDismiss \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorTopicSearchKeyboardAndApplyAreReachable \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadGameDetailsAdaptiveLayout \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/ipad-feed-ui.log || {
