@@ -143,7 +143,6 @@ struct CreateView: View {
                         .padding()
                     }
                 }
-                }
             }
             .navigationTitle("Create")
             .navigationBarTitleDisplayMode(.inline)
