@@ -1678,14 +1678,10 @@ struct PixiPlayerSheet: View {
                 // accessibility button to 36pt, even with a 44pt label.
                 // The single exit lives in the player-owned safe-area row.
                 ToolbarItemGroup(placement: .primaryAction) {
-                    ShareLink(item: shareURL) {
-                        Image(systemName: "square.and.arrow.up")
-                    }
-                    .accessibilityLabel("Share game")
-                    .simultaneousGesture(TapGesture().onEnded {
-                        Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "share") }
-                    })
-
+                    // The real system ShareLink is in the same native
+                    // safe-area row as Done. iPhone AND iPad CI measured a
+                    // navigation-toolbar ShareLink AX height of only 36pt.
+                    // Keep quality selection in the navigation toolbar.
                     Menu {
                         Picker("Player quality", selection: $qualityRaw) {
                             ForEach(PlayerQuality.allCases, id: \.rawValue) { q in
@@ -1764,6 +1760,25 @@ struct PixiPlayerSheet: View {
                     .accessibilityIdentifier("player.done")
                     .accessibilityHint("Close this game and return to the feed")
                     Spacer(minLength: 0)
+                    // One interactive host for both native player actions.
+                    // Avoid the UINavigationBar's measured 36pt ShareLink
+                    // hitbox without inventing a custom share controller.
+                    ShareLink(item: shareURL) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(ArcadePulseTheme.textPrimary)
+                            .frame(minWidth: 88, minHeight: 48)
+                            .background(
+                                ArcadePulseTheme.surface,
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Share game")
+                    .simultaneousGesture(TapGesture().onEnded {
+                        Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "share") }
+                    })
                 }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 56)
