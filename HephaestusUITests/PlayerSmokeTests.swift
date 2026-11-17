@@ -304,6 +304,64 @@ final class PlayerSmokeTests: XCTestCase {
         }
     }
 
+    /// Creator topic keyboard Submit is owned by the single parent search
+    /// listener, not a second nested TextField callback. This test uses the
+    /// real deployed Creator endpoint (which may honestly fail) and never
+    /// creates a fake Creator or assumes an empty response is a confirmed 0.
+    @MainActor
+    func testArcadePulseCreatorTopicSearchKeyboardAndApplyAreReachable() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        // Make feed availability independent of this Creator keyboard UI
+        // test. The Creator directory itself still calls the real API.
+        app.launchArguments.append("--ui-test-feed-error-state")
+        app.launch()
+
+        let openCreators = app.buttons["Discover creators"].firstMatch
+        XCTAssertTrue(openCreators.waitForExistence(timeout: 15) &&
+                      openCreators.isHittable,
+                      "Actual native Discover must expose Creator Directory.")
+        openCreators.tap()
+
+        let topic = app.textFields["creator.discovery.topicInput"].firstMatch
+        let apply = app.buttons["creator.discovery.topicApply"].firstMatch
+        XCTAssertTrue(topic.waitForExistence(timeout: 10) && topic.isHittable)
+        XCTAssertTrue(apply.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(topic.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(apply.frame.height, 44)
+
+        // Use the physical iOS Search keyboard action, not a direct test
+        // invocation of load(reset:) or an invented backend result.
+        topic.tap()
+        topic.typeText("puzzle\\n")
+        XCTAssertEqual(topic.value as? String, "puzzle",
+                       "The real topic input must retain what was searched.")
+
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-creator-topic-keyboard-portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let deadline = Date().addingTimeInterval(10)
+        while window.frame.width <= window.frame.height && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height)
+        XCTAssertTrue(topic.waitForExistence(timeout: 10))
+        XCTAssertTrue(apply.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(apply.frame.height, 44,
+                                    "Topic Apply must stay a real 44pt action in landscape.")
+
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-creator-topic-keyboard-landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// The preferences modal may not claim a successful write until the
     /// backend confirms. Simulate a failed write without changing any user
     /// settings or generating fictitious game/creator data.
