@@ -328,7 +328,18 @@ final class PlayerSmokeTests: XCTestCase {
         let apply = app.buttons["creator.discovery.topicApply"].firstMatch
         XCTAssertTrue(topic.waitForExistence(timeout: 10) && topic.isHittable)
         XCTAssertTrue(apply.waitForExistence(timeout: 10))
+        // The previous system-styled Apply pill looked taller in pixels but
+        // its real XCUI button hitbox measured only 22pt on BOTH devices.
+        // Capture unmodified pixels BEFORE the strict geometry assertion.
+        let beforeSubmit = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        beforeSubmit.name = "arcade-pulse-creator-apply-native-hitbox-before-keyboard"
+        beforeSubmit.lifetime = .keepAlways
+        add(beforeSubmit)
+        print("CREATOR_APPLY_NATIVE_GEOMETRY topic=\(topic.frame) button=\(apply.frame)")
+        XCTAssertTrue(apply.isHittable,
+                      "The Creator Apply control must be physically reachable.")
         XCTAssertGreaterThanOrEqual(topic.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(apply.frame.width, 44)
         XCTAssertGreaterThanOrEqual(apply.frame.height, 44)
 
         // Use the physical iOS Search keyboard action, not a direct test
