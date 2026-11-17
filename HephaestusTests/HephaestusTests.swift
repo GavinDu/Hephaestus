@@ -2782,3 +2782,129 @@ struct HephaestusTests {
     ))
 }
 
+
+@Test func purePrewarmRecipientSpeculativeLeaseAndAttachedDecisionMatrix() {
+    typealias Policy = PlayerPrewarmMessageOwnershipPolicy
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: nil, currentLease: 9,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .speculative)
+    // A message delivered after take() but before the Coordinator's lease
+    // acknowledgement still reaches the strict pool-owned v2 collector.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 10, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .speculative)
+    // A retired lease cannot turn into a message capture window.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 10, currentLease: 11,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    // Once the Coordinator is installed, all later WKScriptMessage
+    // callbacks use the same handler but arrive at the attached owner.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: true, credentialScopeCurrent: true
+    ) == .attached)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    // A zero lease is never attached authorization. A detached owner
+    // cannot keep an old Coordinator receiver or a transfer lease.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 0,
+        hasAttachedReceiver: true, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 0, currentLease: 0,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: true, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: 10, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    // Even a current lease and live receiver cannot bypass a credential
+    // epoch that changed synchronously before the notification callback.
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: false
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 10, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: false
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: true, credentialScopeCurrent: false
+    ) == .drop)
+}
+
+@Test func purePrewarmOwnershipRejectsRetiredAndForeignLeaseAcross160Transfers() {
+    typealias Policy = PlayerPrewarmMessageOwnershipPolicy
+    for lease in UInt64(1)...UInt64(160) {
+        let stale = lease + 1
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: stale, currentLease: lease,
+            hasAttachedReceiver: false, credentialScopeCurrent: true
+        ) == .drop)
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: lease, currentLease: lease,
+            hasAttachedReceiver: false, credentialScopeCurrent: true
+        ) == .speculative)
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: nil, currentLease: lease,
+            hasAttachedReceiver: true, credentialScopeCurrent: true
+        ) == .attached)
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: nil, currentLease: lease,
+            hasAttachedReceiver: true, credentialScopeCurrent: false
+        ) == .drop)
+    }
+}
+
+@Test func nativeBackgroundOnlyEvictsCurrentlyUnattachedSpeculativePrewarmAcross256Transitions() {
+    // The UIApplication notification is delivered asynchronously. A prewarm
+    // can become the active WKWebView between post and MainActor handling.
+    // Every decision MUST read the current attachment and pooled view state,
+    // using the same pure native reducer as the shipping memory-warning path.
+    for epoch in 1...256 {
+        let currentlyAttached = epoch % 2 == 0
+        let currentlyPooled = epoch % 3 != 0
+        let permitted = PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+            isAttached: currentlyAttached, hasPooledView: currentlyPooled
+        )
+        #expect(permitted == (!currentlyAttached && currentlyPooled))
+        if currentlyAttached {
+            // An active interactive game is never a disposable prewarm,
+            // including after a stale background notification fires.
+            #expect(!permitted)
+        }
+        if !currentlyPooled {
+            // Already-discarded/speculative view: no stale WebContent work.
+            #expect(!permitted)
+        }
+    }
+
+    // An event posted while still speculative must not evict the game
+    // when the real player attaches before the MainActor callback runs.
+    let stateAtNotification = (isAttached: false, hasPooledView: true)
+    #expect(PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: stateAtNotification.isAttached,
+        hasPooledView: stateAtNotification.hasPooledView
+    ))
+    let stateAtDelivery = (isAttached: true, hasPooledView: true)
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: stateAtDelivery.isAttached,
+        hasPooledView: stateAtDelivery.hasPooledView
+    ))
+    // Conversely, after an interactive view detaches, the pool must never
+    // consider an absent view as a new speculative game.
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: false, hasPooledView: false
+    ))
+}

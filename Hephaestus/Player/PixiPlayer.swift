@@ -260,6 +260,38 @@ enum PlayerPrewarmMessageOriginPolicy {
     }
 }
 
+/// Pure native-only routing decision for one pooled WKScriptMessage handler.
+/// Native WebView/credential/lease facts must be supplied by the pool. This
+/// policy alone does NOT authenticate a page, frame, nonce or run result.
+enum PlayerPrewarmMessageOwnershipPolicy {
+    enum Recipient: Equatable {
+        case speculative
+        case attached
+        case drop
+    }
+
+    static func recipient(
+        isAttached: Bool, transferringLease: UInt64?,
+        currentLease: UInt64, hasAttachedReceiver: Bool,
+        credentialScopeCurrent: Bool
+    ) -> Recipient {
+        guard credentialScopeCurrent else { return .drop }
+        if !isAttached {
+            // A retired attachment must not retain a stale receiver/lease.
+            return transferringLease == nil && !hasAttachedReceiver
+                ? .speculative : .drop
+        }
+        guard currentLease != 0 else { return .drop }
+        if let transferringLease {
+            // During take()->Coordinator install, the pool collector owns
+            // the callback only for the exact current nonzero lease.
+            return transferringLease != 0 && transferringLease == currentLease
+                ? .speculative : .drop
+        }
+        return hasAttachedReceiver ? .attached : .drop
+    }
+}
+
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
@@ -926,6 +958,21 @@ enum PlayerWebViewPool {
             DevLog.info(.player, "unattached speculative WebView prewarm evicted after memory warning")
         }
     }
+    // Only a *currently unattached* speculative WKWebView is evictable on
+    // background. Evaluate at MainActor callback delivery, not when the
+    // notification was posted: a real Play may have attached in between.
+    private static let backgroundObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
+        forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+    ) { _ in
+        Task { @MainActor in
+            guard PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+                isAttached: PlayerWebViewPool.isAttached,
+                hasPooledView: PlayerWebViewPool.pooledView != nil
+            ) else { return }
+            PlayerWebViewPool.discardUnattachedPrewarm()
+            DevLog.info(.player, "unattached speculative WebView prewarm evicted after background")
+        }
+    }
     private static var prewarmEpoch: UInt64 = 0
     private static var prewarmExpiryTask: Task<Void, Never>?
     private static let warmupDelegate = WarmupDelegate()
@@ -1142,6 +1189,7 @@ enum PlayerWebViewPool {
     private static func ensureCurrentCredentialScope() {
         _ = sessionObserver
         _ = memoryWarningObserver
+        _ = backgroundObserver
         let current = credentialFingerprint()
         if PlayerSessionCachePolicy.shouldPurge(
             cachedFingerprint: sessionFingerprint, currentFingerprint: current
