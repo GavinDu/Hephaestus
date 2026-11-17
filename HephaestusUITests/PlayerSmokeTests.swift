@@ -154,6 +154,19 @@ final class PlayerSmokeTests: XCTestCase {
                        "Player remained on the loading overlay for 90 seconds. UI: \\(app.debugDescription)")
         // This certifies native navigation/overlay readiness, not a verified
         // in-game win or first-render frame. Browser playtest owns that gate.
+        // The old source-only .frame on the toolbar Button passed existence,
+        // but PR #239's real iPhone/iPad native test rejected its hit target.
+        // Require actual XCUI hittability and both measured dimensions.
+        XCTAssertTrue(done.isHittable,
+                      "Player Done must be physically reachable above WKWebView.")
+        XCTAssertGreaterThanOrEqual(done.frame.width, 44,
+                                    "Player Done requires an actual >=44pt-wide hit target.")
+        XCTAssertGreaterThanOrEqual(done.frame.height, 44,
+                                    "Player Done requires an actual >=44pt-tall hit target.")
+        let fullScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        fullScreen.name = "player-real-done-44pt-native-fullscreen"
+        fullScreen.lifetime = .keepAlways
+        add(fullScreen)
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "player-after-boot"
         shot.lifetime = .keepAlways
