@@ -2782,3 +2782,243 @@ struct HephaestusTests {
     ))
 }
 
+
+@Test func prewarmSceneLedgerRequiresCurrentDocumentIdentityAndLease() {
+    let nonce = String(repeating: "a", count: 32)
+    let url = URL(string: "https://games.example.test/player?game=sky&quality=low")!
+    let expected = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: nonce,
+        credentialFingerprint: "anonymous-session-digest",
+        runtimeSessionID: "session-1"
+    )
+    var ledger = PlayerPrewarmSceneMilestoneLedger()
+    #expect(expected.isValid)
+    let observedLedgerTransition1 = !ledger.record(identity: expected, expected: expected, sequence: 1,
+                           milliseconds: 20, isMainFrame: false, isSpeculative: true,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition1)
+    let observedLedgerTransition2 = !ledger.record(identity: expected, expected: expected, sequence: 1,
+                           milliseconds: 20, isMainFrame: true, isSpeculative: false,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition2)
+    let observedLedgerTransition3 = !ledger.record(identity: expected, expected: expected, sequence: 1,
+                           milliseconds: 20, isMainFrame: true, isSpeculative: true,
+                           navigationStarted: false)
+    #expect(observedLedgerTransition3)
+    let observedLedgerTransition4 = !ledger.record(identity: expected, expected: expected, sequence: -1,
+                           milliseconds: 20, isMainFrame: true, isSpeculative: true,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition4)
+    let observedLedgerTransition5 = !ledger.record(identity: expected, expected: expected, sequence: 1,
+                           milliseconds: 3_600_001, isMainFrame: true, isSpeculative: true,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition5)
+    let observedLedgerTransition6 = ledger.record(identity: expected, expected: expected, sequence: 1,
+                          milliseconds: 20, isMainFrame: true, isSpeculative: true,
+                          navigationStarted: true)
+    #expect(observedLedgerTransition6)
+    let observedLedgerTransition7 = !ledger.record(identity: expected, expected: expected, sequence: 2,
+                           milliseconds: 30, isMainFrame: true, isSpeculative: true,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition7)
+    #expect(ledger.candidate?.milliseconds == 20)
+
+    let sameGameDifferentQuality = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky",
+        playerURL: URL(string: "https://games.example.test/player?game=sky&quality=high")!,
+        documentNonce: nonce, credentialFingerprint: "anonymous-session-digest",
+        runtimeSessionID: "session-1"
+    )
+    let accountChanged = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: nonce,
+        credentialFingerprint: "new-account-digest", runtimeSessionID: "session-1"
+    )
+    let otherGame = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "other", playerURL: url, documentNonce: nonce,
+        credentialFingerprint: "anonymous-session-digest", runtimeSessionID: "session-1"
+    )
+    let otherNonce = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: String(repeating: "b", count: 32),
+        credentialFingerprint: "anonymous-session-digest", runtimeSessionID: "session-1"
+    )
+    let otherSession = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: nonce,
+        credentialFingerprint: "anonymous-session-digest", runtimeSessionID: "session-2"
+    )
+    for wrong in [sameGameDifferentQuality, accountChanged, otherGame, otherNonce, otherSession] {
+        let observedLedgerTransition8 = ledger.consume(
+            expected: wrong, offeredLease: 15, currentLease: 15,
+            isCurrentPooledView: true, isAttached: true
+        ) == nil
+        #expect(observedLedgerTransition8)
+    }
+    let observedLedgerTransition9 = ledger.consume(
+        expected: expected, offeredLease: 14, currentLease: 15,
+        isCurrentPooledView: true, isAttached: true
+    ) == nil
+    #expect(observedLedgerTransition9)
+    let observedLedgerTransition10 = ledger.consume(
+        expected: expected, offeredLease: 0, currentLease: 0,
+        isCurrentPooledView: true, isAttached: true
+    ) == nil
+    #expect(observedLedgerTransition10)
+    let observedLedgerTransition11 = ledger.consume(
+        expected: expected, offeredLease: 15, currentLease: 15,
+        isCurrentPooledView: false, isAttached: true
+    ) == nil
+    #expect(observedLedgerTransition11)
+    let observedLedgerTransition12 = ledger.consume(
+        expected: expected, offeredLease: 15, currentLease: 15,
+        isCurrentPooledView: true, isAttached: false
+    ) == nil
+    #expect(observedLedgerTransition12)
+    #expect(ledger.candidate?.identity == expected)
+    let accepted = ledger.consume(
+        expected: expected, offeredLease: 15, currentLease: 15,
+        isCurrentPooledView: true, isAttached: true
+    )
+    #expect(accepted?.sequence == 1)
+    #expect(accepted?.milliseconds == 20)
+    #expect(ledger.hasTransferred)
+    #expect(ledger.candidate == nil)
+    let observedLedgerTransition13 = ledger.consume(
+        expected: expected, offeredLease: 15, currentLease: 15,
+        isCurrentPooledView: true, isAttached: true
+    ) == nil
+    #expect(observedLedgerTransition13)
+    let observedLedgerTransition14 = !ledger.record(identity: expected, expected: expected, sequence: 2,
+                           milliseconds: 30, isMainFrame: true, isSpeculative: true,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition14)
+    ledger.invalidate()
+    #expect(!ledger.hasTransferred && ledger.candidate == nil)
+    let observedLedgerTransition15 = ledger.record(identity: expected, expected: expected, sequence: 0,
+                          milliseconds: 0, isMainFrame: true, isSpeculative: true,
+                          navigationStarted: true)
+    #expect(observedLedgerTransition15)
+}
+
+@Test func prewarmSceneLedgerRejectsMalformedIdentityAndStaleNonceAcross160Navigations() {
+    let url = URL(string: "https://games.example.test/player?game=sky")!
+    var epoch = PlayerNativeDocumentEpochGate()
+    var ledger = PlayerPrewarmSceneMilestoneLedger()
+    var previousNonce: String?
+    for sequence in 0..<160 {
+        let nonce = epoch.prepareNavigation()
+        let observedLedgerTransition16 = epoch.didStartNavigation()
+        #expect(observedLedgerTransition16)
+        let now = PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "credential-epoch-1", runtimeSessionID: "session-1"
+        )
+        if let oldNonce = previousNonce {
+            let stale = PlayerPrewarmSceneMilestoneLedger.Identity(
+                gameID: "sky", playerURL: url, documentNonce: oldNonce,
+                credentialFingerprint: "credential-epoch-1", runtimeSessionID: "session-1"
+            )
+            let observedLedgerTransition17 = !ledger.record(identity: stale, expected: now, sequence: sequence,
+                                   milliseconds: 1, isMainFrame: true, isSpeculative: true,
+                                   navigationStarted: true)
+            #expect(observedLedgerTransition17)
+        }
+        let observedLedgerTransition18 = ledger.record(identity: now, expected: now, sequence: sequence,
+                              milliseconds: 1, isMainFrame: true, isSpeculative: true,
+                              navigationStarted: true)
+        #expect(observedLedgerTransition18)
+        // A new navigation or credential epoch always drops the candidate.
+        ledger.invalidate()
+        #expect(ledger.candidate == nil)
+        previousNonce = nonce
+    }
+    let invalidNonce = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: "invalid",
+        credentialFingerprint: "credential-epoch-1", runtimeSessionID: "session-1"
+    )
+    let emptySession = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: String(repeating: "c", count: 32),
+        credentialFingerprint: "credential-epoch-1", runtimeSessionID: ""
+    )
+    let insecureURL = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: URL(string: "http://games.example.test/player")!,
+        documentNonce: String(repeating: "c", count: 32),
+        credentialFingerprint: "credential-epoch-1", runtimeSessionID: "session-1"
+    )
+    let malformedURLs = [
+        "https://games.example.test/another?game=sky",
+        "https://games.example.test/player?game=sky&game=sky",
+        "https://games.example.test/player?game=foreign",
+        "https://games.example.test/player?game=sky#fragment",
+        "https://user:secret@games.example.test/player?game=sky"
+    ]
+    let forgedURLIdentities = malformedURLs.map { player in
+        PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: URL(string: player)!,
+            documentNonce: String(repeating: "c", count: 32),
+            credentialFingerprint: "credential-epoch-1",
+            runtimeSessionID: "session-1"
+        )
+    }
+    let invalidSessionIdentities = [
+        "contains space", String(repeating: "😀", count: 128),
+        String(repeating: "s", count: 129),
+        "e\u{301}"
+    ].map { session in
+        PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: url,
+            documentNonce: String(repeating: "c", count: 32),
+            credentialFingerprint: "credential-epoch-1",
+            runtimeSessionID: session
+        )
+    }
+    let overlongCredential = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url,
+        documentNonce: String(repeating: "c", count: 32),
+        credentialFingerprint: String(repeating: "x", count: 257),
+        runtimeSessionID: "session-1"
+    )
+    for invalid in [invalidNonce, emptySession, insecureURL, overlongCredential] +
+        forgedURLIdentities + invalidSessionIdentities {
+        #expect(!invalid.isValid)
+        let observedLedgerTransition19 = !ledger.record(identity: invalid, expected: invalid,
+                               sequence: 1, milliseconds: 1,
+                               isMainFrame: true, isSpeculative: true,
+                               navigationStarted: true)
+        #expect(observedLedgerTransition19)
+    }
+}
+
+@Test func prewarmSceneLedgerRequiresCanonicalGameBinding() {
+    let nonce = String(repeating: "a", count: 32)
+    let legitimate = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky",
+        playerURL: URL(string: "https://games.example.test/player?game=sky&quality=low")!,
+        documentNonce: nonce, credentialFingerprint: "digest",
+        runtimeSessionID: "session"
+    )
+    #expect(legitimate.isValid)
+    for rawURL in [
+        "https://games.example.test/player?game=other",
+        "https://games.example.test/player?quality=low",
+        "https://games.example.test/player?game=sky&game=other",
+        "https://games.example.test/player?game=sky#stale-document",
+        "https://user:secret@games.example.test/player?game=sky",
+    ] {
+        let identity = PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: URL(string: rawURL)!,
+            documentNonce: nonce, credentialFingerprint: "digest",
+            runtimeSessionID: "session"
+        )
+        #expect(!identity.isValid)
+        var ledger = PlayerPrewarmSceneMilestoneLedger()
+        // Even if both observed and expected identities have the same
+        // malformed URL, they must never be eligible for transfer.
+        let accepted = ledger.record(
+            identity: identity, expected: identity,
+            sequence: 1, milliseconds: 20, isMainFrame: true,
+            isSpeculative: true, navigationStarted: true
+        )
+        #expect(!accepted)
+        #expect(ledger.candidate == nil)
+    }
+}
+
