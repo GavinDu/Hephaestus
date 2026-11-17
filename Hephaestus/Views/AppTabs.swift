@@ -14,6 +14,7 @@ import UIKit
 /// Recently played games.
 struct LibraryView: View {
     let onOpenProfile: () -> Void
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var recent: [RecentGame] = []
@@ -288,6 +289,19 @@ struct LibraryView: View {
                         .accessibilityIdentifier("library.privacyFooter")
                 }
             }
+            // A short iPhone landscape viewport can place the real saved-games
+            // sign-in CTA beneath translucent system tabs. Reserve extra
+            // SCROLLABLE trailing content space, not an overlay or a fake CTA:
+            // the user can scroll the actual Library panel completely clear.
+            // Regular iPad detail navigation keeps its native layout.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear
+                    .frame(height: LibraryTabBarClearancePolicy.trailingScrollInset(
+                        isPhone: UIDevice.current.userInterfaceIdiom == .phone,
+                        isCompactHeight: verticalSizeClass == .compact
+                    ))
+                    .accessibilityHidden(true)
+            }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(ArcadePulseTheme.canvas)
@@ -458,6 +472,18 @@ enum LibrarySavedCountCaption {
         }
         return Presentation(visibleText: "Unavailable",
                             accessibilityLabel: "Saved games count unavailable")
+    }
+}
+
+/// The system TabView can float over a compact iPhone landscape List.
+/// A scroll-end inset is intentionally separate from the existing portrait
+/// footer spacing: it must be enough for an actual 48pt CTA plus breathing
+/// room above native tabs without taking space from the iPad sidebar.
+enum LibraryTabBarClearancePolicy {
+    static let compactPhoneTrailingInset: CGFloat = 72
+
+    static func trailingScrollInset(isPhone: Bool, isCompactHeight: Bool) -> CGFloat {
+        isPhone && isCompactHeight ? compactPhoneTrailingInset : 0
     }
 }
 
