@@ -39,20 +39,48 @@ struct CreatorTopicFilterControls: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
-                .onSubmit(onApply)
+                // Native XCTest measured the focused TextField itself at
+                // just 22pt even though the enclosing frame was 48pt.
+                // Padding belongs to the actual editable SwiftUI host so
+                // its hit region (not only the surrounding layout) grows.
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+                .background(
+                    ArcadePulseTheme.surface,
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+                .contentShape(Rectangle())
+                // The Creator Discovery host owns ONE search submission
+                // action for both this field and the navigation search bar.
+                // A nested onSubmit plus outer onSubmit could reset twice,
+                // and the old inner handler ignored the disabled Apply state.
                 .frame(maxWidth: .infinity, minHeight: CreatorTopicFilterLayout.minimumTargetHeight)
                 .accessibilityIdentifier("creator.discovery.topicInput")
 
-            Button(action: onApply) {
+            Button {
+                if CreatorQuerySubmitPolicy.canSubmit(isLoading: isLoading) {
+                    onApply()
+                }
+            } label: {
+                // Native iPad/iPhone CI measured the old borderedProminent
+                // accessibility Button at only 22pt despite a 48pt inner
+                // Text frame. Own the real 48pt interactive surface here.
                 Text(isLoading ? "Searching…" : "Apply")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.black)
+                    .padding(.horizontal, 18)
                     .frame(minWidth: 64,
                            maxWidth: stacked ? .infinity : nil,
                            minHeight: CreatorTopicFilterLayout.minimumTargetHeight)
+                    .background(
+                        ArcadePulseTheme.electricViolet,
+                        in: RoundedRectangle(cornerRadius: 15)
+                    )
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.borderedProminent)
-            .tint(ArcadePulseTheme.electricViolet)
+            .buttonStyle(.plain)
+            .opacity(isLoading ? 0.65 : 1)
             .disabled(isLoading)
             .accessibilityLabel(isLoading ? "Searching creators" : "Apply topic filter")
             .accessibilityIdentifier("creator.discovery.topicApply")
