@@ -2,6 +2,21 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+/// A private photo transfer may finish after a later selection, cancellation,
+/// or a deliberate reset. Only the current valid decoded selection can be
+/// installed as the drawing the person consents to upload.
+enum CreatePhotoSelectionPolicy {
+    static func mayCommitLoadedImage(
+        requestEpoch: Int,
+        currentEpoch: Int,
+        hasBytes: Bool,
+        hasDecodedPreview: Bool,
+        wasCancelled: Bool
+    ) -> Bool {
+        requestEpoch == currentEpoch && hasBytes && hasDecodedPreview && !wasCancelled
+    }
+}
+
 /// Photograph a drawing → analyze → generate → confirm → play.
 struct CreateView: View {
     let onOpenProfile: () -> Void
@@ -23,6 +38,9 @@ struct CreateView: View {
 
     @State private var phase: Phase = .pick
     @State private var pickerItem: PhotosPickerItem?
+    @State private var photoSelectionEpoch = 0
+    @State private var photoLoadTask: Task<Void, Never>?
+    @State private var photoSelectionError: String?
     @State private var imageData: Data?
     @State private var previewImage: UIImage?
     @State private var hasSourceConsent = false
@@ -175,13 +193,47 @@ struct CreateView: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("create.pick.chooseDrawing")
                 .onChange(of: pickerItem) { _, newItem in
-                    Task {
-                        guard let newItem else { return }
-                        if let data = try? await newItem.loadTransferable(type: Data.self) {
-                            imageData = data
-                            previewImage = UIImage(data: data)
+                    // Revocation happens BEFORE any await. Never keep the
+                    // former drawing visible/consented while loading a
+                    // newly chosen private photo.
+                    photoLoadTask?.cancel()
+                    photoSelectionEpoch &+= 1
+                    let requestEpoch = photoSelectionEpoch
+                    hasSourceConsent = false
+                    imageData = nil
+                    previewImage = nil
+                    photoSelectionError = nil
+
+                    guard let newItem else { return }
+                    photoLoadTask = Task {
+                        let data = try? await newItem.loadTransferable(type: Data.self)
+                        let preview = data.flatMap { UIImage(data: $0) }
+                        // A stale or cancelled transfer must never put an
+                        // earlier private image behind the current consent.
+                        guard requestEpoch == photoSelectionEpoch, !Task.isCancelled else {
+                            return
                         }
+                        photoLoadTask = nil
+                        guard CreatePhotoSelectionPolicy.mayCommitLoadedImage(
+                            requestEpoch: requestEpoch,
+                            currentEpoch: photoSelectionEpoch,
+                            hasBytes: data != nil,
+                            hasDecodedPreview: preview != nil,
+                            wasCancelled: Task.isCancelled
+                        ), let data, let preview else {
+                            photoSelectionError = "Couldn't open this drawing. Choose another image."
+                            return
+                        }
+                        imageData = data
+                        previewImage = preview
                     }
+                }
+                if let photoSelectionError {
+                    Text(photoSelectionError)
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("create.pick.selectionError")
                 }
 
                 VStack(alignment: .leading, spacing: 14) {
@@ -450,6 +502,12 @@ struct CreateView: View {
     }
 
     private func reset() {
+        // Invalidate any local PhotoKit transfer even if it ignores
+        // cancellation and returns bytes after the UI has reset.
+        photoLoadTask?.cancel()
+        photoLoadTask = nil
+        photoSelectionEpoch &+= 1
+        photoSelectionError = nil
         phase = .pick
         pickerItem = nil
         imageData = nil
