@@ -2782,3 +2782,53 @@ struct HephaestusTests {
     ))
 }
 
+
+@Test func attachedFirstSceneSheetCallbackRequiresOneMilestoneAndCurrentLeaseAcross160Attempts() {
+    // The runtime callback must be downstream of all three existing gates.
+    // A delayed MainActor task is rechecked against the current attachment
+    // and bound session before the sheet can observe the timestamp.
+    for iteration in 1...160 {
+        let lease = UInt64(iteration)
+        var lifecycle = PlayerHostLaunchReducer()
+        var sequence = PlayerRuntimeMetricSequenceGate()
+        var oneShot = PlayerFirstSceneRenderSubmissionGate()
+
+        let acceptedSequence = sequence.accept(
+            metric: "first_scene_render_submit", sequence: 1
+        )
+        let acceptedMillisecond = oneShot.accept(milliseconds: 40)
+        let acceptedLifecycle = lifecycle.sceneSubmitted()
+        let attachedOwns = PlayerAttachmentLeasePolicy.mayRecycle(
+            isCurrentPooledView: true, isAttached: true,
+            expectedLease: lease, currentLease: lease
+        )
+        let mayDeliver = PlayerHostCallbackDeliveryPolicy.mayDeliver(
+            ownsCurrentAttachment: attachedOwns,
+            acceptsRuntimeEvents: lifecycle.permitsRuntimeEvents
+        )
+        #expect(acceptedSequence && acceptedMillisecond && acceptedLifecycle && mayDeliver)
+
+        let replayedSequence = sequence.accept(
+            metric: "first_scene_render_submit", sequence: 2
+        )
+        let duplicateMilestone = oneShot.accept(milliseconds: 50)
+        let duplicateLifecycle = lifecycle.sceneSubmitted()
+        #expect(replayedSequence && !duplicateMilestone && !duplicateLifecycle)
+
+        let staleOwns = PlayerAttachmentLeasePolicy.mayRecycle(
+            isCurrentPooledView: true, isAttached: true,
+            expectedLease: lease, currentLease: lease + 1
+        )
+        let staleMayDeliver = PlayerHostCallbackDeliveryPolicy.mayDeliver(
+            ownsCurrentAttachment: staleOwns,
+            acceptsRuntimeEvents: lifecycle.permitsRuntimeEvents
+        )
+        #expect(!staleMayDeliver)
+        lifecycle.detach()
+        let detachedMayDeliver = PlayerHostCallbackDeliveryPolicy.mayDeliver(
+            ownsCurrentAttachment: attachedOwns,
+            acceptsRuntimeEvents: lifecycle.permitsRuntimeEvents
+        )
+        #expect(!detachedMayDeliver)
+    }
+}
