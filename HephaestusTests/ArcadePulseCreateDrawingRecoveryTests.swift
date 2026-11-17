@@ -23,6 +23,24 @@ struct ArcadePulseCreateDrawingRecoveryTests {
         ))
     }
 
+    @Test func uncertainAnalysisIsDisclosedBeforeAnotherManualPost() {
+        let notice = CreateDrawingRecoveryPolicy.manualRetryNotice(
+            priorAnalysisOutcomeUnconfirmed: true, hasSourceImage: true
+        )
+        #expect(notice != nil)
+        #expect(notice?.contains("may have reached the service") == true)
+        #expect(notice?.contains("starts a new request") == true)
+        #expect(notice?.contains("does not resume") == true)
+        // A fresh image or an explicit reset must not inherit stale
+        // uncertainty from a completely different source selection.
+        #expect(CreateDrawingRecoveryPolicy.manualRetryNotice(
+            priorAnalysisOutcomeUnconfirmed: false, hasSourceImage: true
+        ) == nil)
+        #expect(CreateDrawingRecoveryPolicy.manualRetryNotice(
+            priorAnalysisOutcomeUnconfirmed: true, hasSourceImage: false
+        ) == nil)
+    }
+
     @Test func failedRemoteWriteOrPollingMustNotOfferAutomaticResubmit() {
         for hasImage in [false, true] {
             for hasPreview in [false, true] {
