@@ -2965,3 +2965,26 @@ struct HephaestusTests {
         #expect(!oldDocumentAfterRetry)
     }
 }
+
+@Test func staleRejectedWebKitHandoffNeverBlanksSuccessorAcross160LeaseRotations() {
+    typealias Cleanup = PlayerRejectedHandoffCleanupPolicy
+    for lease in UInt64(1)...UInt64(160) {
+        // Old Coordinator has the SAME WKWebView instance but a retired
+        // attachment lease: no view mutation, because a successor owns it.
+        let oldOwns = PlayerAttachmentLeasePolicy.mayRecycle(
+            isCurrentPooledView: true, isAttached: true,
+            expectedLease: lease, currentLease: lease + 1
+        )
+        #expect(!oldOwns)
+        #expect(!Cleanup.mayBlank(isCurrentPooledView: true))
+
+        // Synchronous Keychain rotation invalidates/retire the old view;
+        // only THEN can the already-retired instance be stopped and blanked.
+        let oldViewStillPooled = false
+        #expect(Cleanup.mayBlank(isCurrentPooledView: oldViewStillPooled))
+
+        // A detached but still pooled view is neutralized by recycle()
+        // itself, not by an old in-flight makeUIView rejection callback.
+        #expect(!Cleanup.mayBlank(isCurrentPooledView: true))
+    }
+}
