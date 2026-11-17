@@ -41,6 +41,15 @@ struct ArcadePulseCreateDrawingRecoveryTests {
         ) == nil)
     }
 
+    @Test func failedAnalysisCannotDisplayRawProviderDiagnostics() {
+        let message = CreateDrawingRecoveryPolicy.safeAnalysisFailureMessage
+        let rawProviderURL = "https://private.example.invalid/ingest?token=SECRET-DO-NOT-SHOW"
+        #expect(!message.contains(rawProviderURL))
+        #expect(!message.contains("SECRET-DO-NOT-SHOW"))
+        #expect(message.contains("Couldn't confirm"))
+        #expect(message.contains("still on this device"))
+    }
+
     @Test func failedRemoteWriteOrPollingMustNotOfferAutomaticResubmit() {
         for hasImage in [false, true] {
             for hasPreview in [false, true] {
