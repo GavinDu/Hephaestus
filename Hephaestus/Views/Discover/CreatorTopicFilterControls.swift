@@ -51,15 +51,24 @@ struct CreatorTopicFilterControls: View {
                     onApply()
                 }
             } label: {
+                // Native iPad/iPhone CI measured the old borderedProminent
+                // accessibility Button at only 22pt despite a 48pt inner
+                // Text frame. Own the real 48pt interactive surface here.
                 Text(isLoading ? "Searching…" : "Apply")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.black)
+                    .padding(.horizontal, 18)
                     .frame(minWidth: 64,
                            maxWidth: stacked ? .infinity : nil,
                            minHeight: CreatorTopicFilterLayout.minimumTargetHeight)
+                    .background(
+                        ArcadePulseTheme.electricViolet,
+                        in: RoundedRectangle(cornerRadius: 15)
+                    )
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.borderedProminent)
-            .tint(ArcadePulseTheme.electricViolet)
+            .buttonStyle(.plain)
+            .opacity(isLoading ? 0.65 : 1)
             .disabled(isLoading)
             .accessibilityLabel(isLoading ? "Searching creators" : "Apply topic filter")
             .accessibilityIdentifier("creator.discovery.topicApply")
