@@ -2627,3 +2627,24 @@ struct HephaestusTests {
         backendURL: customHTTPSBackend
     ))
 }
+
+@Test func singleCardPagerNativeVerticalSwipeKeepsOneSemanticPageTransition() {
+    // The visible card, not the disabled ScrollView, owns physical DragGesture.
+    // Both phone and tablet use the same pure gesture reducer. Gesture
+    // routing itself is independently verified by the real iPad UI smoke.
+    let upward = ForYouPageLayout.pageOffsetForSwipe(
+        translation: CGSize(width: 0, height: -400),
+        predictedEndTranslation: CGSize(width: 0, height: -460)
+    )
+    let downward = ForYouPageLayout.pageOffsetForSwipe(
+        translation: CGSize(width: 0, height: 400),
+        predictedEndTranslation: CGSize(width: 0, height: 460)
+    )
+    let diagonal = ForYouPageLayout.pageOffsetForSwipe(
+        translation: CGSize(width: 300, height: -200),
+        predictedEndTranslation: CGSize(width: 450, height: -250)
+    )
+    #expect(upward == 1)
+    #expect(downward == -1)
+    #expect(diagonal == 0)
+}
