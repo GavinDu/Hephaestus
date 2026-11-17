@@ -154,6 +154,22 @@ final class PlayerSmokeTests: XCTestCase {
                        "Player remained on the loading overlay for 90 seconds. UI: \\(app.debugDescription)")
         // This certifies native navigation/overlay readiness, not a verified
         // in-game win or first-render frame. Browser playtest owns that gate.
+        // Share is the genuine system ShareLink. Its glyph alone did not
+        // declare a 44pt native hit region before #466. Verify the actual
+        // accessibility surface after a REAL backend game has navigated.
+        let share = app.buttons["Share game"].firstMatch
+        XCTAssertTrue(share.waitForExistence(timeout: 10) && share.isHittable,
+                      "Real Share game must remain tappable above the live WKWebView.")
+        XCTAssertGreaterThanOrEqual(share.frame.width, 44,
+                                    "Share game requires a >=44pt-wide native touch target.")
+        XCTAssertGreaterThanOrEqual(share.frame.height, 44,
+                                    "Share game requires a >=44pt-tall native touch target.")
+        // Do not invoke this ShareLink in smoke: the separate system-share
+        // test owns UIActivityViewController correctness and social tracking.
+        let originalScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        originalScreen.name = "player-share-44pt-native-fullscreen"
+        originalScreen.lifetime = .keepAlways
+        add(originalScreen)
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "player-after-boot"
         shot.lifetime = .keepAlways
