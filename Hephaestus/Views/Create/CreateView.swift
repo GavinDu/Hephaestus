@@ -34,6 +34,17 @@ enum CreateDrawingRecoveryPolicy {
         }
         return false
     }
+
+    /// Never imply an HTTP timeout means the server did not receive the
+    /// ingest request. The editor can preserve local art without claiming
+    /// that resubmitting it will resume (or deduplicate) remote analysis.
+    static func manualRetryNotice(
+        priorAnalysisOutcomeUnconfirmed: Bool,
+        hasSourceImage: Bool
+    ) -> String? {
+        guard priorAnalysisOutcomeUnconfirmed, hasSourceImage else { return nil }
+        return "The previous analysis may have reached the service. Analyze again starts a new request; it does not resume the earlier one."
+    }
 }
 
 /// Photograph a drawing → analyze → generate → confirm → play.
@@ -73,6 +84,7 @@ struct CreateView: View {
     @State private var playerRequest: PixiPlayerRequest?
     @State private var showsProjects = false
     @State private var failedDrawingAnalysis = false
+    @State private var priorAnalysisOutcomeUnconfirmed = false
     @State private var showsDiscardDrawingConfirmation = false
 
     var body: some View {
@@ -257,6 +269,7 @@ struct CreateView: View {
                     photoSelectionEpoch &+= 1
                     let requestEpoch = photoSelectionEpoch
                     hasSourceConsent = false
+                    priorAnalysisOutcomeUnconfirmed = false
                     imageData = nil
                     previewImage = nil
                     photoSelectionError = nil
@@ -308,6 +321,16 @@ struct CreateView: View {
                     TextField("Optional keywords, separated by commas", text: $keywordsText)
                         .textFieldStyle(.roundedBorder)
                         .accessibilityIdentifier("create.pick.keywords")
+                    if let warning = CreateDrawingRecoveryPolicy.manualRetryNotice(
+                        priorAnalysisOutcomeUnconfirmed: priorAnalysisOutcomeUnconfirmed,
+                        hasSourceImage: imageData != nil
+                    ) {
+                        Label(warning, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("create.pick.analysisRetryNotice")
+                    }
                     Button {
                         Task { await analyze() }
                     } label: {
@@ -560,6 +583,7 @@ struct CreateView: View {
 
     private func reset() {
         failedDrawingAnalysis = false
+        priorAnalysisOutcomeUnconfirmed = false
         showsDiscardDrawingConfirmation = false
         // Invalidate any local PhotoKit transfer even if it ignores
         // cancellation and returns bytes after the UI has reset.
@@ -584,6 +608,7 @@ struct CreateView: View {
         guard PlayableExpression.canSubmitSource(hasImage: imageData != nil, hasConsent: hasSourceConsent),
               let imageData else { return }
         failedDrawingAnalysis = false
+        priorAnalysisOutcomeUnconfirmed = false
         phase = .analyzing
         let keywords = keywordsText
             .split(separator: ",")
@@ -596,10 +621,12 @@ struct CreateView: View {
                 phase = .review(result: result, image: image)
             } else {
                 failedDrawingAnalysis = true
+                priorAnalysisOutcomeUnconfirmed = true
                 phase = .failed("Couldn't read the selected image.")
             }
         } catch {
             failedDrawingAnalysis = true
+            priorAnalysisOutcomeUnconfirmed = true
             phase = .failed(error.localizedDescription)
         }
     }
