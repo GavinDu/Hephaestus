@@ -173,6 +173,18 @@ final class PlayerSmokeTests: XCTestCase {
                                     "Player Done requires an actual >=44pt-wide hit target.")
         XCTAssertGreaterThanOrEqual(done.frame.height, 44,
                                     "Player Done requires an actual >=44pt-tall hit target.")
+        // A ToolbarItem ShareLink likewise measured only 36pt tall on BOTH
+        // genuine native devices in PR #467. The player-owned safe-area row
+        // must host one real system ShareLink, not a decorative SF Symbol.
+        let share = app.buttons["player.share"].firstMatch
+        XCTAssertTrue(share.waitForExistence(timeout: 10) && share.isHittable,
+                      "System Share game must be reachable above live WKWebView.")
+        XCTAssertEqual(share.label, "Share game")
+        XCTAssertGreaterThanOrEqual(share.frame.width, 44,
+                                    "Player Share requires a >=44pt-wide native hit target.")
+        XCTAssertGreaterThanOrEqual(share.frame.height, 44,
+                                    "Player Share requires a >=44pt-tall native hit target.")
+        print("PLAYER_SHARE_NATIVE_AX frame=\(share.frame)")
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "player-after-boot"
         shot.lifetime = .keepAlways
