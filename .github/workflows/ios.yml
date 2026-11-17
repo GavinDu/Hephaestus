@@ -214,6 +214,7 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutState \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutAccessibilityTextSize \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateEntryConsentAndControls \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateKeywordsAccessibility5ContrastAndInput \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedUnavailableRecoveryToLibrary \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStalledTransportReachesHonestRecovery \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSlowLiveFeedCanOpenLibraryBeforeTimeout \
