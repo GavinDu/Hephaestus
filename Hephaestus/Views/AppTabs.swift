@@ -14,6 +14,8 @@ import UIKit
 /// Recently played games.
 struct LibraryView: View {
     let onOpenProfile: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var recent: [RecentGame] = []
     @State private var recentScopeKey: String?
     @State private var saved: [FeedGame] = []
@@ -59,6 +61,48 @@ struct LibraryView: View {
                 )
             )
         )
+    }
+
+    /// Show only a count confirmed for the active account and credential epoch.
+    /// Distinguish a true zero from a guest, pending, or failed request.
+    private var savedCountCaption: LibrarySavedCountCaption.Presentation {
+        LibrarySavedCountCaption.presentation(
+            confirmedCount: confirmedSavedCount,
+            signedIn: !BackendConfig.currentUserID.isEmpty,
+            loading: isLoadingSaved
+        )
+    }
+
+    /// A stacked header leaves genuine account state readable at the largest
+    /// text sizes instead of letting two competing columns truncate.
+    private var savedGamesSectionHeader: some View {
+        Group {
+            if LibrarySavedCountLayout.stacks(
+                for: dynamicTypeSize, compact: horizontalSizeClass == .compact
+            ) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Saved games")
+                    savedCountStatus
+                }
+            } else {
+                HStack {
+                    Text("Saved games")
+                    Spacer()
+                    savedCountStatus
+                }
+            }
+        }
+    }
+
+    private var savedCountStatus: some View {
+        Text(savedCountCaption.visibleText)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.primary)
+            .multilineTextAlignment(.trailing)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("library.savedCount.status")
+            .accessibilityLabel(savedCountCaption.accessibilityLabel)
     }
 
     var body: some View {
@@ -179,21 +223,7 @@ struct LibraryView: View {
                         }
                     }
                 } header: {
-                    HStack {
-                        Text("Saved games")
-                        Spacer()
-                        if let count = confirmedSavedCount {
-                            Text("\(count)")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel("\(count) saved games")
-                        } else {
-                            Text("—")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel("Saved games count unavailable")
-                        }
-                    }
+                    savedGamesSectionHeader
                 }
 
                 Section {
@@ -393,6 +423,41 @@ struct LibraryView: View {
             ) else { return }
             errorMessage = "Couldn't remove saved game. Please try again."
         }
+    }
+}
+
+/// Responsive Library header: don't force unrelated labels into a cramped row.
+enum LibrarySavedCountLayout {
+    static func stacks(for size: DynamicTypeSize, compact: Bool) -> Bool {
+        size.isAccessibilitySize || (compact && (size == .xxLarge || size == .xxxLarge))
+    }
+}
+
+/// Accessible, truthful presentation of the current account's confirmed
+/// saved-game total. Display-only policy: no separate stale count cache.
+enum LibrarySavedCountCaption {
+    struct Presentation {
+        let visibleText: String
+        let accessibilityLabel: String
+    }
+
+    static func presentation(
+        confirmedCount: Int?, signedIn: Bool, loading: Bool
+    ) -> Presentation {
+        if let count = confirmedCount, signedIn, !loading {
+            return Presentation(visibleText: String(count),
+                                accessibilityLabel: "\(count) saved games")
+        }
+        if !signedIn {
+            return Presentation(visibleText: "Sign in",
+                                accessibilityLabel: "Sign in to see saved-game count")
+        }
+        if loading {
+            return Presentation(visibleText: "Loading",
+                                accessibilityLabel: "Loading saved-game count")
+        }
+        return Presentation(visibleText: "Unavailable",
+                            accessibilityLabel: "Saved games count unavailable")
     }
 }
 
