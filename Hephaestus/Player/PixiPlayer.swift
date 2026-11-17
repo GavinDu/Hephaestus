@@ -384,6 +384,12 @@ enum PlayerNativeRuntimeIdentifierPolicy {
         return bytes.allSatisfy { (0x21...0x7e).contains($0) }
     }
 
+    /// A genuine response must identify the exact run that was requested;
+    /// same-game/verified-looking data from another run is never sufficient.
+    static func matchesRequestedRunID(_ requested: String, response: String) -> Bool {
+        validRunID(requested) && validRunID(response) && requested == response
+    }
+
     static func validRunID(_ value: String) -> Bool {
         let bytes = Array(value.utf8)
         guard (1...maximumBytes).contains(bytes.count),
@@ -2223,6 +2229,9 @@ private struct PlayerWebView: UIViewRepresentable {
                           self.launchLifecycle.permitsRuntimeEvents,
                           self.runtimeSessionID == runtimeSessionID,
                           self.verifiedRunGate.isLatest(runID),
+                          PlayerNativeRuntimeIdentifierPolicy.matchesRequestedRunID(
+                              runID, response: result.runID
+                          ),
                           result.gameID == self.expectedGameID, result.isVerified else { return }
                     self.onVerifiedRun(result)
                 } catch {
