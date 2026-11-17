@@ -17,6 +17,25 @@ enum CreatePhotoSelectionPolicy {
     }
 }
 
+/// Local source preservation is safe only when we can display the actual
+/// user-selected image and the failed step was image analysis. Failed game
+/// creation, confirmation, polling and publication can be ambiguous writes;
+/// never offer them as automatic resubmission/restart.
+enum CreateDrawingRecoveryPolicy {
+    enum FailureSource { case imageAnalysis, uncertainRemoteWork }
+
+    static func canEditOriginalDrawing(
+        after source: FailureSource,
+        hasImageData: Bool,
+        hasDecodedPreview: Bool
+    ) -> Bool {
+        if case .imageAnalysis = source {
+            return hasImageData && hasDecodedPreview
+        }
+        return false
+    }
+}
+
 /// Photograph a drawing → analyze → generate → confirm → play.
 struct CreateView: View {
     let onOpenProfile: () -> Void
@@ -53,6 +72,8 @@ struct CreateView: View {
     @State private var isPublishing = false
     @State private var playerRequest: PixiPlayerRequest?
     @State private var showsProjects = false
+    @State private var failedDrawingAnalysis = false
+    @State private var showsDiscardDrawingConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -74,9 +95,35 @@ struct CreateView: View {
                 case .failed(let message):
                     VStack(spacing: 16) {
                         Text("Something went wrong").font(.headline)
-                        Text(message).foregroundStyle(.secondary)
-                        Button("Start over") { reset() }
+                        Text(message)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if CreateDrawingRecoveryPolicy.canEditOriginalDrawing(
+                            after: failedDrawingAnalysis ? .imageAnalysis : .uncertainRemoteWork,
+                            hasImageData: imageData != nil,
+                            hasDecodedPreview: previewImage != nil
+                        ) {
+                            Text("Your drawing and its settings are still available on this device.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("Keep drawing and edit") {
+                                // A local UI transition only: no automatic POST.
+                                failedDrawingAnalysis = false
+                                phase = .pick
+                            }
                             .buttonStyle(.borderedProminent)
+                            .frame(minWidth: 180, minHeight: 48)
+                            .accessibilityIdentifier("create.failure.keepDrawing")
+                        }
+                        Button(imageData == nil ? "Start over" : "Discard drawing and start over",
+                               role: .destructive) {
+                            if imageData == nil { reset() }
+                            else { showsDiscardDrawingConfirmation = true }
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(minWidth: 180, minHeight: 48)
+                        .accessibilityIdentifier("create.failure.discard")
                     }
                     .padding()
                 }
@@ -91,6 +138,16 @@ struct CreateView: View {
                     showsProjects = false
                     onOpenProfile()
                 })
+            }
+            .confirmationDialog(
+                "Discard your selected drawing and settings?",
+                isPresented: $showsDiscardDrawingConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Discard and start over", role: .destructive) { reset() }
+                Button("Keep drawing", role: .cancel) {}
+            } message: {
+                Text("This discards the image and local inputs. A submission already sent to the service may still exist.")
             }
         }
     }
@@ -502,6 +559,8 @@ struct CreateView: View {
     }
 
     private func reset() {
+        failedDrawingAnalysis = false
+        showsDiscardDrawingConfirmation = false
         // Invalidate any local PhotoKit transfer even if it ignores
         // cancellation and returns bytes after the UI has reset.
         photoLoadTask?.cancel()
@@ -524,6 +583,7 @@ struct CreateView: View {
     private func analyze() async {
         guard PlayableExpression.canSubmitSource(hasImage: imageData != nil, hasConsent: hasSourceConsent),
               let imageData else { return }
+        failedDrawingAnalysis = false
         phase = .analyzing
         let keywords = keywordsText
             .split(separator: ",")
@@ -535,14 +595,17 @@ struct CreateView: View {
             if let image = UIImage(data: imageData) {
                 phase = .review(result: result, image: image)
             } else {
+                failedDrawingAnalysis = true
                 phase = .failed("Couldn't read the selected image.")
             }
         } catch {
+            failedDrawingAnalysis = true
             phase = .failed(error.localizedDescription)
         }
     }
 
     private func generate(result: IngestResult) async {
+        failedDrawingAnalysis = false
         do {
             let resp = try await BackendAPI.shared.createGame(
                 ingestID: result.ingest_id,
@@ -556,6 +619,7 @@ struct CreateView: View {
     }
 
     private func pollJob(_ jobID: String) async {
+        failedDrawingAnalysis = false
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(3))
             do {
@@ -581,6 +645,7 @@ struct CreateView: View {
     }
 
     private func confirm(job: JobStatus) async {
+        failedDrawingAnalysis = false
         do {
             try await BackendAPI.shared.confirmGame(id: job.game_id)
             phase = .generating(job)
