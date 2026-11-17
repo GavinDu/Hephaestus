@@ -2175,6 +2175,10 @@ private struct PlayerWebView: UIViewRepresentable {
     let onFirstInput: () -> Void
     let onVerifiedRun: (VerifiedRunResult) -> Void
 
+    // Also used by Coordinator during strict message-name admission;
+    // the pool owns handler registration but not the trusted name policy.
+    private static let messageName = "hephaestusRunResult"
+
     func makeCoordinator() -> Coordinator {
         Coordinator(gameID: gameID, expectedURL: url, onProgress: onProgress,
                     onLoadFinish: onLoadFinish, onLoadFail: onLoadFail,
