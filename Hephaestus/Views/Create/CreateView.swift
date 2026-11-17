@@ -45,6 +45,12 @@ enum CreateDrawingRecoveryPolicy {
         guard priorAnalysisOutcomeUnconfirmed, hasSourceImage else { return nil }
         return "The previous analysis may have reached the service. Analyze again starts a new request; it does not resume the earlier one."
     }
+
+    /// Do not show raw URLSession/NSError or provider diagnostics that could
+    /// contain private image URLs or credentials. Detailed stage-aware
+    /// messages for *all* generator operations remain in #321.
+    static let safeAnalysisFailureMessage =
+        "Couldn't confirm whether your drawing was analyzed. Your drawing is still on this device."
 }
 
 /// Photograph a drawing → analyze → generate → confirm → play.
@@ -627,7 +633,7 @@ struct CreateView: View {
         } catch {
             failedDrawingAnalysis = true
             priorAnalysisOutcomeUnconfirmed = true
-            phase = .failed(error.localizedDescription)
+            phase = .failed(CreateDrawingRecoveryPolicy.safeAnalysisFailureMessage)
         }
     }
 
