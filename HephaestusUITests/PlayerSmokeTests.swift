@@ -283,6 +283,31 @@ final class PlayerSmokeTests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
+        // Native source image and permission remain untouched; only edit
+        // harmless optional keywords to prove the real input remains usable.
+        // The old iPad screenshot showed its default prompt black-on-black.
+        let keywords = app.textFields["create.pick.keywords"].firstMatch
+        XCTAssertTrue(keywords.waitForExistence(timeout: 10),
+                      "Create must expose the real editable keywords TextField.")
+        if !keywords.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(keywords.isHittable,
+                      "Keywords need a reachable visible input, not a decorative prompt.")
+        XCTAssertGreaterThanOrEqual(keywords.frame.height, 44,
+                                    "Real keywords field must meet native touch minimum.")
+        keywords.tap()
+        keywords.typeText("puzzle")
+        XCTAssertEqual(keywords.value as? String, "puzzle",
+                       "Typing in the high-contrast real field must preserve user-entered keywords.")
+        XCTAssertFalse(analyze.isEnabled,
+                       "Editing optional keywords must never bypass image consent.")
+        let typedShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        typedShot.name = isPad ? "arcade-pulse-create-keywords-ipad-typed"
+                               : "arcade-pulse-create-keywords-iphone-typed"
+        typedShot.lifetime = .keepAlways
+        add(typedShot)
+
         if !isPad {
             let projects = app.buttons["create.myProjects"].firstMatch
             XCTAssertTrue(projects.waitForExistence(timeout: 10) && projects.isHittable,
