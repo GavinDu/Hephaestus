@@ -39,6 +39,18 @@ struct CreatorTopicFilterControls: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
+                // Native XCTest measured the focused TextField itself at
+                // just 22pt even though the enclosing frame was 48pt.
+                // Padding belongs to the actual editable SwiftUI host so
+                // its hit region (not only the surrounding layout) grows.
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+                .background(
+                    ArcadePulseTheme.surface,
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+                .contentShape(Rectangle())
                 // The Creator Discovery host owns ONE search submission
                 // action for both this field and the navigation search bar.
                 // A nested onSubmit plus outer onSubmit could reset twice,
