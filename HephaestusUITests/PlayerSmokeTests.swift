@@ -794,13 +794,26 @@ final class PlayerSmokeTests: XCTestCase {
         // the initial screen with Saved Games only just entering view.
         // Scroll physically, then require real row existence and full
         // geometry clearance; do not fabricate or bypass the CTA.
+        // At Accessibility5 the Library's giant hero can occupy multiple
+        // viewports. A root-app swipe can hit the floating tab bar instead of
+        // the SwiftUI List. Target the genuine native scrolling container.
+        let collection = app.collectionViews.firstMatch
+        let table = app.tables.firstMatch
+        let scrollingList = collection.exists ? collection : table
+        XCTAssertTrue(scrollingList.exists,
+                      "Actual Library must expose a native scrollable List container.")
         for _ in 0..<12 {
             if signIn.exists && signIn.isHittable &&
                signIn.frame.maxY <= tabs.frame.minY - 4 {
                 break
             }
-            app.swipeUp()
+            scrollingList.swipeUp()
         }
+        print("LIBRARY_A5_NATIVE_SCROLL frame=\(window.frame) list=\(scrollingList.frame) tabs=\(tabs.frame) sign_in_exists=\(signIn.exists)")
+        let afterPhysicalScroll = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        afterPhysicalScroll.name = "arcade-pulse-library-a5-native-scroll-before-signin-assertion"
+        afterPhysicalScroll.lifetime = .keepAlways
+        add(afterPhysicalScroll)
         XCTAssertTrue(signIn.exists,
                       "Real Library sign-in must materialize after actual native scrolling.")
         XCTAssertTrue(signIn.isHittable,
