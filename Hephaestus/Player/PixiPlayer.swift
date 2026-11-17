@@ -229,9 +229,6 @@ struct PlayerPrewarmV2SceneMetricGate {
     }
 }
 
-/// Pure native-side provenance policy for speculative WebKit callbacks.
-/// The caller supplies identity/frame/origin from WKScriptMessage itself, not
-/// from browser JSON. URL equality includes the exact game and quality query.
 /// One exact-origin policy for both speculative and attached WKWebView
 /// callbacks. WebKit represents an omitted standard HTTP(S) port as 0;
 /// treat it as the scheme default only, never as a wildcard for a custom
@@ -259,6 +256,9 @@ enum PlayerWebKitOriginPolicy {
     }
 }
 
+/// Pure native-side provenance policy for speculative WebKit callbacks.
+/// The caller supplies identity/frame/origin from WKScriptMessage itself, not
+/// from browser JSON. URL equality includes the exact game and quality query.
 enum PlayerPrewarmMessageOriginPolicy {
     static func allows(
         isCurrentPooledView: Bool,
