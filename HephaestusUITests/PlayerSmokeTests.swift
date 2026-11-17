@@ -330,8 +330,17 @@ final class PlayerSmokeTests: XCTestCase {
             let signIn = app.buttons["studio.openProfile"].firstMatch
             XCTAssertTrue(signIn.waitForExistence(timeout: 5) && signIn.isHittable)
             signIn.tap()
-            XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
-                          "Studio must return to the real Profile authentication entry.")
+            let appleSignIn = app.buttons["Sign in with Apple"].firstMatch
+            XCTAssertTrue(appleSignIn.waitForExistence(timeout: 10),
+                          "Studio must dismiss BEFORE the actual Profile sign-in entry appears.")
+            XCTAssertTrue(appleSignIn.isHittable,
+                          "Real Apple sign-in must not be obscured by a lingering Studio sheet.")
+            XCTAssertFalse(studio.isHittable,
+                           "The former Creator Studio sheet must no longer cover Profile.")
+            let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            arrived.name = "arcade-pulse-iphone-create-studio-profile-arrived"
+            arrived.lifetime = .keepAlways
+            add(arrived)
         }
     }
 
