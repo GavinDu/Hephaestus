@@ -2627,3 +2627,62 @@ struct HephaestusTests {
         backendURL: customHTTPSBackend
     ))
 }
+
+@Test func nativeRuntimeIdentityPolicyRejectsOversizedUnicodeAndUnsafeRunSegments() {
+    let session = PlayerNativeRuntimeIdentifierPolicy.validSessionID
+    let run = PlayerNativeRuntimeIdentifierPolicy.validRunID
+    #expect(PlayerNativeRuntimeIdentifierPolicy.maximumBytes == 128)
+
+    #expect(session("runtime-session_01~"))
+    #expect(session(String(repeating: "s", count: 128)))
+    #expect(!session(""))
+    #expect(!session(String(repeating: "s", count: 129)))
+    #expect(!session(String(repeating: "😀", count: 128)))
+    #expect(!session("e\u{301}"))
+    #expect(!session(" Session"))
+    #expect(!session("Session "))
+    #expect(!session("session\nnext"))
+    #expect(!session("session\u{0000}"))
+    #expect(!session("A\u{200B}B"))
+    #expect(session("runtime:session/with-visible-punctuation"))
+
+    #expect(run("70ab831b-9e2e-4cd6-a07c-19e713b76901"))
+    #expect(run("run_ABC-123.~"))
+    #expect(run(String(repeating: "r", count: 128)))
+    for bad in [
+        "", ".", "..", " ", "run with space", "run/other",
+        "run%2Fother", "run?limit=1", "run#fragment",
+        "é", "😀", "e\u{301}", "run\n", "\u{0000}",
+        String(repeating: "r", count: 129),
+        String(repeating: "😀", count: 128),
+    ] {
+        #expect(!run(bad), "unexpectedly admitted run identifier")
+    }
+}
+
+@Test func invalidWebKitRuntimeIdentitiesNeverClaimSessionOrFetchSlot() {
+    var session = PlayerRuntimeSessionBindingGate()
+    let badUnicode = String(repeating: "😀", count: 128)
+    #expect(!session.bind(badUnicode))
+    #expect(session.activeSessionID == nil)
+    #expect(!session.bind("has space"))
+    #expect(session.activeSessionID == nil)
+    #expect(session.bind("valid-native-session"))
+    #expect(session.activeSessionID == "valid-native-session")
+    session.beginNavigation()
+    #expect(!session.bind(badUnicode))
+    #expect(!session.bind("valid-native-session"))
+    #expect(session.bind("next-valid-session"))
+
+    var runs = PlayerVerifiedRunNotificationGate()
+    #expect(runs.offer("../other") == nil)
+    #expect(runs.offer(badUnicode) == nil)
+    #expect(runs.offer("run%2Fother") == nil)
+    #expect(runs.recentCount == 0)
+    #expect(runs.pendingCount == 0)
+    #expect(runs.deferredCount == 0)
+    #expect(runs.offer("valid-run-01") == "valid-run-01")
+    #expect(runs.recentCount == 1)
+    #expect(runs.pendingCount == 1)
+}
+
