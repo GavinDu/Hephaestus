@@ -2867,3 +2867,44 @@ struct HephaestusTests {
     }
 }
 
+@Test func nativeBackgroundOnlyEvictsCurrentlyUnattachedSpeculativePrewarmAcross256Transitions() {
+    // The UIApplication notification is delivered asynchronously. A prewarm
+    // can become the active WKWebView between post and MainActor handling.
+    // Every decision MUST read the current attachment and pooled view state,
+    // using the same pure native reducer as the shipping memory-warning path.
+    for epoch in 1...256 {
+        let currentlyAttached = epoch % 2 == 0
+        let currentlyPooled = epoch % 3 != 0
+        let permitted = PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+            isAttached: currentlyAttached, hasPooledView: currentlyPooled
+        )
+        #expect(permitted == (!currentlyAttached && currentlyPooled))
+        if currentlyAttached {
+            // An active interactive game is never a disposable prewarm,
+            // including after a stale background notification fires.
+            #expect(!permitted)
+        }
+        if !currentlyPooled {
+            // Already-discarded/speculative view: no stale WebContent work.
+            #expect(!permitted)
+        }
+    }
+
+    // An event posted while still speculative must not evict the game
+    // when the real player attaches before the MainActor callback runs.
+    let stateAtNotification = (isAttached: false, hasPooledView: true)
+    #expect(PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: stateAtNotification.isAttached,
+        hasPooledView: stateAtNotification.hasPooledView
+    ))
+    let stateAtDelivery = (isAttached: true, hasPooledView: true)
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: stateAtDelivery.isAttached,
+        hasPooledView: stateAtDelivery.hasPooledView
+    ))
+    // Conversely, after an interactive view detaches, the pool must never
+    // consider an absent view as a new speculative game.
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: false, hasPooledView: false
+    ))
+}
