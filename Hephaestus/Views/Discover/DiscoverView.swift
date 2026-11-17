@@ -2379,7 +2379,7 @@ private struct CreatorDiscoverySheet: View {
                         topicText: $topicText,
                         isLoading: isLoading
                     ) {
-                        Task { await load(reset: true) }
+                        submitCreatorQueryFromUI()
                     }
                 } header: {
                     Text("Topic")
@@ -2481,7 +2481,12 @@ private struct CreatorDiscoverySheet: View {
             .navigationTitle("Creators")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search creators or games")
-            .onSubmit(of: .search) { Task { await load(reset: true) } }
+            // The single submission owner receives Search from both the
+            // navigation search field and topic field. This must obey the
+            // same disabled state as the visible Apply button.
+            .onSubmit(of: .search) {
+                submitCreatorQueryFromUI()
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
@@ -2493,6 +2498,18 @@ private struct CreatorDiscoverySheet: View {
                 CreatorProfileSheet(creatorID: request.id)
             }
         }
+    }
+
+    /// A keyboard Search and the visible Apply button share this same
+    /// synchronous admission gate. Mark the real request as busy BEFORE
+    /// scheduling an async Task, so two callbacks in one run-loop turn
+    /// cannot issue duplicate reset GETs.
+    private func submitCreatorQueryFromUI() {
+        guard CreatorQuerySubmitPolicy.canSubmit(isLoading: isLoading) else {
+            return
+        }
+        isLoading = true
+        Task { await load(reset: true) }
     }
 
     private func load(reset: Bool) async {
