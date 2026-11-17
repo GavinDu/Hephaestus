@@ -293,7 +293,13 @@ final class PlayerSmokeTests: XCTestCase {
         let done = directory.buttons["Done"].firstMatch
         XCTAssertTrue(done.exists && done.isHittable)
         done.tap()
-        XCTAssertFalse(directory.waitForExistence(timeout: 3),
+        // waitForExistence succeeds while the exit animation is still visible.
+        // Explicitly wait for the real native sheet to disappear instead.
+        let sheetGone = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: directory
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [sheetGone], timeout: 8), .completed,
                        "Normal Done must fully dismiss the Directory sheet.")
         XCTAssertTrue(openDirectory.waitForExistence(timeout: 8) &&
                       openDirectory.isHittable,
