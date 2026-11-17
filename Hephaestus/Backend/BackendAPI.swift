@@ -349,6 +349,11 @@ struct VerifiedRunResult: Decodable, Identifiable {
     let status: String
     let result: Outcome?
     let rank: Rank?
+    // These fields may only come from the authenticated server result API.
+    // Historical browser-provided status/score records omit these fields.
+    let attested: Bool?
+    let rankingScope: String?
+    let evidenceStatus: String?
 
     var id: String { runID }
 
@@ -374,10 +379,19 @@ struct VerifiedRunResult: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case runID = "runId"
         case gameID = "gameId"
-        case status, result, rank
+        case status, result, rank, attested, rankingScope, evidenceStatus
     }
 
-    var isVerified: Bool { status == "verified" && result != nil }
+    // Browser-controlled status, score and ranking hints are not proof of
+    // independent semantic replay. Fail closed until the backend has a
+    // genuinely server-issued attestation with matching provenance.
+    var isVerified: Bool {
+        status == "verified" &&
+        result != nil &&
+        attested == true &&
+        rankingScope == "verified_only" &&
+        evidenceStatus == "verified"
+    }
 }
 
 struct IngestResult: Codable {

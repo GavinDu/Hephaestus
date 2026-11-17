@@ -923,7 +923,12 @@ struct HephaestusTests {
     }
     """.data(using: .utf8)!
     let result = try JSONDecoder().decode(VerifiedRunResult.self, from: json)
-    #expect(result.isVerified)
+    // Historical status-only scores remain decodable for diagnostics,
+    // but must never appear as independently verified gameplay results.
+    #expect(!result.isVerified)
+    #expect(result.attested == nil)
+    #expect(result.rankingScope == nil)
+    #expect(result.evidenceStatus == nil)
     #expect(result.runID == "run-1")
     #expect(result.gameID == "game-1")
     #expect(result.result?.score == 420)
@@ -937,6 +942,73 @@ struct HephaestusTests {
     """.data(using: .utf8)!
     let result = try JSONDecoder().decode(VerifiedRunResult.self, from: json)
     #expect(!result.isVerified)
+}
+
+@Test func verifiedRunRequiresIndependentServerAttestationProvenance() throws {
+    let trusted: [String: Any] = [
+        "runId": "run-provenance-1",
+        "gameId": "published-game",
+        "status": "verified",
+        "result": ["won": true, "score": 12, "durationMs": 780],
+        "attested": true,
+        "rankingScope": "verified_only",
+        "evidenceStatus": "verified"
+    ]
+
+    func accepted(_ raw: [String: Any]) -> Bool {
+        guard let bytes = try? JSONSerialization.data(withJSONObject: raw),
+              let payload = try? JSONDecoder().decode(
+                  VerifiedRunResult.self, from: bytes
+              ) else { return false }
+        return payload.isVerified
+    }
+
+    // This is a future typed server contract, NOT evidence that any current
+    // backend has issued an independently verified run.
+    #expect(accepted(trusted))
+    var legacy = trusted
+    for field in ["attested", "rankingScope", "evidenceStatus"] {
+        legacy.removeValue(forKey: field)
+    }
+    #expect(!accepted(legacy))
+    for field in ["attested", "rankingScope", "evidenceStatus"] {
+        var absent = trusted
+        absent.removeValue(forKey: field)
+        #expect(!accepted(absent))
+        absent[field] = NSNull()
+        #expect(!accepted(absent))
+    }
+
+    let denials: [(String, Any)] = [
+        ("attested", false),
+        ("attested", "true"),
+        ("rankingScope", "provisional"),
+        ("rankingScope", "all"),
+        ("rankingScope", true),
+        ("evidenceStatus", "legacy_unverified"),
+        ("evidenceStatus", true),
+        ("status", "unverified"),
+        ("status", "pending")
+    ]
+    for (field, value) in denials {
+        var changed = trusted
+        changed[field] = value
+        #expect(!accepted(changed))
+    }
+    var missing = trusted
+    missing.removeValue(forKey: "result")
+    #expect(!accepted(missing))
+    missing["result"] = NSNull()
+    #expect(!accepted(missing))
+
+    // A browser's optimistic verified flag cannot override the backend
+    // result model or synthesize missing attestation provenance.
+    var spoofed = legacy
+    spoofed["verified"] = true
+    spoofed["rankingScope"] = "provisional"
+    spoofed["attested"] = true
+    spoofed["evidenceStatus"] = "verified"
+    #expect(!accepted(spoofed))
 }
 
 @Test func appleSignInResponseDecodesSession() throws {
