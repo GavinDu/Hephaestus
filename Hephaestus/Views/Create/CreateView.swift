@@ -74,6 +74,41 @@ enum CreateErrorPresentation {
     }
 }
 
+/// Active Create-screen guard against duplicate public POSTs while the server
+/// receipt is unknown. This is intentionally not a durable cross-launch journal;
+/// authoritative server reconciliation remains a separate contract (#412).
+struct CreatePublishAttemptGate {
+    enum State: Equatable { case ready, inFlight, acknowledged, unconfirmed }
+    private(set) var state: State = .ready
+    private(set) var gameID: String?
+
+    func canBegin(for gameID: String) -> Bool {
+        !gameID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        state == .ready && (self.gameID == nil || self.gameID == gameID)
+    }
+
+    mutating func begin(for gameID: String) -> Bool {
+        guard canBegin(for: gameID) else { return false }
+        self.gameID = gameID
+        state = .inFlight
+        return true
+    }
+
+    mutating func acknowledge(for gameID: String) {
+        guard self.gameID == gameID, state == .inFlight else { return }
+        state = .acknowledged
+    }
+
+    mutating func markUnconfirmed(for gameID: String) {
+        guard self.gameID == gameID, state == .inFlight else { return }
+        state = .unconfirmed
+    }
+
+    mutating func resetForNewLocalGame() {
+        self = CreatePublishAttemptGate()
+    }
+}
+
 /// Photograph a drawing → analyze → generate → confirm → play.
 struct CreateView: View {
     let onOpenProfile: () -> Void
@@ -108,6 +143,7 @@ struct CreateView: View {
     @State private var publishTopics = ""
     @State private var publishMessage: String?
     @State private var isPublishing = false
+    @State private var publishAttemptGate = CreatePublishAttemptGate()
     @State private var playerRequest: PixiPlayerRequest?
     @State private var showsProjects = false
 
@@ -551,26 +587,41 @@ struct CreateView: View {
                     Task { await publish(gameID: gameID) }
                 } label: {
                     if isPublishing { ProgressView() }
-                    else { Label("Publish game", systemImage: "paperplane.fill") }
+                    else if publishAttemptGate.state == .acknowledged {
+                        Label("Submitted for moderation", systemImage: "checkmark.circle.fill")
+                    } else if publishAttemptGate.state == .unconfirmed {
+                        Label("Submission unconfirmed", systemImage: "exclamationmark.circle")
+                    } else {
+                        Label("Publish game", systemImage: "paperplane.fill")
+                    }
                 }
                 .buttonStyle(.borderedProminent)
-                 .disabled(!PlayableExpression.canPublishPublicly(hasConsent: hasPublicPublishConsent, isPublishing: isPublishing))
+                .disabled(!PlayableExpression.canPublishPublicly(hasConsent: hasPublicPublishConsent, isPublishing: isPublishing) ||
+                          !publishAttemptGate.canBegin(for: gameID))
+                .accessibilityIdentifier("create.publish.action")
             }
             .frame(maxWidth: 420)
             Button("Make another") { reset() }
+                .disabled(isPublishing)
+                .accessibilityIdentifier("create.publish.makeAnother")
         }
         .padding()
     }
 
     private func publish(gameID: String) async {
-        guard PlayableExpression.canPublishPublicly(hasConsent: hasPublicPublishConsent, isPublishing: isPublishing) else { return }
+        guard PlayableExpression.canPublishPublicly(hasConsent: hasPublicPublishConsent, isPublishing: isPublishing),
+              publishAttemptGate.begin(for: gameID) else { return }
         isPublishing = true
         defer { isPublishing = false }
         let topics = publishTopics.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         do {
             _ = try await BackendAPI.shared.publishPost(gameID: gameID, caption: publishCaption, topics: topics)
+            publishAttemptGate.acknowledge(for: gameID)
             publishMessage = "Submitted for moderation. The post appears in feeds after approval."
         } catch {
+            // The server may have accepted a public POST even if the response
+            // was lost. Do not offer another blind submit in this session.
+            publishAttemptGate.markUnconfirmed(for: gameID)
             publishMessage = CreateErrorPresentation.message(for: error, stage: .publish)
         }
     }
@@ -591,6 +642,7 @@ struct CreateView: View {
         publishCaption = ""
         publishTopics = ""
         publishMessage = nil
+        publishAttemptGate.resetForNewLocalGame()
         hasSourceConsent = false
         hasPublicPublishConsent = false
     }
