@@ -1828,11 +1828,19 @@ final class PlayerSmokeTests: XCTestCase {
         // behind the native share interface. No false pass if prior actions
         // can actually be hit through the system overlay.
         let oldDone = app.buttons["feed.actions.dismiss"].firstMatch
-        let oldShare = app.buttons["Share game"].firstMatch
-        XCTAssertFalse(oldDone.isHittable,
-                       "The old Actions Done must not remain interactive over genuine system sharing.")
-        XCTAssertFalse(oldShare.isHittable,
-                       "The old Actions Share must not remain interactive over genuine system sharing.")
+        let oldShare = app.buttons.matching(
+            NSPredicate(format: "label == %@", "Share game")).firstMatch
+        for (name, staleControl) in [("Done", oldDone), ("Share game", oldShare)] {
+            // A bounded native transition is allowed, but the old sheet
+            // cannot retain an interactive control atop Share. Fail if
+            // either remains hittable after the foreground handoff settles.
+            let noninteractive = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false OR hittable == false"),
+                object: staleControl
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [noninteractive], timeout: 8), .completed,
+                           "Old Actions \(name) must not be interactive over system sharing.")
+        }
         print("UI_EVALUATOR_ACCESSIBILITY dynamic_type=accessibility-xxxl visible_primary_targets=2 menu_actions=6 native_share_attempt=true")
     }
 }
