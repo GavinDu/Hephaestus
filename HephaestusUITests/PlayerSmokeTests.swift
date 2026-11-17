@@ -164,7 +164,6 @@ final class PlayerSmokeTests: XCTestCase {
     /// Open a genuine creator from a published feed game, then capture
     /// its server-backed game counts and profile layout. Never inject
     /// invented profile numbers or avatars for screenshot convenience.
-    @MainActor
     /// Wait for a genuine, server-published creator before inspecting native
     /// Profile/guest routing. A slow feed has a *nonterminal* Retry loading
     /// action that the old tests ignored, and a terminal Try again action.
@@ -219,6 +218,7 @@ final class PlayerSmokeTests: XCTestCase {
         return nil
     }
 
+    @MainActor
     func testArcadePulseCreatorProfileRendersLiveData() throws {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
