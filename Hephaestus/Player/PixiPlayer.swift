@@ -208,8 +208,7 @@ struct PlayerPrewarmV2SceneMetricGate {
               body["documentNonce"] as? String == currentDocumentNonce,
               body["gameId"] as? String == expectedGameID,
               let session = body["sessionId"] as? String,
-              !session.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              session.utf8.count <= 128,
+              PlayerNativeRuntimeIdentifierPolicy.validSessionID(session),
               let sequence = PlayerNativeMetricPayload.strictInt(body["sequence"]),
               (0...100_000).contains(sequence),
               let payload = PlayerNativeMetricPayload.parse(body)
@@ -372,6 +371,35 @@ struct PlayerNativeBridgeVersionGate {
 /// Keep only a fixed number of IDs regardless of game duration.
 /// This is defense-in-depth; a per-navigation runtime nonce would prove
 /// provenance across arbitrarily many document reloads.
+/// Browser-owned runtime identifiers are *candidates*, never credentials.
+/// The Go replay identity boundary caps ASCII identifiers by UTF-8 bytes.
+/// A Swift String.count grapheme cap would accept oversized emoji IDs.
+enum PlayerNativeRuntimeIdentifierPolicy {
+    static let maximumBytes = 128
+
+    static func validSessionID(_ value: String) -> Bool {
+        let bytes = Array(value.utf8)
+        guard (1...maximumBytes).contains(bytes.count) else { return false }
+        // Match the server's printable ASCII identifier baseline.
+        return bytes.allSatisfy { (0x21...0x7e).contains($0) }
+    }
+
+    static func validRunID(_ value: String) -> Bool {
+        let bytes = Array(value.utf8)
+        guard (1...maximumBytes).contains(bytes.count),
+              value != ".", value != ".." else { return false }
+        // The run ID becomes exactly one percent-encoded REST path segment.
+        // Do not allow embedded slashes, percent escapes or dot segments.
+        return bytes.allSatisfy { byte in
+            (0x41...0x5a).contains(byte) ||
+            (0x61...0x7a).contains(byte) ||
+            (0x30...0x39).contains(byte) ||
+            byte == 0x2d || byte == 0x2e ||
+            byte == 0x5f || byte == 0x7e
+        }
+    }
+}
+
 struct PlayerRuntimeSessionBindingGate {
     static let maximumRetiredSessions = 8
     private(set) var activeSessionID: String?
@@ -379,7 +407,7 @@ struct PlayerRuntimeSessionBindingGate {
     var retiredCount: Int { retiredSessionIDs.count }
 
     mutating func bind(_ sessionID: String) -> Bool {
-        guard !sessionID.isEmpty, sessionID.count <= 128,
+        guard PlayerNativeRuntimeIdentifierPolicy.validSessionID(sessionID),
               !retiredSessionIDs.contains(sessionID) else { return false }
         if let activeSessionID { return activeSessionID == sessionID }
         activeSessionID = sessionID
@@ -507,7 +535,7 @@ struct PlayerVerifiedRunNotificationGate {
     /// or nil when the newest candidate is deferred behind two active fetches.
     /// One deferred slot supersedes older waiting outcomes, not newer ones.
     mutating func offer(_ runID: String) -> String? {
-        guard !runID.isEmpty, runID.count <= 128,
+        guard PlayerNativeRuntimeIdentifierPolicy.validRunID(runID),
               !recentRunIDs.contains(runID),
               !pendingRunIDs.contains(runID),
               deferredRunID != runID else { return nil }
@@ -2142,7 +2170,7 @@ private struct PlayerWebView: UIViewRepresentable {
                       view, nonce: body["documentNonce"] as? String
                   )),
                   let runtimeSessionID = body["sessionId"] as? String,
-                  !runtimeSessionID.isEmpty, runtimeSessionID.count <= 128,
+                  PlayerNativeRuntimeIdentifierPolicy.validSessionID(runtimeSessionID),
                   body["gameId"] as? String == expectedGameID,
                   let type = body["type"] as? String,
                   (type == "player_metric" || type == "verified_run_available") else { return }
@@ -2155,7 +2183,9 @@ private struct PlayerWebView: UIViewRepresentable {
                 PlayerNativeMetricPayload.parse(body) != nil
             let validRun = type == "verified_run_available" &&
                 Set(body.keys) == permittedResultFields &&
-                (body["runId"] as? String)?.isEmpty == false
+                (body["runId"] as? String).map(
+                    PlayerNativeRuntimeIdentifierPolicy.validRunID
+                ) == true
             guard (validMetric || validRun),
                   runtimeSessionGate.bind(runtimeSessionID) else { return }
             nativeBridgeVersionGate.didAccept(schema)
