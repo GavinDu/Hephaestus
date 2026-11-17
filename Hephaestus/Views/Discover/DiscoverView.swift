@@ -2481,7 +2481,13 @@ private struct CreatorDiscoverySheet: View {
             .navigationTitle("Creators")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search creators or games")
-            .onSubmit(of: .search) { Task { await load(reset: true) } }
+            // The single submission owner receives Search from both the
+            // navigation search field and topic field. This must obey the
+            // same disabled state as the visible Apply button.
+            .onSubmit(of: .search) {
+                guard CreatorQuerySubmitPolicy.canSubmit(isLoading: isLoading) else { return }
+                Task { await load(reset: true) }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
