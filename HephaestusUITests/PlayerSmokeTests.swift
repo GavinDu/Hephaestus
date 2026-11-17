@@ -842,14 +842,55 @@ final class PlayerSmokeTests: XCTestCase {
         self.app = app
         app.launch()
         let more = app.descendants(matching: .any)["More game actions"].firstMatch
-        let retry = app.buttons["Try again"].firstMatch
+        let terminalRetry = app.buttons["Try again"].firstMatch
+        // On a genuinely slow transport the app offers this *nonterminal*
+        // action before showing the terminal Try again button. The old test
+        // never exercised that available real recovery route (#471).
+        let loadingRetry = app.buttons["Retry loading"].firstMatch
         let until = Date().addingTimeInterval(120)
+        var lastRetry = Date()
         while !more.exists && Date() < until {
-            if retry.waitForExistence(timeout: 4) { retry.tap() }
+            // A failed request may be retried after a short cooldown;
+            // while a real fetch is still active, don't repeatedly cancel it.
+            // Use the nonterminal retry only at the bounded 65-second cadence.
+            let elapsed = Date().timeIntervalSince(lastRetry)
+            // Even terminal buttons can survive briefly in XCTest's
+            // accessibility snapshot during the transition to Loading.
+            // A cooldown avoids accidental rapid duplicate Retry taps.
+            let options: [XCUIElement] =
+                terminalRetry.exists && elapsed >= 12 ? [terminalRetry] :
+                elapsed >= 65 ? [loadingRetry] : []
+            for retry in options where retry.exists && retry.isEnabled {
+                let frame = retry.frame
+                guard !frame.isNull, !frame.isEmpty,
+                      frame.midX.isFinite, frame.midY.isFinite,
+                      app.frame.intersects(frame) else { continue }
+                retry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                lastRetry = Date()
+                break
+            }
             _ = more.waitForExistence(timeout: 4)
         }
-        XCTAssertTrue(more.exists && more.isHittable,
-                      "A real settled feed post must expose its More menu.")
+        if !more.exists || !more.isHittable {
+            // An unavailable backend must FAIL this genuine Game Details
+            // gate, never be replaced by a fabricated item or skipped UI.
+            let original = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            original.name = "arcade-pulse-game-details-real-feed-unavailable"
+            original.lifetime = .keepAlways
+            add(original)
+            let terminalLibrary = app.buttons["feed.error.library"].firstMatch
+            let slowLibrary = app.buttons["feed.loading.library"].firstMatch
+            let library = terminalLibrary.exists ? terminalLibrary : slowLibrary
+            if library.exists && library.isHittable {
+                XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+                library.tap()
+                let genuineLibrary = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+                XCTAssertTrue(genuineLibrary.waitForExistence(timeout: 10),
+                              "Unavailable game details must retain real Library escape.")
+            }
+            XCTFail("A real settled feed never supplied a hittable More action after honest bounded retries.")
+            return
+        }
         more.tap()
         let details = app.buttons["Game details"].firstMatch
         XCTAssertTrue(details.waitForExistence(timeout: 5))
