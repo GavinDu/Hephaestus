@@ -334,7 +334,7 @@ final class PlayerSmokeTests: XCTestCase {
         // Use the physical iOS Search keyboard action, not a direct test
         // invocation of load(reset:) or an invented backend result.
         topic.tap()
-        topic.typeText("puzzle\\n")
+        topic.typeText("puzzle\n")
         XCTAssertEqual(topic.value as? String, "puzzle",
                        "The real topic input must retain what was searched.")
 
