@@ -122,7 +122,7 @@ struct CreateView: View {
                 case .review(let result, let image):
                     reviewView(result: result, image: image)
                 case .generating(let job):
-                    ProgressView("Generating game… (\(job.status))")
+                    ProgressView("Generating game…")
                         .task(id: job.job_id) { await pollJob(job.job_id) }
                 case .confirming(let job):
                     confirmingView(job: job)
