@@ -222,6 +222,10 @@ struct CreateView: View {
                             RoundedRectangle(cornerRadius: 10)
                                 .strokeBorder(.white.opacity(0.60), lineWidth: 1)
                         }
+                        // An explicit custom prompt is not automatically
+                        // the field's VoiceOver label on every iOS release.
+                        .accessibilityLabel("Optional keywords, separated by commas")
+                        .accessibilityHint("Describe your game using optional keywords")
                         .accessibilityIdentifier("create.pick.keywords")
                     Button {
                         Task { await analyze() }
