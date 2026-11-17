@@ -37,6 +37,17 @@ struct ArcadePulseCreateErrorPolicyTests {
             for: URLError(.timedOut), stage: .publish)
         #expect(timeout.contains("whether your game was submitted"))
         #expect(!timeout.localizedCaseInsensitiveContains("timed out"))
+        // A lost connection during POST may have submitted successfully;
+        // never instruct a duplicate public publish without reconciliation.
+        for interrupted in [URLError(.networkConnectionLost),
+                            URLError(.notConnectedToInternet),
+                            URLError(.secureConnectionFailed)] {
+            let ambiguous = CreateErrorPresentation.message(
+                for: interrupted, stage: .publish)
+            #expect(ambiguous.contains("Couldn't confirm"))
+            #expect(ambiguous.contains("My Projects"))
+            #expect(!ambiguous.contains("Submitted for moderation"))
+        }
         let offline = CreateErrorPresentation.message(
             for: URLError(.notConnectedToInternet), stage: .analyze)
         #expect(offline.localizedCaseInsensitiveContains("offline"))
