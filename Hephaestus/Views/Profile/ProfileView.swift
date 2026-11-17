@@ -68,6 +68,7 @@ enum ProfileErrorPresentation {
 
 struct ProfileView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var backendOK = false
     @State private var checked = false
     @State private var logEntries = DevLog.shared.count
@@ -76,6 +77,14 @@ struct ProfileView: View {
     @State private var tokenDraft = BackendConfig.loadSessionToken() ?? ""
     @State private var sessionMessage: String?
     @State private var isDeleteAccountPresented = false
+
+    private var connectionStatus: some View {
+        Label(BackendConfig.currentUserID.isEmpty ? "Not connected" : "Connected",
+              systemImage: BackendConfig.currentUserID.isEmpty ? "person.crop.circle.badge.xmark" : "checkmark.shield.fill")
+            .font(.subheadline)
+            .foregroundStyle(BackendConfig.currentUserID.isEmpty ? Color.secondary : Color.green)
+            .fixedSize(horizontal: false, vertical: true)
+    }
 
     private func signInWithAppleToken(_ identityToken: String) async {
         do {
@@ -110,14 +119,28 @@ struct ProfileView: View {
         NavigationStack {
             List {
                 Section("Account") {
-                    HStack {
-                        Text("Session")
-                        Spacer()
-                        Label(BackendConfig.currentUserID.isEmpty ? "Not connected" : "Connected",
-                              systemImage: BackendConfig.currentUserID.isEmpty ? "person.crop.circle.badge.xmark" : "checkmark.shield.fill")
-                            .font(.subheadline)
-                            .foregroundStyle(BackendConfig.currentUserID.isEmpty ? Color.secondary : Color.green)
+                    Group {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            // At Accessibility5 a horizontal status row split "Session"
+                            // mid-word. Stack complete words, never shrink real text.
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Session")
+                                    .font(.headline)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                connectionStatus
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            HStack(spacing: 8) {
+                                Text("Session")
+                                    .fixedSize(horizontal: true, vertical: false)
+                                Spacer(minLength: 8)
+                                connectionStatus
+                            }
+                        }
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("profile.account.session-row")
                     if BackendConfig.currentUserID.isEmpty {
                         SignInWithAppleButton(.signIn) { request in
                             // Identity only: no name or email scope is requested.
@@ -280,6 +303,13 @@ struct ProfileView: View {
                     Text("Server-wide incident aggregates are restricted to operators and are not fetched by the app. If you encounter a player issue, copy or share the session log above only after removing private information.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+            // Reserve scrollable space above the floating compact tab bar.
+            // Do not visually crop Account privacy/help text at large sizes.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if horizontalSizeClass == .compact {
+                    Color.clear.frame(height: 72)
                 }
             }
             .sheet(isPresented: $isModerationAppealPresented) {
