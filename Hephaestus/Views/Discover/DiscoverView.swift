@@ -3118,6 +3118,14 @@ enum CommentsErrorPresentation {
     }
 }
 
+/// The onscreen button and the keyboard Send key must have identical
+/// admission semantics. Backend retry/idempotency remains owned by submit().
+enum CommentsSubmitEligibilityPolicy {
+    static func canSend(draft: String, isSubmitting: Bool) -> Bool {
+        !isSubmitting && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 /// Only a request that started after the last destructive mutation can
 /// reconcile a lost DELETE response. An older or overlapping GET may contain
 /// a valid-but-stale list and must not unlock a duplicate DELETE.
@@ -3282,6 +3290,14 @@ private struct CommentsSheet: View {
                         .textFieldStyle(.roundedBorder)
                         .lineLimit(1...4)
                         .submitLabel(.send)
+                        .onSubmit {
+                            // The keyboard advertises Send, so it must use
+                            // the SAME idempotent submit path as the paperplane.
+                            guard CommentsSubmitEligibilityPolicy.canSend(
+                                draft: draft, isSubmitting: isSubmitting
+                            ) else { return }
+                            Task { await submit() }
+                        }
                         // Sending owns the draft until the server confirms;
                         // disable edits so the completion cannot erase a
                         // second message typed during the in-flight request.
@@ -3291,7 +3307,9 @@ private struct CommentsSheet: View {
                         ProgressView()
                             .frame(width: 44, height: 44)
                             .accessibilityLabel("Sending comment")
-                    } else if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    } else if CommentsSubmitEligibilityPolicy.canSend(
+                        draft: draft, isSubmitting: isSubmitting
+                    ) {
                         Button {
                             Task { await submit() }
                         } label: {
@@ -3404,7 +3422,9 @@ private struct CommentsSheet: View {
 
     private func submit() async {
         let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty, !isSubmitting else { return }
+        guard CommentsSubmitEligibilityPolicy.canSend(
+            draft: body, isSubmitting: isSubmitting
+        ) else { return }
         let epoch = viewerEpoch
         isSubmitting = true
         if pendingBody != body {
