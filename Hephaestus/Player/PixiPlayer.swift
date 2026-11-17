@@ -1683,7 +1683,14 @@ struct PixiPlayerSheet: View {
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
                     ShareLink(item: shareURL) {
+                        // In a NavigationStack toolbar an icon's intrinsic
+                        // glyph bounds may be smaller than the accessibility
+                        // target. Extend the *interactive label*, not just
+                        // the surrounding ToolbarItemGroup.
                         Image(systemName: "square.and.arrow.up")
+                            .frame(minWidth: HephaestusDesign.minimumActionHeight,
+                                   minHeight: HephaestusDesign.minimumActionHeight)
+                            .contentShape(Rectangle())
                     }
                     .accessibilityLabel("Share game")
                     .simultaneousGesture(TapGesture().onEnded {
