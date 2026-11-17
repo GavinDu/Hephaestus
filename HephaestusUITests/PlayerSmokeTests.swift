@@ -271,6 +271,43 @@ final class PlayerSmokeTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    /// Normal Done from a REAL Creator Directory must never send a guest to
+    /// Profile. The actual directory still calls the deployed endpoint; we
+    /// do not seed fake creator IDs or turn a failed JSON request into empty.
+    @MainActor
+    func testArcadePulseCreatorDirectoryNormalDoneKeepsFeedDestination() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        // Deterministic live-feed ERROR state only, not a fake Creator API.
+        app.launchArguments.append("--ui-test-feed-error-state")
+        app.launch()
+        let openDirectory = app.buttons["Discover creators"].firstMatch
+        XCTAssertTrue(openDirectory.waitForExistence(timeout: 15) &&
+                      openDirectory.isHittable,
+                      "Discover must offer the real Creator Directory entry even when feed is unavailable.")
+        openDirectory.tap()
+        let directory = app.navigationBars["Creators"].firstMatch
+        XCTAssertTrue(directory.waitForExistence(timeout: 10),
+                      "The actual native Creator Directory must open.")
+        let done = directory.buttons["Done"].firstMatch
+        XCTAssertTrue(done.exists && done.isHittable)
+        done.tap()
+        XCTAssertFalse(directory.waitForExistence(timeout: 3),
+                       "Normal Done must fully dismiss the Directory sheet.")
+        XCTAssertTrue(openDirectory.waitForExistence(timeout: 8) &&
+                      openDirectory.isHittable,
+                      "Closing Directory normally must return to Discover, not Profile.")
+        XCTAssertFalse(app.buttons["Sign in with Apple"].firstMatch.exists,
+                       "Normal Directory Done cannot trigger a guest sign-in route.")
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = UIDevice.current.userInterfaceIdiom == .pad
+            ? "arcade-pulse-ipad-creator-normal-done-returns-feed"
+            : "arcade-pulse-iphone-creator-normal-done-returns-feed"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+    }
+
     /// Prove the actual Create screen, not a marketing concept, exposes
     /// a reachable photo picker and blocks upload before consent and art.
     @MainActor
