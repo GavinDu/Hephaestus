@@ -1245,7 +1245,7 @@ final class PlayerSmokeTests: XCTestCase {
         let signIn = app.buttons["Sign in with Apple"].firstMatch
         XCTAssertTrue(signIn.waitForExistence(timeout: 15) && signIn.isHittable,
                       "Sidebar Profile must expose a hittable real Apple authentication action.")
-        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 64, "Accessibility5 real Apple target requires 64pt.")
         let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         after.name = "arcade-pulse-ipad-sidebar-xxl-landscape-after-profile"
         after.lifetime = .keepAlways
@@ -1253,11 +1253,61 @@ final class PlayerSmokeTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(signIn.waitForExistence(timeout: 15) && signIn.isHittable,
                       "Rotation must retain a hittable real Profile sign-in action.")
-        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 64, "Accessibility5 real Apple target requires 64pt.")
         let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         portrait.name = "arcade-pulse-ipad-sidebar-xxl-portrait-profile"
         portrait.lifetime = .keepAlways
         add(portrait)
+    }
+
+    /// Native Accessibility5 Apple sign-in geometry on compact iPhone.
+    /// No actual authentication is performed or simulated.
+    @MainActor
+    func testArcadePulseIPhoneAppleSignInDynamicTypeTarget() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("iPhone tab bar and compact landscape regression.")
+        }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+        let profile = app.tabBars.buttons["Profile"].firstMatch
+        XCTAssertTrue(profile.waitForExistence(timeout: 15) && profile.isHittable)
+        profile.tap()
+        let signIn = app.buttons["Sign in with Apple"].firstMatch
+        XCTAssertTrue(signIn.waitForExistence(timeout: 15) && signIn.isHittable)
+        XCTAssertGreaterThanOrEqual(signIn.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 64)
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-iphone-profile-a5-real-apple-portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let deadline = Date().addingTimeInterval(10)
+        while window.frame.width <= window.frame.height && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height)
+        let scroller = app.collectionViews.firstMatch.exists
+            ? app.collectionViews.firstMatch : app.tables.firstMatch
+        for _ in 0..<8 where signIn.exists && !signIn.isHittable {
+            XCTAssertTrue(scroller.exists, "Real Profile List must own scroll")
+            scroller.swipeUp()
+        }
+        let original = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        original.name = "arcade-pulse-iphone-profile-a5-real-apple-landscape"
+        original.lifetime = .keepAlways
+        add(original)
+        XCTAssertTrue(signIn.exists && signIn.isHittable,
+                      "Real Apple sign-in remains reachable at Accessibility5 landscape.")
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 64)
+        XCUIDevice.shared.orientation = .portrait
     }
 
     /// In accessibility text sizes the multi-column explainer is intentionally
