@@ -157,16 +157,22 @@ final class PlayerSmokeTests: XCTestCase {
         // The old source-only .frame on the toolbar Button passed existence,
         // but PR #239's real iPhone/iPad native test rejected its hit target.
         // Require actual XCUI hittability and both measured dimensions.
+        // Preserve original native pixels even if the safe-area host still
+        // constrains Done. A failed hitbox must leave actionable screenshot
+        // evidence, never be made green by broadening XCTest's tolerance.
+        let fullScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        fullScreen.name = "player-real-done-44pt-native-fullscreen"
+        fullScreen.lifetime = .keepAlways
+        add(fullScreen)
+        print("PLAYER_DONE_NATIVE_AX frame=\(done.frame) screen=\(app.windows.firstMatch.frame)")
+        XCTAssertEqual(app.buttons.matching(identifier: "player.done").count, 1,
+                       "One native escape owner only; no duplicate toolbar/overlay Done.")
         XCTAssertTrue(done.isHittable,
                       "Player Done must be physically reachable above WKWebView.")
         XCTAssertGreaterThanOrEqual(done.frame.width, 44,
                                     "Player Done requires an actual >=44pt-wide hit target.")
         XCTAssertGreaterThanOrEqual(done.frame.height, 44,
                                     "Player Done requires an actual >=44pt-tall hit target.")
-        let fullScreen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        fullScreen.name = "player-real-done-44pt-native-fullscreen"
-        fullScreen.lifetime = .keepAlways
-        add(fullScreen)
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "player-after-boot"
         shot.lifetime = .keepAlways
