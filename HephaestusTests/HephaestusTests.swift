@@ -2522,7 +2522,41 @@ struct HephaestusTests {
         documentNonce: String(repeating: "c", count: 32),
         credentialFingerprint: "credential-epoch-1", runtimeSessionID: "session-1"
     )
-    for invalid in [invalidNonce, emptySession, insecureURL] {
+    let malformedURLs = [
+        "https://games.example.test/another?game=sky",
+        "https://games.example.test/player?game=sky&game=sky",
+        "https://games.example.test/player?game=foreign",
+        "https://games.example.test/player?game=sky#fragment",
+        "https://user:secret@games.example.test/player?game=sky"
+    ]
+    let forgedURLIdentities = malformedURLs.map { player in
+        PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: URL(string: player)!,
+            documentNonce: String(repeating: "c", count: 32),
+            credentialFingerprint: "credential-epoch-1",
+            runtimeSessionID: "session-1"
+        )
+    }
+    let invalidSessionIdentities = [
+        "contains space", String(repeating: "😀", count: 128),
+        String(repeating: "s", count: 129),
+        "e\u{301}"
+    ].map { session in
+        PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: url,
+            documentNonce: String(repeating: "c", count: 32),
+            credentialFingerprint: "credential-epoch-1",
+            runtimeSessionID: session
+        )
+    }
+    let overlongCredential = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url,
+        documentNonce: String(repeating: "c", count: 32),
+        credentialFingerprint: String(repeating: "x", count: 257),
+        runtimeSessionID: "session-1"
+    )
+    for invalid in [invalidNonce, emptySession, insecureURL, overlongCredential] +
+        forgedURLIdentities + invalidSessionIdentities {
         #expect(!invalid.isValid)
         let observedLedgerTransition19 = !ledger.record(identity: invalid, expected: invalid,
                                sequence: 1, milliseconds: 1,
