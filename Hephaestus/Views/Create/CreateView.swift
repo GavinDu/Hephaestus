@@ -2,6 +2,24 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+/// One-shot source-owned handoff: the real host Profile must not open
+/// underneath a still-presented Create→Studio sheet.
+struct CreatorStudioProfileDismissGate {
+    private(set) var pendingProfileRoute = false
+
+    mutating func requestAfterStudioDismiss() -> Bool {
+        guard !pendingProfileRoute else { return false }
+        pendingProfileRoute = true
+        return true
+    }
+
+    mutating func consumeAfterStudioDismiss() -> Bool {
+        guard pendingProfileRoute else { return false }
+        pendingProfileRoute = false
+        return true
+    }
+}
+
 /// Photograph a drawing → analyze → generate → confirm → play.
 struct CreateView: View {
     let onOpenProfile: () -> Void
@@ -35,6 +53,7 @@ struct CreateView: View {
     @State private var isPublishing = false
     @State private var playerRequest: PixiPlayerRequest?
     @State private var showsProjects = false
+    @State private var studioProfileDismissGate = CreatorStudioProfileDismissGate()
 
     var body: some View {
         NavigationStack {
@@ -68,10 +87,17 @@ struct CreateView: View {
             .fullScreenCover(item: $playerRequest) { req in
                 PixiPlayerSheet(gameID: req.gameID, title: req.title)
             }
-            .sheet(isPresented: $showsProjects) {
-                CreatorStudioView(onOpenProfile: {
-                    showsProjects = false
+            .sheet(isPresented: $showsProjects, onDismiss: {
+                // Do not change the host TabView selection until SwiftUI
+                // has actually dismissed the native Studio modal.
+                if studioProfileDismissGate.consumeAfterStudioDismiss() {
                     onOpenProfile()
+                }
+            }) {
+                CreatorStudioView(onOpenProfile: {
+                    if studioProfileDismissGate.requestAfterStudioDismiss() {
+                        showsProjects = false
+                    }
                 })
             }
         }
