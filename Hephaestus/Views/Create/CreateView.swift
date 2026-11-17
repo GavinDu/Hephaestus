@@ -196,8 +196,32 @@ struct CreateView: View {
                         .foregroundStyle(ArcadePulseTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("create.sourceConsent.disclosure")
-                    TextField("Optional keywords, separated by commas", text: $keywordsText)
-                        .textFieldStyle(.roundedBorder)
+                    // The default dark-mode roundedBorder style rendered
+                    // a near-black prompt on a black fill in original iPad
+                    // native screenshot evidence (#468). Draw a semantic,
+                    // measurable input instead of an unreadable system tint.
+                    TextField(
+                        "Optional keywords, separated by commas",
+                        text: $keywordsText,
+                        prompt: Text("Optional keywords, separated by commas")
+                            .foregroundColor(.white.opacity(0.84))
+                    )
+                        .font(.body)
+                        .foregroundStyle(ArcadePulseTheme.textPrimary)
+                        .tint(ArcadePulseTheme.electricViolet)
+                        .textFieldStyle(.plain)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 48)
+                        .background(
+                            ArcadePulseTheme.canvas,
+                            in: RoundedRectangle(cornerRadius: 10)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(.white.opacity(0.60), lineWidth: 1)
+                        }
                         .accessibilityIdentifier("create.pick.keywords")
                     Button {
                         Task { await analyze() }
