@@ -761,9 +761,14 @@ final class PlayerSmokeTests: XCTestCase {
             "UICTContentSizeCategoryAccessibilityXXXL"
         ]
         app.launch()
+        let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 15),
+                      "Test must start inside the actual signed-out Library destination.")
         let signIn = app.buttons["library.signIn"].firstMatch
-        XCTAssertTrue(signIn.waitForExistence(timeout: 15),
-                      "Guest Library must show the genuine Apple Profile sign-in entry.")
+        // In an Accessibility5 List, the real sign-in cell is lazily laid
+        // out below the oversized genuine hero: it is NOT present in the
+        // initial portrait accessibility tree. Do not demand existence
+        // before physically scrolling the actual CollectionView.
 
         let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         portrait.name = "arcade-pulse-library-a5-iphone-portrait-before-rotation"
@@ -780,16 +785,24 @@ final class PlayerSmokeTests: XCTestCase {
                              "A true native landscape frame is required for overlay evidence.")
         let tabs = app.tabBars.firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 8))
-        XCTAssertTrue(signIn.waitForExistence(timeout: 8))
+        XCTAssertTrue(library.waitForExistence(timeout: 8),
+                      "Library must remain selected after physical rotation.")
 
-        // SwiftUI List may be a ScrollView or CollectionView; physically
-        // scroll the real Library, not a guessed XCTest Table descendant.
-        for _ in 0..<8 {
-            if signIn.isHittable && signIn.frame.maxY <= tabs.frame.minY - 4 {
+        // SwiftUI List is lazy: the genuine sign-in row can be absent from
+        // the accessibility tree until scrolled on-screen. Original failed
+        // screenshot 14283548914 showed the Accessibility5 hero occupying
+        // the initial screen with Saved Games only just entering view.
+        // Scroll physically, then require real row existence and full
+        // geometry clearance; do not fabricate or bypass the CTA.
+        for _ in 0..<12 {
+            if signIn.exists && signIn.isHittable &&
+               signIn.frame.maxY <= tabs.frame.minY - 4 {
                 break
             }
             app.swipeUp()
         }
+        XCTAssertTrue(signIn.exists,
+                      "Real Library sign-in must materialize after actual native scrolling.")
         XCTAssertTrue(signIn.isHittable,
                       "Real Library sign-in must be reachable at Accessibility5 in landscape.")
         XCTAssertGreaterThanOrEqual(signIn.frame.width, 44)
