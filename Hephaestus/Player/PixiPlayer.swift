@@ -287,19 +287,24 @@ struct PlayerPrewarmSceneMilestoneLedger {
         let runtimeSessionID: String
 
         var isValid: Bool {
-            !gameID.isEmpty &&
-            playerURL.scheme == "https" &&
-            playerURL.host != nil &&
-            playerURL.user == nil && playerURL.password == nil &&
-            playerURL.fragment == nil &&
-            URLComponents(url: playerURL, resolvingAgainstBaseURL: false)?
-                .queryItems?.filter({ $0.name == "game" }).count == 1 &&
-            URLComponents(url: playerURL, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "game" })?.value == gameID &&
-            PlayerNativeDocumentEpochGate.isWellFormed(documentNonce) &&
-            !credentialFingerprint.isEmpty &&
-            !runtimeSessionID.isEmpty &&
-            runtimeSessionID.utf8.count <= 128
+            guard !gameID.isEmpty, gameID.utf8.count <= 128,
+                  playerURL.scheme?.lowercased() == "https",
+                  let host = playerURL.host, !host.isEmpty,
+                  playerURL.user == nil, playerURL.password == nil,
+                  playerURL.fragment == nil,
+                  let components = URLComponents(
+                      url: playerURL, resolvingAgainstBaseURL: false
+                  ),
+                  components.path == "/player",
+                  let gameItems = components.queryItems?.filter({ $0.name == "game" }),
+                  gameItems.count == 1, gameItems[0].value == gameID,
+                  PlayerNativeDocumentEpochGate.isWellFormed(documentNonce),
+                  !credentialFingerprint.isEmpty,
+                  credentialFingerprint.utf8.count <= 256,
+                  (1...128).contains(runtimeSessionID.utf8.count) else { return false }
+            // Mirror the protocol byte contract instead of String.count,
+            // which counts grapheme clusters, not the UTF-8 session bytes.
+            return runtimeSessionID.utf8.allSatisfy { (0x21...0x7e).contains($0) }
         }
     }
 
