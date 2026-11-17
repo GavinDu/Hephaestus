@@ -920,14 +920,55 @@ final class PlayerSmokeTests: XCTestCase {
         self.app = app
         app.launch()
         let more = app.descendants(matching: .any)["More game actions"].firstMatch
-        let retry = app.buttons["Try again"].firstMatch
+        let terminalRetry = app.buttons["Try again"].firstMatch
+        // On a genuinely slow transport the app offers this *nonterminal*
+        // action before showing the terminal Try again button. The old test
+        // never exercised that available real recovery route (#471).
+        let loadingRetry = app.buttons["Retry loading"].firstMatch
         let until = Date().addingTimeInterval(120)
+        var lastRetry = Date()
         while !more.exists && Date() < until {
-            if retry.waitForExistence(timeout: 4) { retry.tap() }
+            // A failed request may be retried after a short cooldown;
+            // while a real fetch is still active, don't repeatedly cancel it.
+            // Use the nonterminal retry only at the bounded 65-second cadence.
+            let elapsed = Date().timeIntervalSince(lastRetry)
+            // Even terminal buttons can survive briefly in XCTest's
+            // accessibility snapshot during the transition to Loading.
+            // A cooldown avoids accidental rapid duplicate Retry taps.
+            let options: [XCUIElement] =
+                terminalRetry.exists && elapsed >= 12 ? [terminalRetry] :
+                elapsed >= 65 ? [loadingRetry] : []
+            for retry in options where retry.exists && retry.isEnabled {
+                let frame = retry.frame
+                guard !frame.isNull, !frame.isEmpty,
+                      frame.midX.isFinite, frame.midY.isFinite,
+                      app.frame.intersects(frame) else { continue }
+                retry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                lastRetry = Date()
+                break
+            }
             _ = more.waitForExistence(timeout: 4)
         }
-        XCTAssertTrue(more.exists && more.isHittable,
-                      "A real settled feed post must expose its More menu.")
+        if !more.exists || !more.isHittable {
+            // An unavailable backend must FAIL this genuine Game Details
+            // gate, never be replaced by a fabricated item or skipped UI.
+            let original = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            original.name = "arcade-pulse-game-details-real-feed-unavailable"
+            original.lifetime = .keepAlways
+            add(original)
+            let terminalLibrary = app.buttons["feed.error.library"].firstMatch
+            let slowLibrary = app.buttons["feed.loading.library"].firstMatch
+            let library = terminalLibrary.exists ? terminalLibrary : slowLibrary
+            if library.exists && library.isHittable {
+                XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+                library.tap()
+                let genuineLibrary = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+                XCTAssertTrue(genuineLibrary.waitForExistence(timeout: 10),
+                              "Unavailable game details must retain real Library escape.")
+            }
+            XCTFail("A real settled feed never supplied a hittable More action after honest bounded retries.")
+            return
+        }
         more.tap()
         let details = app.buttons["Game details"].firstMatch
         XCTAssertTrue(details.waitForExistence(timeout: 5))
@@ -1323,7 +1364,7 @@ final class PlayerSmokeTests: XCTestCase {
         let signIn = app.buttons["Sign in with Apple"].firstMatch
         XCTAssertTrue(signIn.waitForExistence(timeout: 15) && signIn.isHittable,
                       "Sidebar Profile must expose a hittable real Apple authentication action.")
-        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 64, "Accessibility5 real Apple target requires 64pt.")
         let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         after.name = "arcade-pulse-ipad-sidebar-xxl-landscape-after-profile"
         after.lifetime = .keepAlways
@@ -1331,11 +1372,61 @@ final class PlayerSmokeTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(signIn.waitForExistence(timeout: 15) && signIn.isHittable,
                       "Rotation must retain a hittable real Profile sign-in action.")
-        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 64, "Accessibility5 real Apple target requires 64pt.")
         let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         portrait.name = "arcade-pulse-ipad-sidebar-xxl-portrait-profile"
         portrait.lifetime = .keepAlways
         add(portrait)
+    }
+
+    /// Native Accessibility5 Apple sign-in geometry on compact iPhone.
+    /// No actual authentication is performed or simulated.
+    @MainActor
+    func testArcadePulseIPhoneAppleSignInDynamicTypeTarget() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("iPhone tab bar and compact landscape regression.")
+        }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+        let profile = app.tabBars.buttons["Profile"].firstMatch
+        XCTAssertTrue(profile.waitForExistence(timeout: 15) && profile.isHittable)
+        profile.tap()
+        let signIn = app.buttons["Sign in with Apple"].firstMatch
+        XCTAssertTrue(signIn.waitForExistence(timeout: 15) && signIn.isHittable)
+        XCTAssertGreaterThanOrEqual(signIn.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 64)
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-iphone-profile-a5-real-apple-portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let deadline = Date().addingTimeInterval(10)
+        while window.frame.width <= window.frame.height && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height)
+        let scroller = app.collectionViews.firstMatch.exists
+            ? app.collectionViews.firstMatch : app.tables.firstMatch
+        for _ in 0..<8 where signIn.exists && !signIn.isHittable {
+            XCTAssertTrue(scroller.exists, "Real Profile List must own scroll")
+            scroller.swipeUp()
+        }
+        let original = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        original.name = "arcade-pulse-iphone-profile-a5-real-apple-landscape"
+        original.lifetime = .keepAlways
+        add(original)
+        XCTAssertTrue(signIn.exists && signIn.isHittable,
+                      "Real Apple sign-in remains reachable at Accessibility5 landscape.")
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 64)
+        XCUIDevice.shared.orientation = .portrait
     }
 
     /// In accessibility text sizes the multi-column explainer is intentionally
