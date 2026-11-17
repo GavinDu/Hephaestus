@@ -2044,6 +2044,24 @@ private struct ForYouPagerView: View {
         }
     }
 
+    /// A card-local gesture is hit-tested by the visible game itself.
+    /// The disabled ScrollView is only an accessibility/automation viewport;
+    /// it must not silently consume a physical iPad portrait swipe before
+    /// any native drag callback. One gesture invokes one reducer transition.
+    private var physicalPageDrag: some Gesture {
+        DragGesture(minimumDistance: 35)
+            .onEnded { value in
+                let offset = ForYouPageLayout.pageOffsetForSwipe(
+                    translation: value.translation,
+                    predictedEndTranslation: value.predictedEndTranslation
+                )
+                diagnosticDragCount += 1
+                diagnosticLastDragY = Int(value.translation.height)
+                diagnosticLastOffset = offset
+                movePage(by: offset)
+            }
+    }
+
     var body: some View {
         GeometryReader { viewport in
             ScrollView(.vertical) {
@@ -2052,6 +2070,8 @@ private struct ForYouPagerView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: viewport.size.height)
                         .id(game.id)
+                        .contentShape(Rectangle())
+                        .highPriorityGesture(physicalPageDrag)
                         .accessibilityElement(children: .contain)
                         .accessibilityHint("Swipe up for the next game")
                 }
@@ -2073,23 +2093,9 @@ private struct ForYouPagerView: View {
             .scrollDisabled(true)
             .scrollIndicators(.hidden)
             .clipped()
-            // Attach the physical page drag to the actual scroll viewport.
-            // With compact landscape removing the scope picker, a gesture on
-            // the outer GeometryReader could miss swipes begun on the page.
-            .contentShape(Rectangle())
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 35)
-                    .onEnded { value in
-                        let offset = ForYouPageLayout.pageOffsetForSwipe(
-                            translation: value.translation,
-                            predictedEndTranslation: value.predictedEndTranslation
-                        )
-                        diagnosticDragCount += 1
-                        diagnosticLastDragY = Int(value.translation.height)
-                        diagnosticLastOffset = offset
-                        movePage(by: offset)
-                    }
-            )
+            // VoiceOver scrolls still use accessibilityScrollAction above.
+            // Physical touch is owned by the one rendered card, rather than
+            // a disabled UIScrollView that can swallow real iPad swipes.
             .onAppear {
                 settledGameID = ForYouPageLayout.reconciledSelection(
                     currentID: settledGameID,
