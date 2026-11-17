@@ -228,6 +228,31 @@ struct PlayerPrewarmV2SceneMetricGate {
     }
 }
 
+/// Fail-closed WebKit origin equality shared by speculative and attached players.
+/// WKSecurityOrigin.port can be 0 for an implicit *standard* HTTP(S) port.
+/// This helper does not authenticate a frame, navigation, document, or session.
+enum PlayerWebKitOriginPolicy {
+    static func matches(
+        backendURL: URL,
+        originScheme: String,
+        originHost: String,
+        originPort: Int
+    ) -> Bool {
+        guard let scheme = backendURL.scheme,
+              scheme == "https" || scheme == "http",
+              let host = backendURL.host, !host.isEmpty,
+              backendURL.user == nil, backendURL.password == nil,
+              (0...65535).contains(originPort)
+        else { return false }
+        let defaultPort = scheme == "https" ? 443 : 80
+        let expectedPort = backendURL.port ?? defaultPort
+        guard (1...65535).contains(expectedPort) else { return false }
+        let observedPort = originPort == 0 ? defaultPort : originPort
+        return originScheme == scheme && originHost == host &&
+            observedPort == expectedPort
+    }
+}
+
 /// Pure native-side provenance policy for speculative WebKit callbacks.
 /// The caller supplies identity/frame/origin from WKScriptMessage itself, not
 /// from browser JSON. URL equality includes the exact game and quality query.
@@ -244,19 +269,12 @@ enum PlayerPrewarmMessageOriginPolicy {
         backendURL: URL
     ) -> Bool {
         guard isCurrentPooledView, !isAttached, isMainFrame,
-              let expectedURL, actualURL == expectedURL,
-              let scheme = backendURL.scheme, let host = backendURL.host
-        else { return false }
-        // WebKit normalizes omitted/default ports to 0 in
-        // WKSecurityOrigin.port. Only normalize 0 to the scheme's known
-        // default: an explicit nondefault backend port must still match
-        // exactly, never admit a foreign origin as a default-port alias.
-        guard scheme == "https" || scheme == "http" else { return false }
-        let defaultPort = scheme == "https" ? 443 : 80
-        let expectedPort = backendURL.port ?? defaultPort
-        let normalizedOriginPort = originPort == 0 ? defaultPort : originPort
-        return originScheme == scheme && originHost == host &&
-            normalizedOriginPort == expectedPort
+              let expectedURL, actualURL == expectedURL else { return false }
+        return PlayerWebKitOriginPolicy.matches(
+            backendURL: backendURL,
+            originScheme: originScheme, originHost: originHost,
+            originPort: originPort
+        )
     }
 }
 
@@ -2379,10 +2397,11 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         private func sameOrigin(_ origin: WKSecurityOrigin) -> Bool {
-            guard let expectedScheme = BackendConfig.baseURL.scheme,
-                  let expectedHost = BackendConfig.baseURL.host else { return false }
-            let expectedPort = BackendConfig.baseURL.port ?? (expectedScheme == "https" ? 443 : 80)
-            return origin.protocol == expectedScheme && origin.host == expectedHost && origin.port == expectedPort
+            PlayerWebKitOriginPolicy.matches(
+                backendURL: BackendConfig.baseURL,
+                originScheme: origin.protocol, originHost: origin.host,
+                originPort: origin.port
+            )
         }
 
         func observeProgress(of webView: WKWebView) {
