@@ -1320,6 +1320,34 @@ final class PlayerSmokeTests: XCTestCase {
         scrolled.name = "arcade-pulse-iphone-profile-a5-explanation-above-tabs"
         scrolled.lifetime = .keepAlways
         add(scrolled)
+
+        // The compact landscape viewport is much shorter than portrait.
+        // Move the real Profile List, never the app root or floating tabs.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let deadline = Date().addingTimeInterval(12)
+        while window.frame.width <= window.frame.height && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "Original landscape Profile screenshots need a truly wide app window.")
+        XCTAssertTrue(scroller.exists)
+        for _ in 0..<10 where !session.exists || !session.isHittable {
+            scroller.swipeDown()
+        }
+        XCTAssertTrue(session.exists && session.label.contains("Session"))
+        XCTAssertFalse(session.label.contains("Ses-"))
+        for _ in 0..<10 where apple.exists && !apple.isHittable {
+            scroller.swipeUp()
+        }
+        XCTAssertTrue(apple.exists && apple.isHittable,
+                      "Genuine Apple sign-in must stay reachable in compact landscape.")
+        XCTAssertGreaterThanOrEqual(apple.frame.height, 64)
+        let wide = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        wide.name = "arcade-pulse-iphone-profile-a5-full-session-landscape"
+        wide.lifetime = .keepAlways
+        add(wide)
+        XCUIDevice.shared.orientation = .portrait
     }
 
     /// Native Accessibility5 Apple sign-in geometry on compact iPhone.
