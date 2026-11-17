@@ -44,6 +44,12 @@ enum CreateErrorPresentation {
                 break
             }
         }
+        // Any transport interruption after tapping Publish can have reached
+        // the server even when no response was received. Require real project
+        // status reconciliation before suggesting another POST.
+        if case .publish = stage {
+            return "Couldn't confirm whether your game was submitted. Check its status in My Projects before trying again."
+        }
         if let network = error as? URLError {
             switch network.code {
             case .notConnectedToInternet, .networkConnectionLost:
@@ -53,16 +59,10 @@ enum CreateErrorPresentation {
                  .serverCertificateHasUnknownRoot:
                 return "A secure connection couldn't be established. Check your network."
             case .timedOut:
-                if case .publish = stage {
-                    return "Couldn't confirm whether your game was submitted. Check its status in My Projects before trying again."
-                }
                 return operation + " is taking too long. Check your connection."
             default:
                 break
             }
-        }
-        if case .publish = stage {
-            return "Couldn't confirm whether your game was submitted. Check its status in My Projects before trying again."
         }
         return operation + " isn't available right now. Please try again."
     }
