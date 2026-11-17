@@ -165,21 +165,66 @@ final class PlayerSmokeTests: XCTestCase {
     /// its server-backed game counts and profile layout. Never inject
     /// invented profile numbers or avatars for screenshot convenience.
     @MainActor
+    /// Wait for a genuine, server-published creator before inspecting native
+    /// Profile/guest routing. A slow feed has a *nonterminal* Retry loading
+    /// action that the old tests ignored, and a terminal Try again action.
+    /// Never synthesize a creator just to make the UI smoke pass (#477).
+    @MainActor
+    private func awaitLiveFeedCreator(_ app: XCUIApplication) -> XCUIElement? {
+        let creator = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "View profile for ")).firstMatch
+        let failedRetry = app.buttons["Try again"].firstMatch
+        let pendingRetry = app.descendants(matching: .any)["feed.retryLoading"].firstMatch
+        let pendingLabelRetry = app.buttons["Retry loading"].firstMatch
+        let deadline = Date().addingTimeInterval(120)
+        var lastRetry = Date()
+        while !creator.exists && Date() < deadline {
+            let elapsed = Date().timeIntervalSince(lastRetry)
+            let available: [XCUIElement] =
+                failedRetry.exists && elapsed >= 12 ? [failedRetry] :
+                elapsed >= 65 ? [pendingRetry, pendingLabelRetry] : []
+            for action in available where action.exists && action.isEnabled {
+                let frame = action.frame
+                let window = app.windows.firstMatch.frame
+                guard !frame.isNull, !frame.isEmpty,
+                      frame.midX.isFinite, frame.midY.isFinite,
+                      window.intersects(frame) else { continue }
+                action.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                lastRetry = Date()
+                break
+            }
+            _ = creator.waitForExistence(timeout: 4)
+        }
+        if creator.exists && creator.isHittable {
+            return creator
+        }
+        // Honest CI failure; the real deployed service supplied no creator.
+        // Capture original pixels BEFORE any optional real Library escape.
+        let original = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        original.name = "arcade-pulse-real-creator-feed-unavailable"
+        original.lifetime = .keepAlways
+        add(original)
+        let terminalLibrary = app.buttons["feed.error.library"].firstMatch
+        let loadingLibrary = app.buttons["feed.loading.library"].firstMatch
+        let library = terminalLibrary.exists ? terminalLibrary : loadingLibrary
+        if library.exists && library.isHittable {
+            XCTAssertGreaterThanOrEqual(library.frame.height, 44,
+                                        "True slow-feed Library escape remains a 44pt native action.")
+            library.tap()
+            let genuineLibrary = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+            XCTAssertTrue(genuineLibrary.waitForExistence(timeout: 10),
+                          "Unavailable creator feed must retain a real Library destination.")
+        }
+        XCTFail("No genuine published creator arrived after bounded real feed retries.")
+        return nil
+    }
+
     func testArcadePulseCreatorProfileRendersLiveData() throws {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         self.app = app
         app.launch()
-        let creator = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "View profile for ")).firstMatch
-        let retry = app.buttons["Try again"].firstMatch
-        let until = Date().addingTimeInterval(120)
-        while !creator.exists && Date() < until {
-            if retry.waitForExistence(timeout: 4) { retry.tap() }
-            _ = creator.waitForExistence(timeout: 4)
-        }
-        XCTAssertTrue(creator.exists,
-                      "The live published game must provide a real creator identity.")
+        guard let creator = awaitLiveFeedCreator(app) else { return }
         creator.tap()
         let header = app.descendants(matching: .any)["creator.profile.header"].firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 30),
@@ -204,15 +249,7 @@ final class PlayerSmokeTests: XCTestCase {
         let app = XCUIApplication()
         self.app = app
         app.launch()
-        let creator = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "View profile for ")).firstMatch
-        let retry = app.buttons["Try again"].firstMatch
-        let deadline = Date().addingTimeInterval(120)
-        while !creator.exists && Date() < deadline {
-            if retry.exists && retry.isHittable { retry.tap() }
-            _ = creator.waitForExistence(timeout: 5)
-        }
-        XCTAssertTrue(creator.exists, "A real published creator must be available; never use a fake test identity.")
+        guard let creator = awaitLiveFeedCreator(app) else { return }
         creator.tap()
         let header = app.descendants(matching: .any)["creator.profile.header"].firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 25))
