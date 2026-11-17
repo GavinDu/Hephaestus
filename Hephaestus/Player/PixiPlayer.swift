@@ -1776,6 +1776,7 @@ struct PixiPlayerSheet: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Share game")
+                    .accessibilityIdentifier("player.share")
                     .simultaneousGesture(TapGesture().onEnded {
                         Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "share") }
                     })
