@@ -20,3 +20,12 @@ enum CreatorDiscoveryResultsPolicy {
         resultsMatchCurrentSearch && hasNextCursor && !isLoading
     }
 }
+
+/// Both the navigation search field and topic Apply use one host-owned
+/// request gate. A disabled visible Apply button must not remain actionable
+/// through a keyboard Search submit while a real GET is pending.
+enum CreatorQuerySubmitPolicy {
+    static func canSubmit(isLoading: Bool) -> Bool {
+        !isLoading
+    }
+}
