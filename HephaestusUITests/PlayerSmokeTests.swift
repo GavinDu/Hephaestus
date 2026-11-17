@@ -806,12 +806,16 @@ final class PlayerSmokeTests: XCTestCase {
         let until = Date().addingTimeInterval(120)
         var lastRetry = Date()
         while !more.exists && Date() < until {
-            // A failed request is safe to retry immediately. While a real
-            // fetch is still active, avoid repeatedly cancelling it; only
-            // use the early retry after a bounded 65-second cadence.
+            // A failed request may be retried after a short cooldown;
+            // while a real fetch is still active, don't repeatedly cancel it.
+            // Use the nonterminal retry only at the bounded 65-second cadence.
+            let elapsed = Date().timeIntervalSince(lastRetry)
+            // Even terminal buttons can survive briefly in XCTest's
+            // accessibility snapshot during the transition to Loading.
+            // A cooldown avoids accidental rapid duplicate Retry taps.
             let options: [XCUIElement] =
-                terminalRetry.exists ? [terminalRetry] :
-                Date().timeIntervalSince(lastRetry) >= 65 ? [loadingRetry] : []
+                terminalRetry.exists && elapsed >= 12 ? [terminalRetry] :
+                elapsed >= 65 ? [loadingRetry] : []
             for retry in options where retry.exists && retry.isEnabled {
                 let frame = retry.frame
                 guard !frame.isNull, !frame.isEmpty,
