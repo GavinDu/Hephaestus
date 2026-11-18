@@ -19,4 +19,20 @@ enum CreatorDiscoveryResultsPolicy {
                                isLoading: Bool) -> Bool {
         resultsMatchCurrentSearch && hasNextCursor && !isLoading
     }
+    /// Retry only the failed page from an unchanged, backend-confirmed
+    /// query. A fresh search, edited draft or superseded cursor must instead
+    /// use the ordinary first-page search. Never invent a cursor.
+    static func canRetryFailedPage(
+        failedCursor: String?,
+        nextCursor: String?,
+        resultsMatchCurrentSearch: Bool,
+        draftMatchesAppliedQuery: Bool
+    ) -> Bool {
+        guard resultsMatchCurrentSearch,
+              draftMatchesAppliedQuery,
+              let failedCursor,
+              !failedCursor.isEmpty,
+              failedCursor == nextCursor else { return false }
+        return true
+    }
 }
