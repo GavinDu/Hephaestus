@@ -789,8 +789,8 @@ enum PlayerRuntimeMetricPolicy {
 /// same store the web runtime beacons its errors to, so one incidents
 /// view covers web and native player health. Kinds: `perf` samples are
 /// filed server-side but never counted as incidents; the `ios-*` kinds
-/// are real failure signals and aggregate like web errors. Payloads
-/// Upload only explicitly structured fields, never arbitrary on-device
+/// are real failure signals and aggregate like web errors.
+/// Upload only explicitly structured event fields, never arbitrary on-device
 /// DevLog text. Other caller-supplied event messages require separate audit.
 enum PlayerTelemetryLogUploadPolicy {
     /// Reject arbitrary log text; generic regex scrubbing cannot prove safety.
