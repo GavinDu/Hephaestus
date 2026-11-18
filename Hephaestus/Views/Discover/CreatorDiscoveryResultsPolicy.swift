@@ -63,7 +63,7 @@ enum CreatorDiscoveryResultsPolicy {
     }
 }
 
- 
+
 /// One owner for both the navigation search key and topic Apply.
 /// Keyboard submits must not bypass the visibly disabled Apply action.
 enum CreatorQuerySubmitPolicy {
