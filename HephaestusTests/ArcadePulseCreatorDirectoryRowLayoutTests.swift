@@ -53,4 +53,24 @@ struct ArcadePulseCreatorDirectoryRowLayoutTests {
         #expect(CreatorDirectoryRowLayout.publicGameCount(1) == "1 public game")
         #expect(CreatorDirectoryRowLayout.publicGameCount(2).contains("public games"))
     }
+
+    @Test func emptyOrNonPrintableServerTopicsDoNotBecomeHashtags() {
+        #expect(CreatorDirectoryRowLayout.publicTopicSummary([]) == nil)
+        #expect(CreatorDirectoryRowLayout.publicTopicSummary(["", " ", "\t", "\n"]) == nil)
+        #expect(CreatorDirectoryRowLayout.publicTopicSummary(
+            ["real", "bad\nlabel", " \u{0000} ", "legit"]
+        ) == "#real  #legit")
+    }
+
+    @Test func firstFiveActualPublicTopicsIgnoreBlankEarlierSlots() {
+        let topics = ["", " \t ", "art", "games", "design", "music", "science", "sixth"]
+        #expect(CreatorDirectoryRowLayout.publicTopicSummary(topics) ==
+                "#art  #games  #design  #music  #science")
+    }
+
+    @Test func genuineNonEnglishAndTrimmedTopicsKeepOriginalOrder() {
+        #expect(CreatorDirectoryRowLayout.publicTopicSummary(
+            ["  创意  ", "🎮", "c++", " ألعاب "]
+        ) == "#创意  #🎮  #c++  #ألعاب")
+    }
 }
