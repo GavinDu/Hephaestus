@@ -747,6 +747,22 @@ struct HephaestusTests {
     #expect(!PlayerLoadRetryPolicy.shouldRetryOnForeground(category: nil))
 }
 
+@Test func nativePlayerTelemetryNeverUploadsUnstructuredDevLogTail() {
+    let privateLines = [
+        "Bearer private-bearer-token",
+        "https://private.example.test/games?token=very-secret",
+        "creator user private-identifier",
+        "NSError: connection failed on private host",
+        String(repeating: "S", count: 1000),
+        "first\\nsecond\\nAuthorization: secret"
+    ]
+    #expect(PlayerTelemetryLogUploadPolicy.remoteTail(from: privateLines).isEmpty)
+    #expect(PlayerTelemetryLogUploadPolicy.remoteTail(from: []).isEmpty)
+    for line in privateLines {
+        #expect(PlayerTelemetryLogUploadPolicy.remoteTail(from: [line]).isEmpty)
+    }
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
