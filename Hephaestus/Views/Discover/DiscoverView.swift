@@ -6,6 +6,32 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+/// The Feed Preferences sheet may only offer actual backend topics or
+/// already persisted muted choices. A malformed server token cannot consume
+/// a Toggle/VoiceOver row. Do not fabricate categories or normalize the
+/// persisted muted key, which must still be removable as its original value.
+enum FeedPreferenceTopicPolicy {
+    private static func usableLabel(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && !trimmed.unicodeScalars.contains {
+            CharacterSet.controlCharacters.contains($0)
+        }
+    }
+
+    static func availableTopics(
+        feedTopics: [[String]],
+        mutedTopics: Set<String>
+    ) -> [String] {
+        let genuine = feedTopics.lazy.flatMap { $0 }.compactMap { raw -> String? in
+            guard usableLabel(raw) else { return nil }
+            return raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        // Keep the exact persisted key for Toggle selection/save semantics.
+        let previouslyMuted = mutedTopics.filter(usableLabel)
+        return Array(Set(Array(genuine) + Array(previouslyMuted))).sorted()
+    }
+}
+
 // MARK: - Discover
 
 private struct PlayerResultPresentation: Identifiable {
@@ -200,7 +226,10 @@ struct DiscoverView: View {
     }
 
     private var availableTopics: [String] {
-        Array(Set(games.flatMap { $0.topics ?? [] }.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty } + Array(mutedTopics))).sorted()
+        FeedPreferenceTopicPolicy.availableTopics(
+            feedTopics: games.compactMap { $0.topics },
+            mutedTopics: mutedTopics
+        )
     }
 
     private var feedGridColumns: [GridItem] {
