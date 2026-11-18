@@ -589,17 +589,31 @@ final class PlayerSmokeTests: XCTestCase {
                               "arcade-pulse-stalled-feed-iphone-portrait"
         timeout.lifetime = .keepAlways
         add(timeout)
-        // Retry starts a NEW genuine (in this test: deliberately stalled)
-        // transport. It must not be canceled by the old watchdog generation.
+        // The timed-out feed's recovery is durable; the next real request
+        // may complete its own watchdog between two XCUITest queries.
+        // Check its monotonically increasing transport-attempt ID instead of
+        // depending on a momentary "Loading games" skeleton.
+        let priorValue = retry.value as? String ?? ""
+        XCTAssertTrue(priorValue.hasPrefix("Request attempt "),
+                      "Retry must expose the real feed request-attempt count.")
+        guard let previousAttempt = Int(String(
+            priorValue.split(separator: " ").last ?? ""
+        )) else {
+            XCTFail("Recovery attempt is not an integer: \(priorValue)")
+            return
+        }
         retry.tap()
-        // The loader HStack is intentionally one accessibility element
-        // labelled "Loading games", not a separately exposed static text.
-        let loading = app.descendants(matching: .any)["Loading games"].firstMatch
-        XCTAssertTrue(loading.waitForExistence(timeout: 6),
-                      "Retry must leave the prior error and start a new actual transport attempt.")
-        XCTAssertFalse(title.exists, "The old recovery must clear during a new request.")
-        XCTAssertTrue(title.waitForExistence(timeout: 20),
-                      "A new attempt must independently reach its own recovery without mock success.")
+        let nextValue = "Request attempt \(previousAttempt + 1)"
+        let nextRecovery = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true AND value == %@", nextValue),
+            object: retry
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [nextRecovery], timeout: 20), .completed,
+                       "Retry must start one new real request and reach its own recovery.")
+        XCTAssertTrue(title.exists,
+                      "Second timed-out attempt must return to an actionable recovery.")
+        XCTAssertEqual(retry.value as? String, nextValue,
+                       "Watchdog cancellation must not manufacture extra requests.")
         XCTAssertFalse(app.buttons["game.play"].firstMatch.exists)
         XCUIDevice.shared.orientation = .portrait
     }
