@@ -27,6 +27,7 @@ struct CreatorStudioView: View {
     @State private var isLoadingMore = false
     @State private var requestRevision = 0
     @State private var loadError: String?
+    @State private var lastFailureWasReset = false
     @State private var playerRequest: PixiPlayerRequest?
 
     private enum ProjectFilter: String, CaseIterable, Identifiable {
@@ -69,6 +70,7 @@ struct CreatorStudioView: View {
                             confirmedOwner = nil
                             confirmedCredentialDigest = nil
                             loadError = nil
+                            lastFailureWasReset = false
                             isLoadingMore = false
                             isLoading = true
                             Task { await load(reset: true) }
@@ -124,13 +126,17 @@ struct CreatorStudioView: View {
                             }
                             if let loadError {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Label("Previously confirmed projects. Refresh was not completed. " + loadError,
+                                    Label((lastFailureWasReset
+                                        ? "Previously confirmed projects. Refresh was not completed. "
+                                        : "Could not load additional projects. ") + loadError,
                                           systemImage: "exclamationmark.triangle")
                                         .font(.footnote)
                                         .foregroundStyle(.orange)
                                         .fixedSize(horizontal: false, vertical: true)
                                         .accessibilityIdentifier("studio.projects.staleWarning")
-                                    Button("Retry project refresh") { Task { await load(reset: true) } }
+                                    Button(lastFailureWasReset ? "Retry project refresh" : "Retry loading more") {
+                                        Task { await load(reset: lastFailureWasReset) }
+                                    }
                                         .buttonStyle(.bordered)
                                         .frame(minHeight: ArcadePulseTheme.minimumTarget)
                                         .accessibilityIdentifier("studio.projects.retryPrior")
@@ -176,6 +182,7 @@ struct CreatorStudioView: View {
                 confirmedCredentialDigest = nil
                 confirmedFilter = nil
                 loadError = nil
+                lastFailureWasReset = false
                 isLoading = false
                 isLoadingMore = false
                 playerRequest = nil
@@ -430,6 +437,7 @@ struct CreatorStudioView: View {
             confirmedFilter = nil
             isLoading = false
             isLoadingMore = false
+            lastFailureWasReset = false
             loadError = nil
             return
         }
@@ -452,6 +460,7 @@ struct CreatorStudioView: View {
             }
             // A refresh is a new snapshot: do not paginate an old cursor.
             nextCursor = nil
+            lastFailureWasReset = false
             loadError = nil
         } else {
             guard nextCursor != nil, !isLoadingMore, !isLoading else { return }
@@ -486,6 +495,7 @@ struct CreatorStudioView: View {
                 projects.append(contentsOf: response.projects.filter { !known.contains($0.gameID) })
             }
             nextCursor = response.nextCursor
+            lastFailureWasReset = false
             loadError = nil
         } catch {
             guard !Task.isCancelled,
@@ -508,6 +518,7 @@ struct CreatorStudioView: View {
                 confirmedOwner = nil
                 confirmedCredentialDigest = nil
             }
+            lastFailureWasReset = reset
             loadError = CreatorStudioErrorPresentation.message(for: error)
         }
     }
