@@ -1470,6 +1470,21 @@ final class PlayerSmokeTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(rect.height + 0.000001, 44,
                           "Actual toolbar Button must be at least 44pt high, not its wrapper.")
             }
+            // Real 44pt controls must fit together, not merely report
+            // adequate dimensions while covering Search or each other.
+            for i in controls.indices {
+                for j in controls.indices where i < j {
+                    XCTAssertFalse(controls[i].frame.intersects(controls[j].frame),
+                                   "Discover toolbar touch rectangles must not overlap.")
+                }
+            }
+            let nativeSearch = app.searchFields.firstMatch
+            if nativeSearch.exists && nativeSearch.frame.width > 0 {
+                for control in controls {
+                    XCTAssertFalse(control.frame.intersects(nativeSearch.frame),
+                                   "Native toolbar buttons must not cover Find a game.")
+                }
+            }
         }
         requireActualHitTargets("portrait")
         let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
