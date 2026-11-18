@@ -615,6 +615,13 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertEqual(retry.value as? String, nextValue,
                        "Watchdog cancellation must not manufacture extra requests.")
         XCTAssertFalse(app.buttons["game.play"].firstMatch.exists)
+        XCTAssertTrue(library.exists && library.isHittable,
+                      "A second real timeout must preserve the safe Library recovery.")
+        let retried = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        retried.name = isPad ? "arcade-pulse-stalled-feed-ipad-retry-attempt" :
+                               "arcade-pulse-stalled-feed-iphone-retry-attempt"
+        retried.lifetime = .keepAlways
+        add(retried)
         XCUIDevice.shared.orientation = .portrait
     }
 
