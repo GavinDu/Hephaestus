@@ -95,6 +95,10 @@ struct DiscoverView: View {
         }
         .buttonStyle(ArcadePulseRecoveryButtonStyle())
         .accessibilityIdentifier("feed.error.retry")
+        // This stable, non-secret transport-attempt value remains visible
+        // after watchdog recovery; never infer a real request from a
+        // transient loading skeleton or the generation cancellation token.
+        .accessibilityValue("Request attempt \(feedRequestAttemptCount)")
     }
 
     @ViewBuilder private var feedRecoveryLibrary: some View {
@@ -161,6 +165,9 @@ struct DiscoverView: View {
     @State private var isFeedPreferencesPresented = false
     @State private var likedGameIDs = Set<String>()
     @State private var feedRequestCoordinator = FeedRequestCoordinator()
+    // Increments exactly once with a real FeedRequestCoordinator.begin,
+    // not when its watchdog expires or cancels an old generation.
+    @State private var feedRequestAttemptCount = 0
     @State private var nextCursor: String?
     @State private var isLoadingMore = false
     @State private var loadMoreError: String?
@@ -1010,6 +1017,7 @@ struct DiscoverView: View {
             }
             return try await BackendAPI.shared.fetchFeed(scope: requestedScope)
         }
+        feedRequestAttemptCount &+= 1
         isLoading = true
         isSlowLoading = false
         errorMessage = nil
