@@ -6,7 +6,8 @@ struct ArcadePulseForYouSpotlightTopicPolicyTests {
     @Test func invalidProducerStringsNeverBecomeGhostHashtags() {
         let samples: [[String]?] = [nil, [], ["", "   ", "\n", "bad\nline", "\u{0000}"]]
         for sample in samples {
-            #expect(ForYouSpotlightTopicPolicy.summary(sample) == nil)
+            #expect(ForYouSpotlightTopicPolicy.summary(sample)?.visual == nil)
+            #expect(ForYouSpotlightTopicPolicy.summary(sample)?.spoken == nil)
         }
     }
 
