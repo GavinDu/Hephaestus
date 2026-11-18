@@ -1273,11 +1273,20 @@ final class PlayerSmokeTests: XCTestCase {
         ).firstMatch
         let retry = app.buttons["Try again"].firstMatch
         let deadline = Date().addingTimeInterval(90)
+        var lastRetry = Date.distantPast
         while !publishedTitle.exists && Date() < deadline {
-            if retry.waitForExistence(timeout: 3) && retry.isHittable {
+            if retry.exists && retry.isHittable &&
+               Date().timeIntervalSince(lastRetry) >= 20 {
                 retry.tap()
+                lastRetry = Date()
             }
             _ = publishedTitle.waitForExistence(timeout: 3)
+        }
+        if !publishedTitle.exists {
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "arcade-pulse-grid-no-genuine-published-game"
+            failure.lifetime = .keepAlways
+            add(failure)
         }
         XCTAssertTrue(publishedTitle.exists,
                       "A genuine published game must exist before validating its grid actions.")
@@ -1323,6 +1332,26 @@ final class PlayerSmokeTests: XCTestCase {
         evidence.name = "arcade-pulse-real-grid-44pt-actions-portrait"
         evidence.lifetime = .keepAlways
         add(evidence)
+
+        // The same real search/grid must survive physical compact-landscape
+        // rotation; a larger picture export cannot prove tappable geometry.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let rotateDeadline = Date().addingTimeInterval(10)
+        while window.frame.width <= window.frame.height && Date() < rotateDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height)
+        for control in actions {
+            XCTAssertTrue(control.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(control.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        }
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-real-grid-44pt-actions-landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+        XCUIDevice.shared.orientation = .portrait
 
         // Read-only actual navigation, never submit a made-up public comment.
         if comments.isHittable {
