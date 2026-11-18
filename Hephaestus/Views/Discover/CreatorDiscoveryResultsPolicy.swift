@@ -62,3 +62,12 @@ enum CreatorDiscoveryResultsPolicy {
         return true
     }
 }
+
+
+/// One owner for both the navigation search key and topic Apply.
+/// Keyboard submits must not bypass the visibly disabled Apply action.
+enum CreatorQuerySubmitPolicy {
+    static func canSubmit(isLoading: Bool) -> Bool {
+        !isLoading
+    }
+}
