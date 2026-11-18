@@ -778,7 +778,8 @@ struct HephaestusTests {
             "other_error category=unknown")
     #expect(PlayerLoadFailure.safeDiagnostic(for: invalidStatus) ==
             "other_error category=unknown")
-    for error: NSError in [transport, httpDenied, arbitraryDomain, invalidStatus] {
+    let examples: [NSError] = [transport, httpDenied, arbitraryDomain, invalidStatus]
+    for error in examples {
         let safe = PlayerLoadFailure.safeDiagnostic(for: error)
         #expect(!safe.contains(secret))
         #expect(!safe.contains("Authorization"))
