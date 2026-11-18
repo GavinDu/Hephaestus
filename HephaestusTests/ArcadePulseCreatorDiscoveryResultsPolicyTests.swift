@@ -49,4 +49,23 @@ struct ArcadePulseCreatorDiscoveryResultsPolicyTests {
             failedCursor: "page-2", nextCursor: "page-2",
             resultsMatchCurrentSearch: true, draftMatchesAppliedQuery: false))
     }
+    @Test func cursorRetryRejectsAuthorizationAndUntrustedResponses() {
+        #expect(CreatorDiscoveryResultsPolicy.isTransientPageFailure(
+            APIError.badStatus(429)))
+        #expect(CreatorDiscoveryResultsPolicy.isTransientPageFailure(
+            APIError.badStatus(503)))
+        #expect(CreatorDiscoveryResultsPolicy.isTransientPageFailure(
+            URLError(.notConnectedToInternet)))
+        #expect(CreatorDiscoveryResultsPolicy.isTransientPageFailure(
+            URLError(.timedOut)))
+
+        for code in [302, 400, 401, 403, 404] {
+            #expect(!CreatorDiscoveryResultsPolicy.isTransientPageFailure(
+                APIError.badStatus(code)))
+        }
+        #expect(!CreatorDiscoveryResultsPolicy.isTransientPageFailure(
+            APIError.invalidInput("not a creator result")))
+        #expect(!CreatorDiscoveryResultsPolicy.isTransientPageFailure(
+            URLError(.serverCertificateUntrusted)))
+    }
 }
