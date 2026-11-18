@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import Hephaestus
 
 /// Pure source constraints only. No real account tokens, private project
