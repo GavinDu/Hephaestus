@@ -43,7 +43,7 @@ def classify_redirect(location: str | None) -> str:
         if target.scheme.lower() != "https":
             return "redirect_insecure_scheme"
         if (target.hostname or "").lower() != (base.hostname or "").lower() or (
-            target.port != base.port
+            (target.port or 443) != (base.port or 443)
         ):
             return "redirect_cross_origin"
         path = target.path.rstrip("/").lower() or "/"
