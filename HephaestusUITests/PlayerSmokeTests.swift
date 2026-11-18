@@ -1257,6 +1257,85 @@ final class PlayerSmokeTests: XCTestCase {
                       "Dismissing Details must return to the original browsable post.")
     }
 
+    /// Read the title of a real settled backend game, filter by its own
+    /// published title, then measure the actual GRID buttons. A concept,
+    /// test-only game or empty feed cannot satisfy this regression.
+    @MainActor
+    func testArcadePulseGameGridSocialActionsHaveTrue44ptTargets() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+
+        let publishedTitle = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@",
+                        "feed.page.title.")
+        ).firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let deadline = Date().addingTimeInterval(90)
+        while !publishedTitle.exists && Date() < deadline {
+            if retry.waitForExistence(timeout: 3) && retry.isHittable {
+                retry.tap()
+            }
+            _ = publishedTitle.waitForExistence(timeout: 3)
+        }
+        XCTAssertTrue(publishedTitle.exists,
+                      "A genuine published game must exist before validating its grid actions.")
+        let title = publishedTitle.label
+        let firstWord = title.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).first
+        let query = String((firstWord.map(String.init) ?? title).prefix(8))
+        XCTAssertFalse(query.isEmpty)
+
+        let search = app.searchFields.firstMatch
+        if !search.exists { app.swipeDown() }
+        XCTAssertTrue(search.waitForExistence(timeout: 10) && search.isHittable,
+                      "Native Discover search must be reachable for genuine grid browsing.")
+        search.tap()
+        search.typeText(query)
+
+        let like = app.buttons["grid.game.social.like"].firstMatch
+        let comments = app.buttons["grid.game.social.comments"].firstMatch
+        let more = app.buttons["grid.game.social.more"].firstMatch
+        let save = app.buttons["grid.game.social.save"].firstMatch
+        let share = app.buttons["grid.game.social.share"].firstMatch
+        let actions = [like, comments, more, save, share]
+        for _ in 0..<5 where !like.exists || !like.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(like.waitForExistence(timeout: 10) && like.isHittable,
+                      "A real filtered grid card must expose an actual Like action.")
+        for control in actions {
+            XCTAssertTrue(control.waitForExistence(timeout: 5),
+                          "All original grid actions must remain present after wrapping.")
+            let rect = control.frame
+            XCTAssertGreaterThanOrEqual(rect.width, 44,
+                                        "Actual grid action hitbox must be at least 44pt wide.")
+            XCTAssertGreaterThanOrEqual(rect.height, 44,
+                                        "Actual grid action hitbox must be at least 44pt high.")
+        }
+        for i in actions.indices {
+            for j in actions.indices where i < j {
+                XCTAssertFalse(actions[i].frame.intersects(actions[j].frame),
+                               "Wrapped grid actions must not have overlapping touch rectangles.")
+            }
+        }
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "arcade-pulse-real-grid-44pt-actions-portrait"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+
+        // Read-only actual navigation, never submit a made-up public comment.
+        if comments.isHittable {
+            comments.tap()
+            XCTAssertTrue(app.staticTexts["COMMENTS ON"].firstMatch.waitForExistence(timeout: 10),
+                          "The genuine Comments sheet must remain reachable from the grid.")
+            let commentsEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            commentsEvidence.name = "arcade-pulse-real-grid-comments-sheet"
+            commentsEvidence.lifetime = .keepAlways
+            add(commentsEvidence)
+        }
+    }
+
     /// Verify the actual social sheet on a live feed, not the design render.
     /// No synthetic comments or engagement counters are injected.
     @MainActor
