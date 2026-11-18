@@ -8,6 +8,21 @@ import UIKit
 
 // MARK: - Discover
 
+/// Counts only actual FeedRequestCoordinator.begin transport launches.
+/// The watchdog's generation revocation cannot masquerade as a new attempt.
+/// Saturate at UInt64.max instead of wrapping an accessibility identifier.
+struct FeedRequestAttemptCounter {
+    private(set) var count: UInt64
+
+    init(count: UInt64 = 0) { self.count = count }
+
+    mutating func didBeginRequest() {
+        if count < UInt64.max { count += 1 }
+    }
+
+    var accessibilityValue: String { "Request attempt \(count)" }
+}
+
 private struct PlayerResultPresentation: Identifiable {
     let game: FeedGame
     let result: VerifiedRunResult
@@ -98,7 +113,7 @@ struct DiscoverView: View {
         // This stable, non-secret transport-attempt value remains visible
         // after watchdog recovery; never infer a real request from a
         // transient loading skeleton or the generation cancellation token.
-        .accessibilityValue("Request attempt \(feedRequestAttemptCount)")
+        .accessibilityValue(feedRequestAttempts.accessibilityValue)
     }
 
     @ViewBuilder private var feedRecoveryLibrary: some View {
@@ -167,7 +182,7 @@ struct DiscoverView: View {
     @State private var feedRequestCoordinator = FeedRequestCoordinator()
     // Increments exactly once with a real FeedRequestCoordinator.begin,
     // not when its watchdog expires or cancels an old generation.
-    @State private var feedRequestAttemptCount = 0
+    @State private var feedRequestAttempts = FeedRequestAttemptCounter()
     @State private var nextCursor: String?
     @State private var isLoadingMore = false
     @State private var loadMoreError: String?
@@ -1017,7 +1032,7 @@ struct DiscoverView: View {
             }
             return try await BackendAPI.shared.fetchFeed(scope: requestedScope)
         }
-        feedRequestAttemptCount &+= 1
+        feedRequestAttempts.didBeginRequest()
         isLoading = true
         isSlowLoading = false
         errorMessage = nil
