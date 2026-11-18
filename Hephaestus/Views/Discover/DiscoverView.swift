@@ -1,6 +1,7 @@
 import AuthenticationServices
 import AVFoundation
 import Combine
+import Foundation
 import Network
 import PhotosUI
 import SwiftUI
