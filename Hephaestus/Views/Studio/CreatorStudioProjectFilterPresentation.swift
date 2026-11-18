@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The owner-only Studio has five real project-status choices. Showing all
-/// five as side-by-side segments on iPhone or at Accessibility Dynamic Type
+/// five as side-by-side segments on iPhone or at larger Dynamic Type
 /// risks clipped labels and undersized touch regions. Use the system menu
 /// instead; leave filtering and authorization in CreatorStudioView.
 enum CreatorStudioProjectFilterLayout {
@@ -9,7 +9,7 @@ enum CreatorStudioProjectFilterLayout {
         horizontalSizeClass: UserInterfaceSizeClass?,
         dynamicTypeSize: DynamicTypeSize
     ) -> Bool {
-        horizontalSizeClass != .regular || dynamicTypeSize.isAccessibilitySize
+        horizontalSizeClass != .regular || dynamicTypeSize >= .xxLarge
     }
 }
 
