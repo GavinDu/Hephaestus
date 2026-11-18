@@ -507,11 +507,11 @@ struct CreatorStudioView: View {
             // Raw localizedDescription may contain internal API hostnames,
             // request URLs or unauthorized account metadata. Keep diagnostics
             // separate from fixed, user-actionable native error copy.
-            if CreatorStudioErrorPresentation.mustRevokeVisibleProjects(for: error) {
-                // A real 401/403 response revokes authorization to display
-                // even projects loaded in a previous successful page. Merely
-                // showing an error beneath those private cards would leak
-                // unauthorized owner-only titles until sign-out.
+            if CreatorStudioErrorPresentation.mustRevokeVisibleProjects(for: error) ||
+                (reset && !CreatorStudioRefreshRetentionPolicy.isTransient(error)) {
+                // Authorization denial ALWAYS revokes private rows, including
+                // a paginated request. An invalid/unsupported RESET request
+                // must not keep representing old rows as safe refreshed data.
                 projects.removeAll()
                 nextCursor = nil
                 confirmedFilter = nil
@@ -532,6 +532,23 @@ enum CreatorStudioRefreshRetentionPolicy {
         return SHA256.hash(data: Data(token.utf8))
             .map { String(format: "%02x", $0) }.joined()
     }
+    static func isTransient(_ error: Error) -> Bool {
+        if let apiError = error as? APIError,
+           case let .badStatus(status) = apiError {
+            return status == 429 || (500...599).contains(status)
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                 .cannotConnectToHost, .cannotFindHost, .secureConnectionFailed:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
+    }
+
     static func mayRetain(
         hasConfirmedProjects: Bool,
         storedOwner: String?, currentOwner: String,
