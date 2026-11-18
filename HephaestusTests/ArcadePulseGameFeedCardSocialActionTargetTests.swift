@@ -1,3 +1,5 @@
+import Foundation
+import CoreGraphics
 import Testing
 @testable import Hephaestus
 
@@ -5,7 +7,7 @@ import Testing
 /// This source test does not pretend a genuine published game was visible.
 struct ArcadePulseGameFeedCardSocialActionTargetTests {
     @Test func gridSocialIconTouchTargetMeetsMinimumInBothDimensions() {
-        #expect(GameFeedCardSocialActionLayout.minimumHitSize >= 44)
+        #expect(GameFeedCardSocialActionLayout.minimumHitSize >= CGFloat(44))
         #expect(GameFeedCardSocialActionLayout.minimumHitSize ==
                 ArcadePulseTheme.minimumTarget)
     }
