@@ -20,7 +20,10 @@ struct ArcadePulseProfileAppleSignInLayoutTests {
             DynamicTypeSize.accessibility1,
             .accessibility2, .accessibility3, .accessibility4, .accessibility5
         ] {
-            #expect(ProfileAppleSignInLayout.buttonHeight(for: size) == 64)
+            // Design target is 64pt; the implementation uses a 1pt
+            // cushion because the native AX CGRect can round 64 down.
+            #expect(ProfileAppleSignInLayout.buttonHeight(for: size) == 65)
+            #expect(ProfileAppleSignInLayout.buttonHeight(for: size) >= 64)
         }
     }
 }
