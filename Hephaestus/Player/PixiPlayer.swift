@@ -1435,6 +1435,9 @@ struct PixiPlayerSheet: View {
     @State private var reportedThermal = false
     @State private var reportedMemoryWarning = false
     @State private var gameplayStartedAt: Date?
+    // Current attached runtime's renderer *submission*, not GPU-present.
+    // Any retry/sheet epoch revokes the diagnostic immediately.
+    @State private var firstSceneSubmittedForAttempt: (epoch: Int, milliseconds: Int)?
     @State private var didTrackGameplayStart = false
     @State private var verifiedResult: VerifiedRunResult?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
@@ -1642,6 +1645,15 @@ struct PixiPlayerSheet: View {
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             prewarmHit = true
+                        },
+                        onFirstSceneRenderSubmit: { ms in
+                            guard PlayerLaunchCallbackGate.accepts(
+                                expectedEpoch: callbackEpoch, currentEpoch: attempt,
+                                sessionRevoked: sessionRevoked
+                            ) else { return }
+                            firstSceneSubmittedForAttempt = (
+                                epoch: callbackEpoch, milliseconds: ms
+                            )
                         },
                         onFirstInput: {
                             guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
@@ -1886,6 +1898,7 @@ struct PixiPlayerSheet: View {
                 // A prior quick-exit start and completed prewarm must not
                 // leak into retry, connectivity recovery or crash reload.
                 prewarmHit = false
+                firstSceneSubmittedForAttempt = nil
                 gameplayStartedAt = nil
                 didTrackGameplayStart = false
                 verifiedResult = nil
@@ -2124,6 +2137,7 @@ private struct PlayerWebView: UIViewRepresentable {
     /// Declared between onTerminate and onVerifiedRun to match the
     /// call-site argument order (Swift requires the same order).
     var onPrewarmHit: () -> Void = {}
+    let onFirstSceneRenderSubmit: (Int) -> Void
     let onFirstInput: () -> Void
     let onVerifiedRun: (VerifiedRunResult) -> Void
 
@@ -2132,8 +2146,9 @@ private struct PlayerWebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator {
         Coordinator(gameID: gameID, expectedURL: url, onProgress: onProgress,
                     onLoadFinish: onLoadFinish, onLoadFail: onLoadFail,
-                    onTerminate: onTerminate, onFirstInput: onFirstInput,
-                    onVerifiedRun: onVerifiedRun)
+                    onTerminate: onTerminate,
+                    onFirstSceneRenderSubmit: onFirstSceneRenderSubmit,
+                    onFirstInput: onFirstInput, onVerifiedRun: onVerifiedRun)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -2204,6 +2219,7 @@ private struct PlayerWebView: UIViewRepresentable {
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
+        let onFirstSceneRenderSubmit: (Int) -> Void
         let onFirstInput: () -> Void
         let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
@@ -2234,6 +2250,7 @@ private struct PlayerWebView: UIViewRepresentable {
              onLoadFinish: @escaping () -> Void,
              onLoadFail: @escaping (Error) -> Void,
              onTerminate: @escaping () -> Void,
+             onFirstSceneRenderSubmit: @escaping (Int) -> Void,
              onFirstInput: @escaping () -> Void,
              onVerifiedRun: @escaping (VerifiedRunResult) -> Void) {
             self.expectedGameID = gameID
@@ -2242,6 +2259,7 @@ private struct PlayerWebView: UIViewRepresentable {
             self.onLoadFinish = onLoadFinish
             self.onLoadFail = onLoadFail
             self.onTerminate = onTerminate
+            self.onFirstSceneRenderSubmit = onFirstSceneRenderSubmit
             self.onFirstInput = onFirstInput
             self.onVerifiedRun = onVerifiedRun
         }
@@ -2356,6 +2374,14 @@ private struct PlayerWebView: UIViewRepresentable {
                     name: "FirstSceneRenderSubmitted",
                     message: "renderer-submitted-ms=\(ms); not display-presented or interactive"
                 )
+                // All strict main-frame/origin/nonce/typed metric/session
+                // gates have accepted this one-shot renderer milestone.
+                // Recheck attachment lease and session after the actor hop.
+                Task { @MainActor [weak self] in
+                    guard let self, self.acceptsCurrentHostCallbacks,
+                          self.runtimeSessionID == runtimeSessionID else { return }
+                    self.onFirstSceneRenderSubmit(ms)
+                }
             case .firstInput(let ms):
                 guard launchLifecycle.firstInput(milliseconds: ms) else { return }
                 Task { @MainActor [weak self] in
