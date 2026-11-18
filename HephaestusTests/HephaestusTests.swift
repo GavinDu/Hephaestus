@@ -2908,3 +2908,72 @@ struct HephaestusTests {
         isAttached: false, hasPooledView: false
     ))
 }
+
+@Test func webKitOriginPolicyAdmitsOnlyExactBackendOriginAcrossDefaultAndCustomPorts() {
+    let https = URL(string: "https://games.example.test")!
+    let http = URL(string: "http://games.example.test")!
+    let customHTTPS = URL(string: "https://games.example.test:8443")!
+    let customHTTP = URL(string: "http://games.example.test:8123")!
+
+    // An observed WebKit port 0 means the *standard scheme port* only;
+    // it never grants a wildcard authorization for a custom backend.
+    let cases: [(URL, String, String, Int, Bool)] = [
+        (https, "https", "games.example.test", 0, true),
+        (https, "https", "games.example.test", 443, true),
+        (http, "http", "games.example.test", 0, true),
+        (http, "http", "games.example.test", 80, true),
+        (customHTTPS, "https", "games.example.test", 8443, true),
+        (customHTTP, "http", "games.example.test", 8123, true),
+        (customHTTPS, "https", "games.example.test", 0, false),
+        (customHTTPS, "https", "games.example.test", 443, false),
+        (customHTTP, "http", "games.example.test", 0, false),
+        (customHTTP, "http", "games.example.test", 80, false),
+        (https, "http", "games.example.test", 443, false),
+        (https, "https", "evil.example.test", 443, false),
+        (https, "https", "evil.example.test", 0, false),
+        (https, "https", "games.example.test.evil.test", 0, false),
+        (https, "https", "games.example.test", -1, false),
+        (https, "https", "games.example.test", 65536, false),
+        (customHTTPS, "https", "games.example.test", 8123, false),
+        (URL(string: "file:///private/tmp/player")!, "file", "", 0, false),
+        (URL(string: "https://user@games.example.test")!, "https", "games.example.test", 0, false),
+        (URL(string: "https://games.example.test:0")!, "https", "games.example.test", 0, false),
+    ]
+    for (backend, scheme, host, port, expected) in cases {
+        #expect(PlayerWebKitOriginPolicy.matches(
+            backendURL: backend, originScheme: scheme,
+            originHost: host, originPort: port
+        ) == expected)
+    }
+    #expect(!PlayerWebKitOriginPolicy.matches(
+        backendURL: https, originScheme: "https",
+        originHost: "games.example.test", originPort: Int.max
+    ))
+}
+
+@Test func speculativeAndAttachedOriginChecksShareDefaultPortRules() {
+    let backend = URL(string: "https://games.example.test")!
+    let url = URL(string: "https://games.example.test/player?game=fixture")!
+    #expect(PlayerWebKitOriginPolicy.matches(
+        backendURL: backend, originScheme: "https",
+        originHost: "games.example.test", originPort: 0
+    ))
+    #expect(PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: url, actualURL: url, isMainFrame: true,
+        originScheme: "https", originHost: "games.example.test",
+        originPort: 0, backendURL: backend
+    ))
+    #expect(!PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: true,
+        expectedURL: url, actualURL: url, isMainFrame: true,
+        originScheme: "https", originHost: "games.example.test",
+        originPort: 0, backendURL: backend
+    ))
+    #expect(!PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: url, actualURL: url, isMainFrame: false,
+        originScheme: "https", originHost: "games.example.test",
+        originPort: 0, backendURL: backend
+    ))
+}
