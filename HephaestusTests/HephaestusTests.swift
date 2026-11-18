@@ -747,6 +747,59 @@ struct HephaestusTests {
     #expect(!PlayerLoadRetryPolicy.shouldRetryOnForeground(category: nil))
 }
 
+@Test func playerConnectivityRestoredRetryIsNetworkOnlyAndEpochSafe() {
+    // A genuine offline -> online transition after a transport failure is
+    // the only automatic reconnect reason. 4xx package/auth failures remain
+    // visible until an explicit safe route or account/package update.
+    let transientStatuses = [408, 425, 429, 500, 502, 503, 504]
+    for status in transientStatuses {
+        let category = PlayerLoadFailure.category(
+            for: PlayerLoadFailure.httpError(statusCode: status)
+        )
+        #expect(category == .network)
+        #expect(PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: true, isOffline: false, category: category,
+            hasError: true, sessionRevoked: false
+        ))
+    }
+
+    for status in [400, 401, 403, 404, 409, 410, 413, 422, 426] {
+        let category = PlayerLoadFailure.category(
+            for: PlayerLoadFailure.httpError(statusCode: status)
+        )
+        #expect(category != .network)
+        #expect(!PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: true, isOffline: false, category: category,
+            hasError: true, sessionRevoked: false
+        ))
+    }
+
+    for category: PlayerLoadFailure.Category? in
+        [.accessDenied, .unavailable, .invalidPackage, .incompatible, .unknown, nil] {
+        #expect(!PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: true, isOffline: false, category: category,
+            hasError: true, sessionRevoked: false
+        ))
+    }
+
+    // Each callback is a pure current-state decision. A second callback,
+    // a background reconnect, or account revocation cannot create retries.
+    let transitions: [(Bool, Bool, Bool, Bool, Bool)] = [
+        (false, false, true, false, false),
+        (false, true, true, false, false),
+        (true, true, true, false, false),
+        (true, false, false, false, false),
+        (true, false, true, true, false),
+        (true, false, true, false, true),
+    ]
+    for (wasOffline, isOffline, hasError, revoked, expected) in transitions {
+        #expect(PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: wasOffline, isOffline: isOffline, category: .network,
+            hasError: hasError, sessionRevoked: revoked
+        ) == expected)
+    }
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
