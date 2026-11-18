@@ -436,7 +436,21 @@ struct CreatorStudioView: View {
         if reset {
             requestRevision += 1
             isLoading = true
-            projects = []
+            let keepConfirmed = CreatorStudioRefreshRetentionPolicy.mayRetain(
+                hasConfirmedProjects: !projects.isEmpty,
+                storedOwner: confirmedOwner, currentOwner: ownerID,
+                storedCredentialDigest: confirmedCredentialDigest,
+                currentCredentialDigest: CreatorStudioRefreshRetentionPolicy.digest(sessionToken),
+                storedFilter: confirmedFilter?.rawValue,
+                currentFilter: selectedStatus.rawValue
+            )
+            if !keepConfirmed {
+                projects = []
+                confirmedFilter = nil
+                confirmedOwner = nil
+                confirmedCredentialDigest = nil
+            }
+            // A refresh is a new snapshot: do not paginate an old cursor.
             nextCursor = nil
             loadError = nil
         } else {
@@ -464,6 +478,9 @@ struct CreatorStudioView: View {
                   ), selectedStatus == filter else { return }
             if reset {
                 projects = response.projects
+                confirmedFilter = filter
+                confirmedOwner = ownerID
+                confirmedCredentialDigest = CreatorStudioRefreshRetentionPolicy.digest(sessionToken)
             } else {
                 let known = Set(projects.map(\.gameID))
                 projects.append(contentsOf: response.projects.filter { !known.contains($0.gameID) })
@@ -487,6 +504,9 @@ struct CreatorStudioView: View {
                 // unauthorized owner-only titles until sign-out.
                 projects.removeAll()
                 nextCursor = nil
+                confirmedFilter = nil
+                confirmedOwner = nil
+                confirmedCredentialDigest = nil
             }
             loadError = CreatorStudioErrorPresentation.message(for: error)
         }
