@@ -790,12 +790,20 @@ enum PlayerRuntimeMetricPolicy {
 /// view covers web and native player health. Kinds: `perf` samples are
 /// filed server-side but never counted as incidents; the `ios-*` kinds
 /// are real failure signals and aggregate like web errors. Payloads
-/// carry no account identifiers and no user content — game id, event
-/// kind, a message, and the tail of the on-device dev log.
+/// Upload only explicitly structured fields, never arbitrary on-device
+/// DevLog text. Other caller-supplied event messages require separate audit.
+enum PlayerTelemetryLogUploadPolicy {
+    /// Reject arbitrary log text; generic regex scrubbing cannot prove safety.
+    static func remoteTail(from localEntries: [String]) -> [String] {
+        []
+    }
+}
+
 enum PlayerTelemetry {
     static func report(gameID: String?, kind: String, name: String, message: String) {
-        let tail = DevLog.shared.exportText()
-            .split(separator: "\n").suffix(20).map(String.init)
+        // The DevLog remains on-device for authorized diagnosis. Report
+        // only the typed event fields, never historical free-form log lines.
+        let tail = PlayerTelemetryLogUploadPolicy.remoteTail(from: [])
         let report = BackendAPI.PlayerTelemetryReport(
             gameId: gameID ?? "",
             runtimeVersion: "ios-player-1.1",
