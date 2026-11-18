@@ -19,6 +19,15 @@ struct ArcadePulseCreatorStudioProjectFilterLayoutTests {
             horizontalSizeClass: .regular, dynamicTypeSize: .medium
         ))
         #expect(!CreatorStudioProjectFilterLayout.usesMenu(
+            horizontalSizeClass: .regular, dynamicTypeSize: .xLarge
+        ))
+    }
+
+    @Test func regularIPadCollapsesBeforeVeryLargeTextCrowdsFiveSegments() {
+        #expect(CreatorStudioProjectFilterLayout.usesMenu(
+            horizontalSizeClass: .regular, dynamicTypeSize: .xxLarge
+        ))
+        #expect(CreatorStudioProjectFilterLayout.usesMenu(
             horizontalSizeClass: .regular, dynamicTypeSize: .xxxLarge
         ))
     }
