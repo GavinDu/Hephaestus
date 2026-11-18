@@ -747,6 +747,48 @@ struct HephaestusTests {
     #expect(!PlayerLoadRetryPolicy.shouldRetryOnForeground(category: nil))
 }
 
+@Test @MainActor func discoverRetryAttemptCounterOnlyChangesOnTransportBegin() {
+    let coordinator = FeedRequestCoordinator()
+    var counter = FeedRequestAttemptCounter()
+    #expect(counter.count == 0)
+    #expect(counter.accessibilityValue == "Request attempt 0")
+
+    let first = coordinator.begin {
+        try await Task.sleep(for: .seconds(30))
+        throw URLError(.timedOut)
+    }
+    counter.didBeginRequest()
+    #expect(counter.count == 1)
+    #expect(counter.accessibilityValue == "Request attempt 1")
+    // A watchdog revokes an owned generation but never starts transport.
+    #expect(coordinator.expireIfCurrent(first.generation))
+    #expect(!coordinator.expireIfCurrent(first.generation))
+    #expect(counter.count == 1)
+
+    let second = coordinator.begin {
+        try await Task.sleep(for: .seconds(30))
+        throw URLError(.timedOut)
+    }
+    counter.didBeginRequest()
+    #expect(counter.count == 2)
+    #expect(counter.accessibilityValue == "Request attempt 2")
+    coordinator.finishIfCurrent(first.generation)
+    #expect(coordinator.isCurrent(second.generation))
+    #expect(counter.count == 2)
+    second.request.cancel()
+    coordinator.finishIfCurrent(second.generation)
+    #expect(counter.count == 2)
+}
+
+@Test func discoverRetryAttemptCounterSaturatesWithoutOverflow() {
+    var counter = FeedRequestAttemptCounter(count: UInt64.max - 1)
+    counter.didBeginRequest()
+    #expect(counter.count == UInt64.max)
+    #expect(counter.accessibilityValue == "Request attempt \(UInt64.max)")
+    counter.didBeginRequest()
+    #expect(counter.count == UInt64.max)
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
