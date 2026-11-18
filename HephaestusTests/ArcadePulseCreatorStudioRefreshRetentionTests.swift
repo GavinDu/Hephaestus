@@ -57,6 +57,33 @@ struct ArcadePulseCreatorStudioRefreshRetentionTests {
         #expect(CreatorStudioRefreshRetentionPolicy.digest("") == nil)
     }
 
+    @Test func onlyRealTransientFailuresCanRetainPreviouslyConfirmedProjects() {
+        #expect(CreatorStudioRefreshRetentionPolicy.isTransient(
+            APIError.badStatus(429)
+        ))
+        #expect(CreatorStudioRefreshRetentionPolicy.isTransient(
+            APIError.badStatus(500)
+        ))
+        #expect(CreatorStudioRefreshRetentionPolicy.isTransient(
+            URLError(.timedOut)
+        ))
+        #expect(CreatorStudioRefreshRetentionPolicy.isTransient(
+            URLError(.notConnectedToInternet)
+        ))
+        #expect(!CreatorStudioRefreshRetentionPolicy.isTransient(
+            APIError.badStatus(401)
+        ))
+        #expect(!CreatorStudioRefreshRetentionPolicy.isTransient(
+            APIError.badStatus(403)
+        ))
+        #expect(!CreatorStudioRefreshRetentionPolicy.isTransient(
+            APIError.badStatus(404)
+        ))
+        #expect(!CreatorStudioRefreshRetentionPolicy.isTransient(
+            APIError.invalidInput("fixture invalid request")
+        ))
+    }
+
     @Test func unauthorizedServerResponsesRequireImmediateVisibleRevocation() {
         #expect(CreatorStudioErrorPresentation.mustRevokeVisibleProjects(
             for: APIError.badStatus(401)
