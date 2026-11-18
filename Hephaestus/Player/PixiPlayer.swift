@@ -744,6 +744,20 @@ enum PlayerLoadRetryPolicy {
     static func shouldRetryOnForeground(category: PlayerLoadFailure.Category?) -> Bool {
         category == .network
     }
+
+    /// Reconnect must not turn an actionable permanent Game Package or
+    /// entitlement failure into another navigation. A nil/unknown category
+    /// is deliberately not sufficient authorization for an automatic retry.
+    static func shouldRetryOnConnectivityRestored(
+        wasOffline: Bool,
+        isOffline: Bool,
+        category: PlayerLoadFailure.Category?,
+        hasError: Bool,
+        sessionRevoked: Bool
+    ) -> Bool {
+        wasOffline && !isOffline && hasError && !sessionRevoked &&
+            category == .network
+    }
 }
 
 /// Keeps transient network state from covering a game that has already loaded.
@@ -1890,10 +1904,19 @@ struct PixiPlayerSheet: View {
                 didTrackGameplayStart = false
                 verifiedResult = nil
             }
-            .onChange(of: pathMonitor.isOffline) { _, offline in
-                if !offline, loadError != nil, !sessionRevoked {
-                    // Back online after a failed load: one quiet retry.
+            .onChange(of: pathMonitor.isOffline) { wasOffline, offline in
+                if PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+                    wasOffline: wasOffline,
+                    isOffline: offline,
+                    category: loadFailureCategory,
+                    hasError: loadError != nil,
+                    sessionRevoked: sessionRevoked
+                ) {
+                    // Only a real offline-to-online transition after a
+                    // transient transport error may start one quiet retry.
+                    // Permanent/unknown failures remain actionable and intact.
                     loadError = nil
+                    loadFailureCategory = nil
                     isLoading = true
                     progress = 0
                     showSlowHint = false
