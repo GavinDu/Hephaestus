@@ -19,6 +19,28 @@ enum CreatorDiscoveryResultsPolicy {
                                isLoading: Bool) -> Bool {
         resultsMatchCurrentSearch && hasNextCursor && !isLoading
     }
+    /// Never offer a cursor-only retry for an auth/permission failure,
+    /// malformed JSON, or a redirect. These require a new authorized query
+    /// or deployment repair, not repeated use of the same cursor.
+    static func isTransientPageFailure(_ error: Error) -> Bool {
+        if let api = error as? APIError {
+            if case let .badStatus(status) = api {
+                return status == 429 || (500...599).contains(status)
+            }
+            return false
+        }
+        if let network = error as? URLError {
+            switch network.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                 .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
+    }
+
     /// Retry only the failed page from an unchanged, backend-confirmed
     /// query. A fresh search, edited draft or superseded cursor must instead
     /// use the ordinary first-page search. Never invent a cursor.
