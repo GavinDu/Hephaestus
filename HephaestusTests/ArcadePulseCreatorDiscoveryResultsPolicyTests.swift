@@ -12,6 +12,12 @@ struct ArcadePulseCreatorDiscoveryResultsPolicyTests {
             resultsMatchCurrentSearch: true, hasNextCursor: true, isLoading: true))
         #expect(!CreatorDiscoveryResultsPolicy.allowsNextPage(
             resultsMatchCurrentSearch: true, hasNextCursor: false, isLoading: false))
+        #expect(!CreatorDiscoveryResultsPolicy.allowsNextPage(
+            resultsMatchCurrentSearch: true, hasNextCursor: true,
+            isLoading: false, hasError: true))
+        #expect(!CreatorDiscoveryResultsPolicy.allowsNextPage(
+            resultsMatchCurrentSearch: true, hasNextCursor: true,
+            isLoading: false, draftMatchesAppliedQuery: false))
     }
 
     @Test func onlyConfirmedEmptySuccessDisplaysNoCreators() {
