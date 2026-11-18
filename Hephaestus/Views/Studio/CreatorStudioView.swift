@@ -61,6 +61,16 @@ struct CreatorStudioView: View {
                         .pickerStyle(.segmented)
                         .accessibilityIdentifier("studio.project.filter")
                         .onChange(of: selectedStatus) { _, _ in
+                            // Clear other-filter projects synchronously before any GET.
+                            requestRevision += 1
+                            projects = []
+                            nextCursor = nil
+                            confirmedFilter = nil
+                            confirmedOwner = nil
+                            confirmedCredentialDigest = nil
+                            loadError = nil
+                            isLoadingMore = false
+                            isLoading = true
                             Task { await load(reset: true) }
                         }
 
@@ -86,6 +96,12 @@ struct CreatorStudioView: View {
                                 description: Text("Games you create will appear here with their real generation and moderation status."))
                                 .frame(maxWidth: .infinity, minHeight: 240)
                         } else {
+                            if isLoading {
+                                Label("Refreshing previously confirmed projects…", systemImage: "arrow.clockwise")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityIdentifier("studio.projects.refreshingPrior")
+                            }
                             LazyVGrid(
                                 columns: [GridItem(.adaptive(minimum: 265, maximum: 420), spacing: 16)],
                                 alignment: .center, spacing: 16
@@ -94,7 +110,7 @@ struct CreatorStudioView: View {
                                     projectCard(project)
                                 }
                             }
-                            if nextCursor != nil {
+                            if nextCursor != nil && !isLoading {
                                 Button {
                                     Task { await load(reset: false) }
                                 } label: {
@@ -107,9 +123,18 @@ struct CreatorStudioView: View {
                                 .accessibilityIdentifier("studio.loadMore")
                             }
                             if let loadError {
-                                Label(loadError, systemImage: "exclamationmark.triangle")
-                                    .font(.caption)
-                                    .foregroundStyle(.orange)
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Label("Previously confirmed projects. Refresh was not completed. " + loadError,
+                                          systemImage: "exclamationmark.triangle")
+                                        .font(.footnote)
+                                        .foregroundStyle(.orange)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .accessibilityIdentifier("studio.projects.staleWarning")
+                                    Button("Retry project refresh") { Task { await load(reset: true) } }
+                                        .buttonStyle(.bordered)
+                                        .frame(minHeight: ArcadePulseTheme.minimumTarget)
+                                        .accessibilityIdentifier("studio.projects.retryPrior")
+                                }
                             }
                         }
                     }
@@ -147,6 +172,9 @@ struct CreatorStudioView: View {
                 requestRevision += 1
                 projects = []
                 nextCursor = nil
+                confirmedOwner = nil
+                confirmedCredentialDigest = nil
+                confirmedFilter = nil
                 loadError = nil
                 isLoading = false
                 isLoadingMore = false
@@ -397,6 +425,11 @@ struct CreatorStudioView: View {
             requestRevision += 1
             projects = []
             nextCursor = nil
+            confirmedOwner = nil
+            confirmedCredentialDigest = nil
+            confirmedFilter = nil
+            isLoading = false
+            isLoadingMore = false
             loadError = nil
             return
         }
