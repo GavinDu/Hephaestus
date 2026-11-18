@@ -1301,6 +1301,20 @@ final class PlayerSmokeTests: XCTestCase {
                       "Native Discover search must be reachable for genuine grid browsing.")
         search.tap()
         search.typeText(query)
+        // Native search results must be usable after the actual Search key,
+        // not merely geometrically present underneath the software keyboard.
+        let keyboardSearch = app.keyboards.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "search")
+        ).firstMatch
+        XCTAssertTrue(keyboardSearch.waitForExistence(timeout: 8),
+                      "Real searchable grid must provide the native Search action.")
+        keyboardSearch.tap()
+        let keyboardDeadline = Date().addingTimeInterval(8)
+        while app.keyboards.firstMatch.exists && Date() < keyboardDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertFalse(app.keyboards.firstMatch.exists,
+                       "Search must dismiss the keyboard before evaluating grid reachability.")
 
         let like = app.buttons["grid.game.social.like"].firstMatch
         let comments = app.buttons["grid.game.social.comments"].firstMatch
