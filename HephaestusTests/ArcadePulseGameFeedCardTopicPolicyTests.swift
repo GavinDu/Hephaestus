@@ -4,7 +4,8 @@ import Testing
 /// Real published game metadata only. No fake live game, creator or backend.
 struct ArcadePulseGameFeedCardTopicPolicyTests {
     @Test func noGenuineTopicsProducesNeitherVisualNorSpokenHashtag() {
-        for topics: [String]? in [nil, [], ["", " \t ", "\n"]] {
+        let cases: [[String]?] = [nil, [], ["", " \t ", "\n"]]
+        for topics in cases {
             #expect(GameFeedCardTopicPolicy.publicLabels(topics).isEmpty)
             #expect(GameFeedCardTopicPolicy.visualSummary(topics) == nil)
             #expect(GameFeedCardTopicPolicy.accessibilitySummary(topics) == nil)
