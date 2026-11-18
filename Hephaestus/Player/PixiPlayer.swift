@@ -228,6 +228,31 @@ struct PlayerPrewarmV2SceneMetricGate {
     }
 }
 
+/// Fail-closed WebKit origin equality shared by speculative and attached players.
+/// WKSecurityOrigin.port can be 0 for an implicit *standard* HTTP(S) port.
+/// This helper does not authenticate a frame, navigation, document, or session.
+enum PlayerWebKitOriginPolicy {
+    static func matches(
+        backendURL: URL,
+        originScheme: String,
+        originHost: String,
+        originPort: Int
+    ) -> Bool {
+        guard let scheme = backendURL.scheme,
+              scheme == "https" || scheme == "http",
+              let host = backendURL.host, !host.isEmpty,
+              backendURL.user == nil, backendURL.password == nil,
+              (0...65535).contains(originPort)
+        else { return false }
+        let defaultPort = scheme == "https" ? 443 : 80
+        let expectedPort = backendURL.port ?? defaultPort
+        guard (1...65535).contains(expectedPort) else { return false }
+        let observedPort = originPort == 0 ? defaultPort : originPort
+        return originScheme == scheme && originHost == host &&
+            observedPort == expectedPort
+    }
+}
+
 /// Pure native-side provenance policy for speculative WebKit callbacks.
 /// The caller supplies identity/frame/origin from WKScriptMessage itself, not
 /// from browser JSON. URL equality includes the exact game and quality query.
@@ -244,19 +269,44 @@ enum PlayerPrewarmMessageOriginPolicy {
         backendURL: URL
     ) -> Bool {
         guard isCurrentPooledView, !isAttached, isMainFrame,
-              let expectedURL, actualURL == expectedURL,
-              let scheme = backendURL.scheme, let host = backendURL.host
-        else { return false }
-        // WebKit normalizes omitted/default ports to 0 in
-        // WKSecurityOrigin.port. Only normalize 0 to the scheme's known
-        // default: an explicit nondefault backend port must still match
-        // exactly, never admit a foreign origin as a default-port alias.
-        guard scheme == "https" || scheme == "http" else { return false }
-        let defaultPort = scheme == "https" ? 443 : 80
-        let expectedPort = backendURL.port ?? defaultPort
-        let normalizedOriginPort = originPort == 0 ? defaultPort : originPort
-        return originScheme == scheme && originHost == host &&
-            normalizedOriginPort == expectedPort
+              let expectedURL, actualURL == expectedURL else { return false }
+        return PlayerWebKitOriginPolicy.matches(
+            backendURL: backendURL,
+            originScheme: originScheme, originHost: originHost,
+            originPort: originPort
+        )
+    }
+}
+
+/// Pure native-only routing decision for one pooled WKScriptMessage handler.
+/// Native WebView/credential/lease facts must be supplied by the pool. This
+/// policy alone does NOT authenticate a page, frame, nonce or run result.
+enum PlayerPrewarmMessageOwnershipPolicy {
+    enum Recipient: Equatable {
+        case speculative
+        case attached
+        case drop
+    }
+
+    static func recipient(
+        isAttached: Bool, transferringLease: UInt64?,
+        currentLease: UInt64, hasAttachedReceiver: Bool,
+        credentialScopeCurrent: Bool
+    ) -> Recipient {
+        guard credentialScopeCurrent else { return .drop }
+        if !isAttached {
+            // A retired attachment must not retain a stale receiver/lease.
+            return transferringLease == nil && !hasAttachedReceiver
+                ? .speculative : .drop
+        }
+        guard currentLease != 0 else { return .drop }
+        if let transferringLease {
+            // During take()->Coordinator install, the pool collector owns
+            // the callback only for the exact current nonzero lease.
+            return transferringLease != 0 && transferringLease == currentLease
+                ? .speculative : .drop
+        }
+        return hasAttachedReceiver ? .attached : .drop
     }
 }
 
@@ -801,6 +851,20 @@ enum PlayerLoadRetryPolicy {
     static func shouldRetryOnForeground(category: PlayerLoadFailure.Category?) -> Bool {
         category == .network
     }
+
+    /// Reconnect must not turn an actionable permanent Game Package or
+    /// entitlement failure into another navigation. A nil/unknown category
+    /// is deliberately not sufficient authorization for an automatic retry.
+    static func shouldRetryOnConnectivityRestored(
+        wasOffline: Bool,
+        isOffline: Bool,
+        category: PlayerLoadFailure.Category?,
+        hasError: Bool,
+        sessionRevoked: Bool
+    ) -> Bool {
+        wasOffline && !isOffline && hasError && !sessionRevoked &&
+            category == .network
+    }
 }
 
 /// Keeps transient network state from covering a game that has already loaded.
@@ -1013,6 +1077,21 @@ enum PlayerWebViewPool {
             ) else { return }
             PlayerWebViewPool.discardUnattachedPrewarm()
             DevLog.info(.player, "unattached speculative WebView prewarm evicted after memory warning")
+        }
+    }
+    // Only a *currently unattached* speculative WKWebView is evictable on
+    // background. Evaluate at MainActor callback delivery, not when the
+    // notification was posted: a real Play may have attached in between.
+    private static let backgroundObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
+        forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+    ) { _ in
+        Task { @MainActor in
+            guard PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+                isAttached: PlayerWebViewPool.isAttached,
+                hasPooledView: PlayerWebViewPool.pooledView != nil
+            ) else { return }
+            PlayerWebViewPool.discardUnattachedPrewarm()
+            DevLog.info(.player, "unattached speculative WebView prewarm evicted after background")
         }
     }
     private static var prewarmEpoch: UInt64 = 0
@@ -1237,6 +1316,7 @@ enum PlayerWebViewPool {
     private static func ensureCurrentCredentialScope() {
         _ = sessionObserver
         _ = memoryWarningObserver
+        _ = backgroundObserver
         let current = credentialFingerprint()
         if PlayerSessionCachePolicy.shouldPurge(
             cachedFingerprint: sessionFingerprint, currentFingerprint: current
@@ -1939,10 +2019,19 @@ struct PixiPlayerSheet: View {
                 didTrackGameplayStart = false
                 verifiedResult = nil
             }
-            .onChange(of: pathMonitor.isOffline) { _, offline in
-                if !offline, loadError != nil, !sessionRevoked {
-                    // Back online after a failed load: one quiet retry.
+            .onChange(of: pathMonitor.isOffline) { wasOffline, offline in
+                if PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+                    wasOffline: wasOffline,
+                    isOffline: offline,
+                    category: loadFailureCategory,
+                    hasError: loadError != nil,
+                    sessionRevoked: sessionRevoked
+                ) {
+                    // Only a real offline-to-online transition after a
+                    // transient transport error may start one quiet retry.
+                    // Permanent/unknown failures remain actionable and intact.
                     loadError = nil
+                    loadFailureCategory = nil
                     isLoading = true
                     progress = 0
                     showSlowHint = false
@@ -2428,10 +2517,11 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         private func sameOrigin(_ origin: WKSecurityOrigin) -> Bool {
-            guard let expectedScheme = BackendConfig.baseURL.scheme,
-                  let expectedHost = BackendConfig.baseURL.host else { return false }
-            let expectedPort = BackendConfig.baseURL.port ?? (expectedScheme == "https" ? 443 : 80)
-            return origin.protocol == expectedScheme && origin.host == expectedHost && origin.port == expectedPort
+            PlayerWebKitOriginPolicy.matches(
+                backendURL: BackendConfig.baseURL,
+                originScheme: origin.protocol, originHost: origin.host,
+                originPort: origin.port
+            )
         }
 
         func observeProgress(of webView: WKWebView) {

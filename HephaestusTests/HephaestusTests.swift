@@ -747,6 +747,61 @@ struct HephaestusTests {
     #expect(!PlayerLoadRetryPolicy.shouldRetryOnForeground(category: nil))
 }
 
+@Test func playerConnectivityRestoredRetryIsNetworkOnlyAndEpochSafe() {
+    // A genuine offline -> online transition after a transport failure is
+    // the only automatic reconnect reason. 4xx package/auth failures remain
+    // visible until an explicit safe route or account/package update.
+    let transientStatuses = [408, 425, 429, 500, 502, 503, 504]
+    for status in transientStatuses {
+        let category = PlayerLoadFailure.category(
+            for: PlayerLoadFailure.httpError(statusCode: status)
+        )
+        #expect(category == .network)
+        #expect(PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: true, isOffline: false, category: category,
+            hasError: true, sessionRevoked: false
+        ))
+    }
+
+    for status in [400, 401, 403, 404, 409, 410, 413, 422, 426] {
+        let category = PlayerLoadFailure.category(
+            for: PlayerLoadFailure.httpError(statusCode: status)
+        )
+        #expect(category != .network)
+        #expect(!PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: true, isOffline: false, category: category,
+            hasError: true, sessionRevoked: false
+        ))
+    }
+
+    let permanentCategories: [PlayerLoadFailure.Category?] = [
+        .accessDenied, .unavailable, .invalidPackage, .incompatible, .unknown, nil
+    ]
+    for category in permanentCategories {
+        #expect(!PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: true, isOffline: false, category: category,
+            hasError: true, sessionRevoked: false
+        ))
+    }
+
+    // Each callback is a pure current-state decision. A second callback,
+    // a background reconnect, or account revocation cannot create retries.
+    let transitions: [(Bool, Bool, Bool, Bool, Bool)] = [
+        (false, false, true, false, false),
+        (false, true, true, false, false),
+        (true, true, true, false, false),
+        (true, false, false, false, false),
+        (true, false, true, true, false),
+        (true, false, true, false, true),
+    ]
+    for (wasOffline, isOffline, hasError, revoked, expected) in transitions {
+        #expect(PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: wasOffline, isOffline: isOffline, category: .network,
+            hasError: hasError, sessionRevoked: revoked
+        ) == expected)
+    }
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
@@ -2782,6 +2837,201 @@ struct HephaestusTests {
     ))
 }
 
+
+@Test func purePrewarmRecipientSpeculativeLeaseAndAttachedDecisionMatrix() {
+    typealias Policy = PlayerPrewarmMessageOwnershipPolicy
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: nil, currentLease: 9,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .speculative)
+    // A message delivered after take() but before the Coordinator's lease
+    // acknowledgement still reaches the strict pool-owned v2 collector.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 10, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .speculative)
+    // A retired lease cannot turn into a message capture window.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 10, currentLease: 11,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    // Once the Coordinator is installed, all later WKScriptMessage
+    // callbacks use the same handler but arrive at the attached owner.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: true, credentialScopeCurrent: true
+    ) == .attached)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    // A zero lease is never attached authorization. A detached owner
+    // cannot keep an old Coordinator receiver or a transfer lease.
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 0,
+        hasAttachedReceiver: true, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 0, currentLease: 0,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: true, credentialScopeCurrent: true
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: 10, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: true
+    ) == .drop)
+    // Even a current lease and live receiver cannot bypass a credential
+    // epoch that changed synchronously before the notification callback.
+    #expect(Policy.recipient(
+        isAttached: false, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: false
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: 10, currentLease: 10,
+        hasAttachedReceiver: false, credentialScopeCurrent: false
+    ) == .drop)
+    #expect(Policy.recipient(
+        isAttached: true, transferringLease: nil, currentLease: 10,
+        hasAttachedReceiver: true, credentialScopeCurrent: false
+    ) == .drop)
+}
+
+@Test func purePrewarmOwnershipRejectsRetiredAndForeignLeaseAcross160Transfers() {
+    typealias Policy = PlayerPrewarmMessageOwnershipPolicy
+    for lease in UInt64(1)...UInt64(160) {
+        let stale = lease + 1
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: stale, currentLease: lease,
+            hasAttachedReceiver: false, credentialScopeCurrent: true
+        ) == .drop)
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: lease, currentLease: lease,
+            hasAttachedReceiver: false, credentialScopeCurrent: true
+        ) == .speculative)
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: nil, currentLease: lease,
+            hasAttachedReceiver: true, credentialScopeCurrent: true
+        ) == .attached)
+        #expect(Policy.recipient(
+            isAttached: true, transferringLease: nil, currentLease: lease,
+            hasAttachedReceiver: true, credentialScopeCurrent: false
+        ) == .drop)
+    }
+}
+
+@Test func nativeBackgroundOnlyEvictsCurrentlyUnattachedSpeculativePrewarmAcross256Transitions() {
+    // The UIApplication notification is delivered asynchronously. A prewarm
+    // can become the active WKWebView between post and MainActor handling.
+    // Every decision MUST read the current attachment and pooled view state,
+    // using the same pure native reducer as the shipping memory-warning path.
+    for epoch in 1...256 {
+        let currentlyAttached = epoch % 2 == 0
+        let currentlyPooled = epoch % 3 != 0
+        let permitted = PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+            isAttached: currentlyAttached, hasPooledView: currentlyPooled
+        )
+        #expect(permitted == (!currentlyAttached && currentlyPooled))
+        if currentlyAttached {
+            // An active interactive game is never a disposable prewarm,
+            // including after a stale background notification fires.
+            #expect(!permitted)
+        }
+        if !currentlyPooled {
+            // Already-discarded/speculative view: no stale WebContent work.
+            #expect(!permitted)
+        }
+    }
+
+    // An event posted while still speculative must not evict the game
+    // when the real player attaches before the MainActor callback runs.
+    let stateAtNotification = (isAttached: false, hasPooledView: true)
+    #expect(PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: stateAtNotification.isAttached,
+        hasPooledView: stateAtNotification.hasPooledView
+    ))
+    let stateAtDelivery = (isAttached: true, hasPooledView: true)
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: stateAtDelivery.isAttached,
+        hasPooledView: stateAtDelivery.hasPooledView
+    ))
+    // Conversely, after an interactive view detaches, the pool must never
+    // consider an absent view as a new speculative game.
+    #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
+        isAttached: false, hasPooledView: false
+    ))
+}
+
+@Test func webKitOriginPolicyAdmitsOnlyExactBackendOriginAcrossDefaultAndCustomPorts() {
+    let https = URL(string: "https://games.example.test")!
+    let http = URL(string: "http://games.example.test")!
+    let customHTTPS = URL(string: "https://games.example.test:8443")!
+    let customHTTP = URL(string: "http://games.example.test:8123")!
+
+    // An observed WebKit port 0 means the *standard scheme port* only;
+    // it never grants a wildcard authorization for a custom backend.
+    let cases: [(URL, String, String, Int, Bool)] = [
+        (https, "https", "games.example.test", 0, true),
+        (https, "https", "games.example.test", 443, true),
+        (http, "http", "games.example.test", 0, true),
+        (http, "http", "games.example.test", 80, true),
+        (customHTTPS, "https", "games.example.test", 8443, true),
+        (customHTTP, "http", "games.example.test", 8123, true),
+        (customHTTPS, "https", "games.example.test", 0, false),
+        (customHTTPS, "https", "games.example.test", 443, false),
+        (customHTTP, "http", "games.example.test", 0, false),
+        (customHTTP, "http", "games.example.test", 80, false),
+        (https, "http", "games.example.test", 443, false),
+        (https, "https", "evil.example.test", 443, false),
+        (https, "https", "evil.example.test", 0, false),
+        (https, "https", "games.example.test.evil.test", 0, false),
+        (https, "https", "games.example.test", -1, false),
+        (https, "https", "games.example.test", 65536, false),
+        (customHTTPS, "https", "games.example.test", 8123, false),
+        (URL(string: "file:///private/tmp/player")!, "file", "", 0, false),
+        (URL(string: "https://user@games.example.test")!, "https", "games.example.test", 0, false),
+        (URL(string: "https://games.example.test:0")!, "https", "games.example.test", 0, false),
+    ]
+    for (backend, scheme, host, port, expected) in cases {
+        #expect(PlayerWebKitOriginPolicy.matches(
+            backendURL: backend, originScheme: scheme,
+            originHost: host, originPort: port
+        ) == expected)
+    }
+    #expect(!PlayerWebKitOriginPolicy.matches(
+        backendURL: https, originScheme: "https",
+        originHost: "games.example.test", originPort: Int.max
+    ))
+}
+
+@Test func speculativeAndAttachedOriginChecksShareDefaultPortRules() {
+    let backend = URL(string: "https://games.example.test")!
+    let url = URL(string: "https://games.example.test/player?game=fixture")!
+    #expect(PlayerWebKitOriginPolicy.matches(
+        backendURL: backend, originScheme: "https",
+        originHost: "games.example.test", originPort: 0
+    ))
+    #expect(PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: url, actualURL: url, isMainFrame: true,
+        originScheme: "https", originHost: "games.example.test",
+        originPort: 0, backendURL: backend
+    ))
+    #expect(!PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: true,
+        expectedURL: url, actualURL: url, isMainFrame: true,
+        originScheme: "https", originHost: "games.example.test",
+        originPort: 0, backendURL: backend
+    ))
+    #expect(!PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: url, actualURL: url, isMainFrame: false,
+        originScheme: "https", originHost: "games.example.test",
+        originPort: 0, backendURL: backend
+    ))
+}
 
 @Test func prewarmSceneLedgerRequiresCurrentDocumentIdentityAndLease() {
     let nonce = String(repeating: "a", count: 32)
