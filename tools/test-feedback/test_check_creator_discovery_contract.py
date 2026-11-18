@@ -110,6 +110,7 @@ class CreatorDiscoveryContractTests(unittest.TestCase):
         examples = [
             ("/player?token=SECRET-QUERY", "redirect_to_player"),
             (source + "/player?private=SECRET-QUERY", "redirect_to_player"),
+            (source + ":443/player?private=SECRET-QUERY", "redirect_to_player"),
             ("/login?token=SECRET-QUERY", "redirect_to_login"),
             ("/auth/login?state=SECRET-QUERY", "redirect_to_login"),
             ("/creator-list?email=PRIVATE", "redirect_same_origin_other"),
