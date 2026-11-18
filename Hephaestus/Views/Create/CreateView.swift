@@ -109,6 +109,24 @@ struct CreatePublishAttemptGate {
     }
 }
 
+/// One-shot source-owned host Profile handoff. Native destination changes
+/// cannot happen underneath a still-presented Creator Studio sheet.
+struct CreatorStudioProfileDismissGate {
+    private(set) var pendingProfileRoute = false
+
+    mutating func requestAfterStudioDismiss() -> Bool {
+        guard !pendingProfileRoute else { return false }
+        pendingProfileRoute = true
+        return true
+    }
+
+    mutating func consumeAfterStudioDismiss() -> Bool {
+        guard pendingProfileRoute else { return false }
+        pendingProfileRoute = false
+        return true
+    }
+}
+
 /// Photograph a drawing → analyze → generate → confirm → play.
 struct CreateView: View {
     let onOpenProfile: () -> Void
@@ -146,6 +164,7 @@ struct CreateView: View {
     @State private var publishAttemptGate = CreatePublishAttemptGate()
     @State private var playerRequest: PixiPlayerRequest?
     @State private var showsProjects = false
+    @State private var studioProfileDismissGate = CreatorStudioProfileDismissGate()
 
     var body: some View {
         NavigationStack {
@@ -184,10 +203,17 @@ struct CreateView: View {
             .fullScreenCover(item: $playerRequest) { req in
                 PixiPlayerSheet(gameID: req.gameID, title: req.title)
             }
-            .sheet(isPresented: $showsProjects) {
-                CreatorStudioView(onOpenProfile: {
-                    showsProjects = false
+            .sheet(isPresented: $showsProjects, onDismiss: {
+                // The root Profile destination must own the screen after the
+                // real Studio sheet has fully completed native dismissal.
+                if studioProfileDismissGate.consumeAfterStudioDismiss() {
                     onOpenProfile()
+                }
+            }) {
+                CreatorStudioView(onOpenProfile: {
+                    if studioProfileDismissGate.requestAfterStudioDismiss() {
+                        showsProjects = false
+                    }
                 })
             }
         }
