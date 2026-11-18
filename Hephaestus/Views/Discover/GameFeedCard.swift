@@ -13,7 +13,7 @@ enum PlayableExpressionLayout {
 /// later genuine tag; VoiceOver must announce the identical source subset.
 enum GameFeedCardTopicPolicy {
     static func publicLabels(_ topics: [String]?) -> [String] {
-        let validated = (topics ?? []).compactMap { raw -> String? in
+        let validated = (topics ?? []).lazy.compactMap { raw -> String? in
             let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !label.isEmpty,
                   !label.unicodeScalars.contains(where: {
