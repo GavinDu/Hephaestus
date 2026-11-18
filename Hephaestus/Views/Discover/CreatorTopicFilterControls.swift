@@ -34,8 +34,15 @@ struct CreatorTopicFilterControls: View {
 
     var body: some View {
         controlsLayout {
-            TextField("Filter by topic (optional)", text: $topicText)
+            TextField(
+                "Filter by topic (optional)",
+                text: $topicText,
+                prompt: Text("Filter by topic (optional)")
+                    .foregroundColor(.white.opacity(0.84))
+            )
                 .font(.body)
+                .foregroundStyle(ArcadePulseTheme.textPrimary)
+                .tint(ArcadePulseTheme.electricViolet)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
