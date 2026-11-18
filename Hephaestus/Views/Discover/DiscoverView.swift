@@ -2402,10 +2402,23 @@ private struct CreatorDiscoverySheet: View {
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var loadGeneration = 0
+    // Retry ONLY a failed transient request for the still-current page.
+    // The cursor is a backend navigation token, never synthetic or logged.
+    @State private var failedPaginationCursor: String?
     // A new query must not present previously confirmed creators as current.
     @State private var resultsMatchCurrentSearch = false
     @State private var appliedSearchText = ""
     @State private var appliedTopicText = ""
+
+    private var canRetryFailedPage: Bool {
+        errorMessage != nil && CreatorDiscoveryResultsPolicy.canRetryFailedPage(
+            failedCursor: failedPaginationCursor,
+            nextCursor: nextCursor,
+            resultsMatchCurrentSearch: resultsMatchCurrentSearch,
+            draftMatchesAppliedQuery: searchText == appliedSearchText &&
+                topicText == appliedTopicText
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -2484,7 +2497,10 @@ private struct CreatorDiscoverySheet: View {
                     if CreatorDiscoveryResultsPolicy.allowsNextPage(
                         resultsMatchCurrentSearch: resultsMatchCurrentSearch,
                         hasNextCursor: nextCursor != nil,
-                        isLoading: isLoading
+                        isLoading: isLoading || isLoadingMore,
+                        hasError: errorMessage != nil,
+                        draftMatchesAppliedQuery: searchText == appliedSearchText &&
+                            topicText == appliedTopicText
                     ) {
                         Section {
                             Button {
@@ -2507,7 +2523,10 @@ private struct CreatorDiscoverySheet: View {
                         Label(errorMessage, systemImage: "exclamationmark.triangle")
                             .font(.footnote)
                             .foregroundStyle(.red)
-                        Button("Try again") { Task { await load(reset: true) } }
+                        Button(canRetryFailedPage ? "Retry this page" : "Try again") {
+                            let retryPage = canRetryFailedPage
+                            Task { await load(reset: !retryPage) }
+                        }
                             .frame(minWidth: 44, minHeight: 48)
                             .accessibilityIdentifier("creator.discovery.retry")
                     }
@@ -2550,11 +2569,14 @@ private struct CreatorDiscoverySheet: View {
             appliedSearchText = searchText
             appliedTopicText = topicText
             nextCursor = nil
+            failedPaginationCursor = nil
             resultsMatchCurrentSearch = false
             isLoading = true
             isLoadingMore = false
         } else {
-            guard nextCursor != nil, !isLoadingMore, !isLoading else { return }
+            guard nextCursor != nil, !isLoadingMore, !isLoading,
+                  resultsMatchCurrentSearch, searchText == appliedSearchText,
+                  topicText == appliedTopicText else { return }
             isLoadingMore = true
         }
         let generation = loadGeneration
@@ -2564,6 +2586,7 @@ private struct CreatorDiscoverySheet: View {
             }
         }
         errorMessage = nil
+        failedPaginationCursor = nil
         do {
             let response = try await BackendAPI.shared.fetchCreators(
                 query: appliedSearchText,
@@ -2582,6 +2605,9 @@ private struct CreatorDiscoverySheet: View {
             nextCursor = response.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
         } catch {
             guard generation == loadGeneration else { return }
+            if !reset && CreatorDiscoveryResultsPolicy.isTransientPageFailure(error) {
+                failedPaginationCursor = nextCursor
+            }
             errorMessage = CreatorDiscoveryErrorPresentation.message(
                 for: error, isPagination: !reset
             )
