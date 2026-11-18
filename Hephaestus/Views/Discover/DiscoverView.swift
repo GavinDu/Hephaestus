@@ -2428,7 +2428,7 @@ private struct CreatorDiscoverySheet: View {
                         topicText: $topicText,
                         isLoading: isLoading
                     ) {
-                        Task { await load(reset: true) }
+                        submitCreatorQueryFromUI()
                     }
                 } header: {
                     Text("Topic")
@@ -2536,7 +2536,10 @@ private struct CreatorDiscoverySheet: View {
             .navigationTitle("Creators")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search creators or games")
-            .onSubmit(of: .search) { Task { await load(reset: true) } }
+            // Both native fields route through ONE host-owned Search action.
+            .onSubmit(of: .search) {
+                submitCreatorQueryFromUI()
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
@@ -2561,6 +2564,14 @@ private struct CreatorDiscoverySheet: View {
                 )
             }
         }
+    }
+
+    /// Mark the native UI busy synchronously before starting the real GET.
+    /// Two Search/Apply callbacks in one run-loop cannot duplicate a reset.
+    private func submitCreatorQueryFromUI() {
+        guard CreatorQuerySubmitPolicy.canSubmit(isLoading: isLoading) else { return }
+        isLoading = true
+        Task { await load(reset: true) }
     }
 
     private func load(reset: Bool) async {
