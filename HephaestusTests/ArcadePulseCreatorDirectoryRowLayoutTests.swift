@@ -79,7 +79,7 @@ struct ArcadePulseCreatorDirectoryRowLayoutTests {
         #expect(summary == "#游戏  #art  #design")
         let label = CreatorDirectoryRowLayout.accessibilityLabel(
             creatorID: "server-owned-id", count: 2, topics: topics)
-        #expect(label == "View creator server-owned-id, 2 public games, topics: " + summary!)
+        #expect(label == "View creator server-owned-id, 2 public games, topics: #游戏  #art  #design")
         #expect(!label.contains("bad\nline"))
         #expect(CreatorDirectoryRowLayout.accessibilityLabel(
             creatorID: "server-owned-id", count: 0, topics: ["", "\n"]) ==
