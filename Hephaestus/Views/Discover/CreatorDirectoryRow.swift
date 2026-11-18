@@ -37,6 +37,19 @@ enum CreatorDirectoryRowLayout {
         let summary = visible.joined(separator: "  ")
         return summary.isEmpty ? nil : summary
     }
+
+    /// The parent Creator row button provides an explicit accessibility
+    /// label; it must include the very same filtered topics visible on screen
+    /// or VoiceOver users will lose all real topic information.
+    static func accessibilityLabel(
+        creatorID: String,
+        count: Int,
+        topics: [String]
+    ) -> String {
+        let base = "View creator \(creatorID), \(publicGameCount(count))"
+        guard let summary = publicTopicSummary(topics) else { return base }
+        return base + ", topics: " + summary
+    }
 }
 
 struct CreatorDirectoryRow: View {
