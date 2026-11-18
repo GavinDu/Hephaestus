@@ -16,9 +16,13 @@ enum CreatorDiscoveryResultsPolicy {
 
     static func allowsNextPage(resultsMatchCurrentSearch: Bool,
                                hasNextCursor: Bool,
-                               isLoading: Bool) -> Bool {
-        resultsMatchCurrentSearch && hasNextCursor && !isLoading
+                               isLoading: Bool,
+                               hasError: Bool = false,
+                               draftMatchesAppliedQuery: Bool = true) -> Bool {
+        resultsMatchCurrentSearch && hasNextCursor && !isLoading &&
+            !hasError && draftMatchesAppliedQuery
     }
+
     /// Never offer a cursor-only retry for an auth/permission failure,
     /// malformed JSON, or a redirect. These require a new authorized query
     /// or deployment repair, not repeated use of the same cursor.
