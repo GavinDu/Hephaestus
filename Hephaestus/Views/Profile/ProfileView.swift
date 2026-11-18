@@ -7,7 +7,10 @@ import UIKit
 /// Do not substitute a fake Apple sign-in control or change its identity scope.
 enum ProfileAppleSignInLayout {
     static func buttonHeight(for size: DynamicTypeSize) -> CGFloat {
-        if size.isAccessibilitySize { return 64 }
+        // Native Accessibility frames can round an exact 64pt height to
+        // 63.99999999999994. Keep the real Apple control one point above
+        // the required minimum without relaxing strict XCUITest geometry.
+        if size.isAccessibilitySize { return 65 }
         if size >= .xxLarge { return 56 }
         return 44
     }
