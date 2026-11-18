@@ -8,6 +8,13 @@ enum PlayableExpressionLayout {
     }
 }
 
+/// A tappable social icon must own the complete 44pt hit rectangle,
+/// rather than only the surrounding HStack's layout. Actual compact width
+/// and VoiceOver action ordering are independently tested on real cards.
+enum GameFeedCardSocialActionLayout {
+    static let minimumHitSize: CGFloat = ArcadePulseTheme.minimumTarget
+}
+
 /// A game-first social card. Until the API returns real preview assets and creator
 /// metadata, the cover is a branded visual rather than fabricated artwork.
 struct GameFeedCardSkeleton: View {
@@ -290,12 +297,16 @@ struct GameFeedCard: View {
                 Button(action: onToggleLike) {
                     Image(systemName: isLiked ? "heart.fill" : "heart")
                         .foregroundStyle(isLiked ? Color.pink : Color.primary)
-                        .frame(width: 36, height: 44)
+                        .frame(width: GameFeedCardSocialActionLayout.minimumHitSize,
+                               height: GameFeedCardSocialActionLayout.minimumHitSize)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isLiked ? "Unlike game" : "Like game")
                 Button(action: onOpenComments) {
-                    Image(systemName: "bubble.right").frame(width: 36, height: 44)
+                    Image(systemName: "bubble.right").frame(width: GameFeedCardSocialActionLayout.minimumHitSize,
+                               height: GameFeedCardSocialActionLayout.minimumHitSize)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("View comments")
@@ -306,7 +317,9 @@ struct GameFeedCard: View {
                     }
                     Button("Report game", systemImage: "flag", role: .destructive, action: onReport)
                 } label: {
-                    Image(systemName: "ellipsis").frame(width: 36, height: 44)
+                    Image(systemName: "ellipsis").frame(width: GameFeedCardSocialActionLayout.minimumHitSize,
+                               height: GameFeedCardSocialActionLayout.minimumHitSize)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityLabel("More game options")
                 Button(action: onToggleSaved) {
