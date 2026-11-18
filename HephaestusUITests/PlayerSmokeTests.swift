@@ -1317,9 +1317,13 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertTrue(control.waitForExistence(timeout: 5),
                           "All original grid actions must remain present after wrapping.")
             let rect = control.frame
-            XCTAssertGreaterThanOrEqual(rect.width, 44,
+            // XCUI frame conversion can encode an exact 44pt UIKit
+            // layout width as 43.999999999999986. Only forgive sub-micropt
+            // binary rounding; a genuinely 43.99pt target still fails.
+            let coordinateRoundingTolerance = 0.000001
+            XCTAssertGreaterThanOrEqual(rect.width + coordinateRoundingTolerance, 44,
                                         "Actual grid action hitbox must be at least 44pt wide.")
-            XCTAssertGreaterThanOrEqual(rect.height, 44,
+            XCTAssertGreaterThanOrEqual(rect.height + coordinateRoundingTolerance, 44,
                                         "Actual grid action hitbox must be at least 44pt high.")
         }
         for i in actions.indices {
@@ -1344,8 +1348,9 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertGreaterThan(window.frame.width, window.frame.height)
         for control in actions {
             XCTAssertTrue(control.waitForExistence(timeout: 5))
-            XCTAssertGreaterThanOrEqual(control.frame.width, 44)
-            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+            // Same sub-micropt binary frame tolerance in landscape.
+            XCTAssertGreaterThanOrEqual(control.frame.width + 0.000001, 44)
+            XCTAssertGreaterThanOrEqual(control.frame.height + 0.000001, 44)
         }
         let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         landscape.name = "arcade-pulse-real-grid-44pt-actions-landscape"
