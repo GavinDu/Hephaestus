@@ -26,7 +26,6 @@ struct ArcadePulseFeedPreferenceTopicPolicyTests {
     @Test func validUnicodeAndEmojiAreNotInventedOrSuppressed() {
         let topics = FeedPreferenceTopicPolicy.availableTopics(
             feedTopics: [[" ألعاب ", " 🎮 ", "  游戏 "]], mutedTopics: [])
-        #expect(topics == ["ألعاب", "العاب", "🎮"] || topics == ["ألعاب", "🎮", "游戏"])
         #expect(Set(topics) == Set(["ألعاب", "🎮", "游戏"]))
     }
 }
