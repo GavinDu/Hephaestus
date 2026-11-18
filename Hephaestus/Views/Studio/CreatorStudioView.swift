@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 /// Private owner workspace. The backend, not the device, authorizes every
 /// project. No invented draft, graph, editor, remix or analytics affordance.
@@ -18,6 +19,10 @@ struct CreatorStudioView: View {
     @State private var projects: [CreatorProject] = []
     @State private var selectedStatus: ProjectFilter = .all
     @State private var nextCursor: String?
+    @State private var confirmedFilter: ProjectFilter?
+    @State private var confirmedOwner: String?
+    // Store only a digest, never any prior bearer token in view state.
+    @State private var confirmedCredentialDigest: String?
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var requestRevision = 0
@@ -455,6 +460,26 @@ struct CreatorStudioView: View {
     }
 }
 
+/// A confirmed owner-only shelf can survive transient refresh ONLY for the
+/// exact same owner, credential and filter. 401/403 and session changes purge.
+enum CreatorStudioRefreshRetentionPolicy {
+    static func digest(_ token: String?) -> String? {
+        guard let token, !token.isEmpty else { return nil }
+        return SHA256.hash(data: Data(token.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+    }
+    static func mayRetain(
+        hasConfirmedProjects: Bool,
+        storedOwner: String?, currentOwner: String,
+        storedCredentialDigest: String?, currentCredentialDigest: String?,
+        storedFilter: String?, currentFilter: String
+    ) -> Bool {
+        hasConfirmedProjects && !currentOwner.isEmpty &&
+            storedOwner == currentOwner && storedCredentialDigest != nil &&
+            storedCredentialDigest == currentCredentialDigest &&
+            storedFilter == currentFilter
+    }
+}
 /// Privacy-safe, actionable source for native Studio project-fetch errors.
 /// Project models, permissions and statuses always remain server-authoritative.
 enum CreatorStudioErrorPresentation {
