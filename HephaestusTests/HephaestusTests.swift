@@ -774,8 +774,10 @@ struct HephaestusTests {
         ))
     }
 
-    for category: PlayerLoadFailure.Category? in
-        [.accessDenied, .unavailable, .invalidPackage, .incompatible, .unknown, nil] {
+    let permanentCategories: [PlayerLoadFailure.Category?] = [
+        .accessDenied, .unavailable, .invalidPackage, .incompatible, .unknown, nil
+    ]
+    for category in permanentCategories {
         #expect(!PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
             wasOffline: true, isOffline: false, category: category,
             hasError: true, sessionRevoked: false
