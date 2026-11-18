@@ -73,4 +73,16 @@ struct ArcadePulseCreatorDirectoryRowLayoutTests {
             ["  创意  ", "🎮", "c++", " ألعاب "]
         ) == "#创意  #🎮  #c++  #ألعاب")
     }
+    @Test func actualRowVoiceOverLabelUsesExactlyVisibleFilteredTopics() {
+        let topics = ["", "  游戏  ", " \t ", "art", "bad\nline", "design"]
+        let summary = CreatorDirectoryRowLayout.publicTopicSummary(topics)
+        #expect(summary == "#游戏  #art  #design")
+        let label = CreatorDirectoryRowLayout.accessibilityLabel(
+            creatorID: "server-owned-id", count: 2, topics: topics)
+        #expect(label == "View creator server-owned-id, 2 public games, topics: " + summary!)
+        #expect(!label.contains("bad\nline"))
+        #expect(CreatorDirectoryRowLayout.accessibilityLabel(
+            creatorID: "server-owned-id", count: 0, topics: ["", "\n"]) ==
+            "View creator server-owned-id, 0 public games")
+    }
 }
