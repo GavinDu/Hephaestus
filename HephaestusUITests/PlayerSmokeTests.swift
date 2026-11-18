@@ -388,6 +388,62 @@ final class PlayerSmokeTests: XCTestCase {
         }
     }
 
+    /// Native keyboard Search and Topic Apply are the same real Creator
+    /// query. Never seed an artificial Creator when the deployed API fails.
+    @MainActor
+    func testArcadePulseCreatorTopicSearchKeyboardAndApplyAreReachable() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-feed-error-state")
+        app.launch()
+
+        let discover = app.buttons["Discover creators"].firstMatch
+        XCTAssertTrue(discover.waitForExistence(timeout: 15) && discover.isHittable,
+                      "Real Discover must expose the Creator Directory destination.")
+        discover.tap()
+
+        let topic = app.textFields["creator.discovery.topicInput"].firstMatch
+        let apply = app.buttons["creator.discovery.topicApply"].firstMatch
+        XCTAssertTrue(topic.waitForExistence(timeout: 10) && topic.isHittable)
+        XCTAssertTrue(apply.waitForExistence(timeout: 10) && apply.isHittable)
+        // These must be actual hit targets, not only oversized outer layout.
+        XCTAssertGreaterThanOrEqual(topic.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(apply.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(apply.frame.height, 44)
+
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "arcade-pulse-creator-native-apply-before-keyboard"
+        before.lifetime = .keepAlways
+        add(before)
+
+        topic.tap()
+        topic.typeText("puzzle\n")
+        XCTAssertEqual(topic.value as? String, "puzzle",
+                       "The actual topic input must preserve the typed query.")
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "arcade-pulse-creator-topic-search-portrait"
+        after.lifetime = .keepAlways
+        add(after)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let deadline = Date().addingTimeInterval(10)
+        while window.frame.width <= window.frame.height && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "Record actual landscape viewport, not rotated image metadata.")
+        XCTAssertTrue(topic.waitForExistence(timeout: 10))
+        XCTAssertTrue(apply.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(apply.frame.height, 44)
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-creator-topic-search-landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// Accessibility5 must not turn a readable dark Create prompt into an
     /// unreachable decorative field. Preserve original actual native pixels
     /// without picking a private photo, granting consent, or publishing.
