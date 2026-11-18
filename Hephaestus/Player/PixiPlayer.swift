@@ -1956,6 +1956,7 @@ struct PixiPlayerSheet: View {
                 // or attached pages, pending callbacks and prior results.
                 PlayerWebViewPool.invalidateForSessionChange()
                 verifiedResult = nil
+                firstSceneSubmittedForAttempt = nil
                 gameplayStartedAt = nil
                 didTrackGameplayStart = false
                 isLoading = false
