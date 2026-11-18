@@ -1,10 +1,32 @@
 import AuthenticationServices
 import AVFoundation
 import Combine
+import Foundation
 import Network
 import PhotosUI
 import SwiftUI
 import UIKit
+
+/// The immersive feed must not let blank/control producer topic tokens
+/// consume one of three visible slots or leak nonsense into VoiceOver.
+/// Preserve authentic source order and the same subset for both channels.
+enum ForYouSpotlightTopicPolicy {
+    static func summary(_ topics: [String]?) -> (visual: String, spoken: String)? {
+        let genuine = Array((topics ?? []).lazy.compactMap { raw -> String? in
+            let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty,
+                  !name.unicodeScalars.contains(where: {
+                      CharacterSet.controlCharacters.contains($0)
+                  }) else { return nil }
+            return name
+        }.prefix(3))
+        guard !genuine.isEmpty else { return nil }
+        return (
+            visual: genuine.map { "#\($0)" }.joined(separator: "  "),
+            spoken: "Topics: " + genuine.joined(separator: ", ")
+        )
+    }
+}
 
 // MARK: - Discover
 
@@ -1639,12 +1661,13 @@ private struct ForYouGamePage: View {
                     .foregroundStyle(.white.opacity(0.94))
                     .lineLimit(2)
             }
-            if !isCompact, let topics = game.topics, !topics.isEmpty {
-                Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
+            if !isCompact,
+               let topics = ForYouSpotlightTopicPolicy.summary(game.topics) {
+                Text(topics.visual)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
-                    .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
+                    .accessibilityLabel(topics.spoken)
             }
             if !isCompact, let expression = game.playableExpression, expression.source_visibility == "public" {
                 Button { showsExpressionDetails = true } label: {
