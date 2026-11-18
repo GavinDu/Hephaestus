@@ -39,20 +39,36 @@ struct CreatorTopicFilterControls: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
-                .onSubmit(onApply)
+                // The parent Creator Discovery owns the single native
+                // Search submission event for both search fields.
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+                .background(ArcadePulseTheme.surface,
+                            in: RoundedRectangle(cornerRadius: 12))
+                .contentShape(Rectangle())
                 .frame(maxWidth: .infinity, minHeight: CreatorTopicFilterLayout.minimumTargetHeight)
                 .accessibilityIdentifier("creator.discovery.topicInput")
 
-            Button(action: onApply) {
+            Button {
+                guard CreatorQuerySubmitPolicy.canSubmit(isLoading: isLoading) else { return }
+                onApply()
+            } label: {
                 Text(isLoading ? "Searching…" : "Apply")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.black)
+                    .padding(.horizontal, 18)
+                    // Size the actual button label so its hit region stays
+                    // 48pt, not just a taller inaccessible outer container.
                     .frame(minWidth: 64,
                            maxWidth: stacked ? .infinity : nil,
                            minHeight: CreatorTopicFilterLayout.minimumTargetHeight)
+                    .background(ArcadePulseTheme.electricViolet,
+                                in: RoundedRectangle(cornerRadius: 15))
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.borderedProminent)
-            .tint(ArcadePulseTheme.electricViolet)
+            .buttonStyle(.plain)
+            .opacity(isLoading ? 0.65 : 1)
             .disabled(isLoading)
             .accessibilityLabel(isLoading ? "Searching creators" : "Apply topic filter")
             .accessibilityIdentifier("creator.discovery.topicApply")
