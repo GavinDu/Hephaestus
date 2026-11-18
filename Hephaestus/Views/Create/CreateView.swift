@@ -310,8 +310,32 @@ struct CreateView: View {
                         .foregroundStyle(ArcadePulseTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("create.sourceConsent.disclosure")
-                    TextField("Optional keywords, separated by commas", text: $keywordsText)
-                        .textFieldStyle(.roundedBorder)
+                    TextField(
+                        "Optional keywords, separated by commas",
+                        text: $keywordsText,
+                        prompt: Text("Optional keywords, separated by commas")
+                            .foregroundColor(.white.opacity(0.84))
+                    )
+                        .font(.body)
+                        .foregroundStyle(ArcadePulseTheme.textPrimary)
+                        .tint(ArcadePulseTheme.electricViolet)
+                        .textFieldStyle(.plain)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 48)
+                        .background(
+                            ArcadePulseTheme.canvas,
+                            in: RoundedRectangle(cornerRadius: 10)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(.white.opacity(0.60), lineWidth: 1)
+                        }
+                        // An explicit custom prompt is not automatically
+                        // the field's VoiceOver label on every iOS release.
+                        .accessibilityLabel("Optional keywords, separated by commas")
+                        .accessibilityHint("Describe your game using optional keywords")
                         .accessibilityIdentifier("create.pick.keywords")
                     Button {
                         Task { await analyze() }

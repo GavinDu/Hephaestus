@@ -357,6 +357,16 @@ final class PlayerSmokeTests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
+        // Preserve the initial Create entry's original consent/navigation
+        // behavior; the focused keyboard and typed-value coverage runs in
+        // the dedicated A5 native test below, where the true ScrollView can
+        // move the field clear of floating tabs before tapping it.
+        let keywords = app.textFields["create.pick.keywords"].firstMatch
+        XCTAssertTrue(keywords.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(keywords.frame.height, 44)
+        XCTAssertTrue(keywords.label.contains("Optional keywords"),
+                      "The genuine dark-mode TextField needs a VoiceOver label.")
+
         if !isPad {
             let projects = app.buttons["create.myProjects"].firstMatch
             XCTAssertTrue(projects.waitForExistence(timeout: 10) && projects.isHittable,
@@ -376,6 +386,74 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
                           "Studio must return to the real Profile authentication entry.")
         }
+    }
+
+    /// Accessibility5 must not turn a readable dark Create prompt into an
+    /// unreachable decorative field. Preserve original actual native pixels
+    /// without picking a private photo, granting consent, or publishing.
+    @MainActor
+    func testArcadePulseCreateKeywordsAccessibility5ContrastAndInput() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            app.launchArguments.append("--ui-test-create-entry")
+        }
+        app.launch()
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let tab = app.tabBars.buttons["Create"].firstMatch
+            XCTAssertTrue(tab.waitForExistence(timeout: 15) && tab.isHittable)
+            tab.tap()
+        }
+        let keywords = app.textFields["create.pick.keywords"].firstMatch
+        XCTAssertTrue(keywords.waitForExistence(timeout: 15))
+        // A hittable accessibility node can still sit under translucent
+        // floating tabs. Scroll the REAL SwiftUI Create ScrollView, not app
+        // chrome, until the whole input is inside the unobscured viewport.
+        let scroll = app.scrollViews.firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 8),
+                      "Create must expose an actual scrollable form.")
+        let tabBar = app.tabBars.firstMatch
+        let window = app.windows.firstMatch
+        let unobscuredBottom = tabBar.exists ? tabBar.frame.minY : window.frame.maxY
+        for _ in 0..<10 {
+            let frame = keywords.frame
+            if keywords.isHittable &&
+               frame.minY >= window.frame.minY + 8 &&
+               frame.maxY <= unobscuredBottom - 28 {
+                break
+            }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(keywords.isHittable,
+                      "At Accessibility5 the genuine keyword prompt must be scroll-reachable.")
+        XCTAssertLessThanOrEqual(keywords.frame.maxY, unobscuredBottom - 28,
+                                 "Do not tap keywords through the floating tab bar.")
+        XCTAssertGreaterThanOrEqual(keywords.frame.height, 44)
+        let label = keywords.label
+        XCTAssertTrue(label.contains("Optional keywords"),
+                      "VoiceOver must describe the real input at Accessibility5.")
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "arcade-pulse-create-keywords-a5-native-prompt"
+        before.lifetime = .keepAlways
+        add(before)
+
+        keywords.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8),
+                      "The native Create keywords field must really receive keyboard focus.")
+        keywords.typeText("puzzle")
+        XCTAssertEqual(keywords.value as? String, "puzzle")
+        let analyze = app.buttons["create.pick.analyze"].firstMatch
+        XCTAssertTrue(analyze.exists && !analyze.isEnabled,
+                      "Keywords alone must not bypass actual image upload consent.")
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "arcade-pulse-create-keywords-a5-native-typed"
+        after.lifetime = .keepAlways
+        add(after)
     }
 
     /// The preferences modal may not claim a successful write until the
