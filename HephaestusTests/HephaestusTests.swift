@@ -747,6 +747,52 @@ struct HephaestusTests {
     #expect(!PlayerLoadRetryPolicy.shouldRetryOnForeground(category: nil))
 }
 
+@Test func attachedFirstSceneSheetCallbackRequiresOneMilestoneAndCurrentLeaseAcross160Attempts() {
+    // Existing trusted message admission, one-shot scene and lease policies
+    // must all agree before a renderer-submitted diagnostic reaches the sheet.
+    for iteration in 1...160 {
+        let lease = UInt64(iteration)
+        var lifecycle = PlayerHostLaunchReducer()
+        var sequence = PlayerRuntimeMetricSequenceGate()
+        var oneShot = PlayerFirstSceneRenderSubmissionGate()
+        let acceptedSequence = sequence.accept(
+            metric: "first_scene_render_submit", sequence: 1
+        )
+        let acceptedMS = oneShot.accept(milliseconds: 40)
+        let acceptedLifecycle = lifecycle.sceneSubmitted()
+        let owns = PlayerAttachmentLeasePolicy.mayRecycle(
+            isCurrentPooledView: true, isAttached: true,
+            expectedLease: lease, currentLease: lease
+        )
+        let mayDeliver = PlayerHostCallbackDeliveryPolicy.mayDeliver(
+            ownsCurrentAttachment: owns,
+            acceptsRuntimeEvents: lifecycle.permitsRuntimeEvents
+        )
+        #expect(acceptedSequence && acceptedMS && acceptedLifecycle && mayDeliver)
+
+        let duplicateSequence = sequence.accept(
+            metric: "first_scene_render_submit", sequence: 2
+        )
+        let duplicateMS = oneShot.accept(milliseconds: 50)
+        let duplicateLifecycle = lifecycle.sceneSubmitted()
+        #expect(duplicateSequence && !duplicateMS && !duplicateLifecycle)
+
+        let staleOwns = PlayerAttachmentLeasePolicy.mayRecycle(
+            isCurrentPooledView: true, isAttached: true,
+            expectedLease: lease, currentLease: lease + 1
+        )
+        #expect(!PlayerHostCallbackDeliveryPolicy.mayDeliver(
+            ownsCurrentAttachment: staleOwns,
+            acceptsRuntimeEvents: lifecycle.permitsRuntimeEvents
+        ))
+        lifecycle.detach()
+        #expect(!PlayerHostCallbackDeliveryPolicy.mayDeliver(
+            ownsCurrentAttachment: owns,
+            acceptsRuntimeEvents: lifecycle.permitsRuntimeEvents
+        ))
+    }
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
