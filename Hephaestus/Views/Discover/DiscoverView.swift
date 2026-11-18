@@ -2472,8 +2472,11 @@ private struct CreatorDiscoverySheet: View {
                                 CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
                                     for: creator.creator_id) == nil
                                 ? "Creator unavailable: invalid public identity"
-                                : "View creator \(creator.creator_id), " +
-                                  CreatorDirectoryRowLayout.publicGameCount(creator.post_count)
+                                : CreatorDirectoryRowLayout.accessibilityLabel(
+                                    creatorID: creator.creator_id,
+                                    count: creator.post_count,
+                                    topics: creator.topics
+                                )
                             )
                             .accessibilityIdentifier(
                                 CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
