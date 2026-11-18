@@ -2497,7 +2497,10 @@ private struct CreatorDiscoverySheet: View {
                     if CreatorDiscoveryResultsPolicy.allowsNextPage(
                         resultsMatchCurrentSearch: resultsMatchCurrentSearch,
                         hasNextCursor: nextCursor != nil,
-                        isLoading: isLoading
+                        isLoading: isLoading || isLoadingMore,
+                        hasError: errorMessage != nil,
+                        draftMatchesAppliedQuery: searchText == appliedSearchText &&
+                            topicText == appliedTopicText
                     ) {
                         Section {
                             Button {
@@ -2571,7 +2574,9 @@ private struct CreatorDiscoverySheet: View {
             isLoading = true
             isLoadingMore = false
         } else {
-            guard nextCursor != nil, !isLoadingMore, !isLoading else { return }
+            guard nextCursor != nil, !isLoadingMore, !isLoading,
+                  resultsMatchCurrentSearch, searchText == appliedSearchText,
+                  topicText == appliedTopicText else { return }
             isLoadingMore = true
         }
         let generation = loadGeneration
@@ -2600,9 +2605,9 @@ private struct CreatorDiscoverySheet: View {
             nextCursor = response.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
         } catch {
             guard generation == loadGeneration else { return }
-            failedPaginationCursor = !reset &&
-                CreatorDiscoveryResultsPolicy.isTransientPageFailure(error)
-                ? nextCursor : nil
+            if !reset && CreatorDiscoveryResultsPolicy.isTransientPageFailure(error) {
+                failedPaginationCursor = nextCursor
+            }
             errorMessage = CreatorDiscoveryErrorPresentation.message(
                 for: error, isPagination: !reset
             )
