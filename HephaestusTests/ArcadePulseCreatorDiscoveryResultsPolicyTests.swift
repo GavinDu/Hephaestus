@@ -30,4 +30,23 @@ struct ArcadePulseCreatorDiscoveryResultsPolicyTests {
         #expect(CreatorDiscoveryResultsPolicy.sectionTitle(resultsMatchCurrentSearch: true)
                 == "Creators")
     }
+    @Test func onlySameConfirmedFailedCursorCanRetryPage() {
+        #expect(CreatorDiscoveryResultsPolicy.canRetryFailedPage(
+            failedCursor: "page-2", nextCursor: "page-2",
+            resultsMatchCurrentSearch: true, draftMatchesAppliedQuery: true))
+        for failed in [nil, "", "page-1", "stale-page"] {
+            #expect(!CreatorDiscoveryResultsPolicy.canRetryFailedPage(
+                failedCursor: failed, nextCursor: "page-2",
+                resultsMatchCurrentSearch: true, draftMatchesAppliedQuery: true))
+        }
+        #expect(!CreatorDiscoveryResultsPolicy.canRetryFailedPage(
+            failedCursor: "page-2", nextCursor: nil,
+            resultsMatchCurrentSearch: true, draftMatchesAppliedQuery: true))
+        #expect(!CreatorDiscoveryResultsPolicy.canRetryFailedPage(
+            failedCursor: "page-2", nextCursor: "page-2",
+            resultsMatchCurrentSearch: false, draftMatchesAppliedQuery: true))
+        #expect(!CreatorDiscoveryResultsPolicy.canRetryFailedPage(
+            failedCursor: "page-2", nextCursor: "page-2",
+            resultsMatchCurrentSearch: true, draftMatchesAppliedQuery: false))
+    }
 }
