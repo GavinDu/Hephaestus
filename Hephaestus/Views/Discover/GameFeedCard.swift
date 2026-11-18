@@ -308,6 +308,7 @@ struct GameFeedCard: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
+                        .accessibilityIdentifier("grid.game.social.follow")
                     }
                     Button(action: onToggleLike) {
                         Image(systemName: isLiked ? "heart.fill" : "heart")
@@ -318,6 +319,7 @@ struct GameFeedCard: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(isLiked ? "Unlike game" : "Like game")
+                    .accessibilityIdentifier("grid.game.social.like")
 
                     Button(action: onOpenComments) {
                         Image(systemName: "bubble.right")
@@ -327,6 +329,7 @@ struct GameFeedCard: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("View comments")
+                    .accessibilityIdentifier("grid.game.social.comments")
 
                     Menu {
                         Button("Not interested", systemImage: "hand.thumbsdown",
@@ -344,6 +347,7 @@ struct GameFeedCard: View {
                             .contentShape(Rectangle())
                     }
                     .accessibilityLabel("More game options")
+                    .accessibilityIdentifier("grid.game.social.more")
 
                     Button(action: onToggleSaved) {
                         Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
@@ -354,6 +358,7 @@ struct GameFeedCard: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(isSaved ? "Remove saved game" : "Save game")
+                    .accessibilityIdentifier("grid.game.social.save")
 
                     ShareLink(item: shareURL) {
                         Image(systemName: "square.and.arrow.up")
@@ -370,6 +375,7 @@ struct GameFeedCard: View {
                         ) }
                     })
                     .accessibilityLabel("Share \(game.title)")
+                    .accessibilityIdentifier("grid.game.social.share")
                 }
             }
             .padding(.horizontal, 14)
