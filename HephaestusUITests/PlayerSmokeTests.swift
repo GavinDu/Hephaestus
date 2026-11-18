@@ -1445,6 +1445,65 @@ final class PlayerSmokeTests: XCTestCase {
         add(arrived)
     }
 
+    /// Original iPad AX snapshots showed Refresh games as only 27x36pt
+    /// inside the native ToolbarItem. Verify the REAL inner buttons and
+    /// navigation, not merely source frame modifiers or a fake feed card.
+    @MainActor
+    func testArcadePulseDiscoverToolbarButtonsOwnFull44ptTargets() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+
+        let prefs = app.buttons["feed.toolbar.preferences"].firstMatch
+        let creators = app.buttons["feed.toolbar.creators"].firstMatch
+        let refresh = app.buttons["feed.toolbar.refresh"].firstMatch
+        let controls = [prefs, creators, refresh]
+
+        func requireActualHitTargets(_ orientation: String) {
+            for control in controls {
+                XCTAssertTrue(control.waitForExistence(timeout: 10),
+                              "Actual Discover toolbar must preserve all three controls in \(orientation).")
+                let rect = control.frame
+                XCTAssertGreaterThanOrEqual(rect.width + 0.000001, 44,
+                          "Actual toolbar Button must be at least 44pt wide, not its wrapper.")
+                XCTAssertGreaterThanOrEqual(rect.height + 0.000001, 44,
+                          "Actual toolbar Button must be at least 44pt high, not its wrapper.")
+            }
+        }
+        requireActualHitTargets("portrait")
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-discover-toolbar-44pt-portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let window = app.windows.firstMatch
+            let until = Date().addingTimeInterval(12)
+            while window.frame.width <= window.frame.height && Date() < until {
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+            XCTAssertGreaterThan(window.frame.width, window.frame.height)
+            requireActualHitTargets("iPad landscape")
+            let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            landscape.name = "arcade-pulse-ipad-discover-toolbar-44pt-landscape"
+            landscape.lifetime = .keepAlways
+            add(landscape)
+        }
+
+        // Real owner-backed sheets work even if public feed data is offline.
+        XCTAssertTrue(creators.isHittable)
+        creators.tap()
+        XCTAssertTrue(app.navigationBars["Creators"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(prefs.waitForExistence(timeout: 10) && prefs.isHittable)
+        prefs.tap()
+        XCTAssertTrue(app.navigationBars["Tune your feed"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Done"].firstMatch.tap()
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// P1 #425: old 250pt sidebar at Accessibility5 broke real destination
     /// names *inside words* despite green route smoke. Inspect the untouched
     /// full-screen native frame; do not accept the XCUI label string alone.
