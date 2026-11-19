@@ -1360,6 +1360,29 @@ final class PlayerSmokeTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.2)
         }
         XCTAssertGreaterThan(window.frame.width, window.frame.height)
+        // The live grid is below the truthful Discover hero. In a genuine
+        // 874x402 landscape window, SwiftUI can remove the LazyVGrid row
+        // from the accessibility tree while it is offscreen. The previous
+        // test expected five controls to exist immediately after rotation
+        // even though portrait source and >=44pt geometry had all passed.
+        // Physically scroll the REAL grid owner to its real card; never
+        // substitute a fake game or weaken the hitbox assertion.
+        let gridScroll = app.scrollViews["feed.grid.scroll"].firstMatch
+        XCTAssertTrue(gridScroll.waitForExistence(timeout: 8),
+                      "A real searched grid must own the landscape scroll surface.")
+        for _ in 0..<8 {
+            if like.exists && like.isHittable { break }
+            gridScroll.swipeUp()
+        }
+        if !like.exists || !like.isHittable {
+            let missingLandscapeCard = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            missingLandscapeCard.name = "arcade-pulse-real-grid-landscape-card-not-reachable"
+            missingLandscapeCard.lifetime = .keepAlways
+            add(missingLandscapeCard)
+            print("GRID_LANDSCAPE_NATIVE frame=\\(window.frame) scroll=\\(gridScroll.frame) like_exists=\\(like.exists)")
+        }
+        XCTAssertTrue(like.exists && like.isHittable,
+                      "Genuine rotated grid must offer reachable social action after native scrolling.")
         for control in actions {
             XCTAssertTrue(control.waitForExistence(timeout: 5))
             // Same sub-micropt binary frame tolerance in landscape.
