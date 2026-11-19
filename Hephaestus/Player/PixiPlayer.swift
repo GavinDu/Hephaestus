@@ -649,6 +649,18 @@ struct PlayerVerifiedRunNotificationGate {
 /// Network failures get a retry-first message; anything else gets the
 /// generic message. Both states offer Retry and Return to feed, so a
 /// failed load never leaves a blank player with no next action.
+/// Recover only a live, unfinished in-flight warmup whose delegate
+/// handoff lost the terminal navigation callback.
+enum PlayerPrewarmHandoffPolicy {
+    static func shouldRecoverUnobservedFinish(
+        isActive: Bool, stillLoading: Bool, hasObservedTerminalNavigation: Bool,
+        recoveryArmed: Bool
+    ) -> Bool {
+        recoveryArmed && isActive && !stillLoading && !hasObservedTerminalNavigation
+    }
+}
+
+/// A game may not navigate the main frame to another document.
 /// Local free-form diagnostics are intentionally identity-free. The logger
 /// does not need an authored/private game identifier; structured telemetry
 /// carries game identity through a separately governed API.
@@ -678,18 +690,6 @@ enum PlayerLocalLifecycleLog {
     }
 }
 
-/// Recover only a live, unfinished in-flight warmup whose delegate
-/// handoff lost the terminal navigation callback.
-enum PlayerPrewarmHandoffPolicy {
-    static func shouldRecoverUnobservedFinish(
-        isActive: Bool, stillLoading: Bool, hasObservedTerminalNavigation: Bool,
-        recoveryArmed: Bool
-    ) -> Bool {
-        recoveryArmed && isActive && !stillLoading && !hasObservedTerminalNavigation
-    }
-}
-
-/// A game may not navigate the main frame to another document.
 enum PlayerMainFrameNavigationPolicy {
     static func shouldAllow(
         requestURL: URL?, expectedURL: URL?,
