@@ -2416,6 +2416,27 @@ final class PlayerSmokeTests: XCTestCase {
             print("UI_EVALUATOR_CREATOR_LARGE_TEXT source=no_hittable_creator; no fake test account")
         }
         actions.tap()
+        // #581: source defines Save and other native actions, but an original
+        // iPhone Accessibility5 failure showed the For You page still visible
+        // after tapping Actions: the native Game actions sheet had not mounted.
+        // Require the real sheet BEFORE querying its child rows so an absent
+        // presentation can never be mistaken for a missing Save label.
+        let mountedActionsDone = app.buttons["feed.actions.dismiss"].firstMatch
+        let actionSheetMounted = mountedActionsDone.waitForExistence(timeout: 10)
+        let actionMountEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        actionMountEvidence.name = actionSheetMounted
+            ? "feed-accessibility-xxxl-actions-sheet-mounted"
+            : "feed-accessibility-xxxl-actions-sheet-did-not-mount"
+        actionMountEvidence.lifetime = .keepAlways
+        add(actionMountEvidence)
+        if !actionSheetMounted {
+            let tabs = app.tabBars.firstMatch
+            print("A5_ACTION_SHEET_MOUNT_FAILURE actions_exists=\(actions.exists) actions_hittable=\(actions.isHittable) actions_frame=\(actions.frame) sheet_count=\(app.sheets.count) done_exists=\(mountedActionsDone.exists) tabs_exist=\(tabs.exists)")
+            XCTFail("The real Game actions sheet failed to mount after a genuine Actions tap; inspect original XCUIScreen rather than treating this as a missing Save row.")
+            return
+        }
+        XCTAssertTrue(mountedActionsDone.isHittable,
+                      "Actual mounted Game actions sheet must expose a hittable Done control.")
         // This menu reflects the *real* backend viewer state: previously
         // saved/liked games correctly show the inverse action, not a mock.
         for (name, allowed) in [
