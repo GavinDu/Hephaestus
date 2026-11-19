@@ -3199,3 +3199,77 @@ struct HephaestusTests {
         originPort: 0, backendURL: backend
     ))
 }
+
+
+@Test func nativePosterAttemptAdmissionNeverAcceptsJSOrRetiredOwnershipAcross160Leases() {
+    typealias Policy = PlayerNativePosterAttemptAdmission
+    let url = URL(string: "https://games.example.test/player?game=sky&quality=low&presentation=play")!
+    for n in 1...160 {
+        let nonce = String(format: "%032x", n)
+        let lease = UInt64(n)
+        let current = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: true, navigationStarted: true
+        )
+        #expect(current != nil)
+        #expect(current?.isValid == true)
+        #expect(current?.documentNonce == nonce)
+        #expect(current?.attachmentLease == lease)
+        let badLease = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease + 1,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: true, navigationStarted: true
+        )
+        let beforeNavigation = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: true, navigationStarted: false
+        )
+        let oldView = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: false,
+            isAttached: true, navigationStarted: true
+        )
+        let retired = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: false, navigationStarted: true
+        )
+        let revokedNonce = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nil,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: true, navigationStarted: true
+        )
+        let revokedCredential = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: nil,
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: true, navigationStarted: true
+        )
+        let changedURL = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: URL(string: "https://games.example.test/player?game=sky&quality=high"),
+            isCurrentPooledView: true, isAttached: true, navigationStarted: true
+        )
+        #expect(badLease == nil && beforeNavigation == nil && oldView == nil)
+        #expect(retired == nil && revokedNonce == nil && revokedCredential == nil)
+        #expect(changedURL == nil)
+    }
+}
+
