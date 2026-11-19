@@ -331,6 +331,95 @@ struct PlayerFirstSceneRenderSubmissionGate {
     }
 }
 
+/// At most one candidate scene-submit milestone per current speculative
+/// WK document. Its identity is immutable; neither URL equality alone nor a
+/// JS session ID alone is sufficient to transfer ownership after a retry.
+/// This *pure ledger* has no WebKit listener yet. #351 connects the collector
+/// and #352 consumes on the real attached Coordinator.
+struct PlayerPrewarmSceneMilestoneLedger {
+    struct Identity: Equatable {
+        let gameID: String
+        let playerURL: URL
+        let documentNonce: String
+        let credentialFingerprint: String
+        let runtimeSessionID: String
+
+        var isValid: Bool {
+            guard !gameID.isEmpty, gameID.utf8.count <= 128,
+                  playerURL.scheme?.lowercased() == "https",
+                  let host = playerURL.host, !host.isEmpty,
+                  playerURL.user == nil, playerURL.password == nil,
+                  playerURL.fragment == nil,
+                  let components = URLComponents(
+                      url: playerURL, resolvingAgainstBaseURL: false
+                  ),
+                  components.path == "/player",
+                  let gameItems = components.queryItems?.filter({ $0.name == "game" }),
+                  gameItems.count == 1, gameItems[0].value == gameID,
+                  PlayerNativeDocumentEpochGate.isWellFormed(documentNonce),
+                  !credentialFingerprint.isEmpty,
+                  credentialFingerprint.utf8.count <= 256,
+                  (1...128).contains(runtimeSessionID.utf8.count) else { return false }
+            // Mirror the protocol byte contract instead of String.count,
+            // which counts grapheme clusters, not the UTF-8 session bytes.
+            return runtimeSessionID.utf8.allSatisfy { (0x21...0x7e).contains($0) }
+        }
+    }
+
+    struct Submission: Equatable {
+        let identity: Identity
+        let sequence: Int
+        let milliseconds: Int
+    }
+
+    private(set) var candidate: Submission?
+    private(set) var hasTransferred = false
+
+    mutating func record(
+        identity: Identity,
+        expected: Identity,
+        sequence: Int,
+        milliseconds: Int,
+        isMainFrame: Bool,
+        isSpeculative: Bool,
+        navigationStarted: Bool
+    ) -> Bool {
+        guard candidate == nil, !hasTransferred,
+              identity.isValid, expected.isValid, identity == expected,
+              isMainFrame, isSpeculative, navigationStarted,
+              (0...100_000).contains(sequence),
+              (0...3_600_000).contains(milliseconds) else { return false }
+        candidate = Submission(
+            identity: identity, sequence: sequence, milliseconds: milliseconds
+        )
+        return true
+    }
+
+    /// A retired SwiftUI Coordinator must not steal a successor's pending
+    /// milestone. Mismatched identities do not consume a current candidate;
+    /// navigation/session invalidation separately clears all stale state.
+    mutating func consume(
+        expected: Identity,
+        offeredLease: UInt64,
+        currentLease: UInt64,
+        isCurrentPooledView: Bool,
+        isAttached: Bool
+    ) -> Submission? {
+        guard !hasTransferred, let candidate,
+              candidate.identity == expected, expected.isValid,
+              offeredLease != 0, offeredLease == currentLease,
+              isCurrentPooledView, isAttached else { return nil }
+        hasTransferred = true
+        self.candidate = nil
+        return candidate
+    }
+
+    mutating func invalidate() {
+        candidate = nil
+        hasTransferred = false
+    }
+}
+
 /// One live, cryptographically unpredictable challenge per attempted main-frame
 /// WK document. The pool (not a JS session ID or SwiftUI Coordinator) owns it.
 /// No historical-ID list is needed: late messages must match this exact nonce.
@@ -830,13 +919,21 @@ enum PlayerRuntimeMetricPolicy {
 /// same store the web runtime beacons its errors to, so one incidents
 /// view covers web and native player health. Kinds: `perf` samples are
 /// filed server-side but never counted as incidents; the `ios-*` kinds
-/// are real failure signals and aggregate like web errors. Payloads
-/// carry no account identifiers and no user content — game id, event
-/// kind, a message, and the tail of the on-device dev log.
+/// are real failure signals and aggregate like web errors.
+/// Upload only explicitly structured event fields, never arbitrary on-device
+/// DevLog text. Other caller-supplied event messages require separate audit.
+enum PlayerTelemetryLogUploadPolicy {
+    /// Reject arbitrary log text; generic regex scrubbing cannot prove safety.
+    static func remoteTail(from localEntries: [String]) -> [String] {
+        []
+    }
+}
+
 enum PlayerTelemetry {
     static func report(gameID: String?, kind: String, name: String, message: String) {
-        let tail = DevLog.shared.exportText()
-            .split(separator: "\n").suffix(20).map(String.init)
+        // The DevLog remains on-device for authorized diagnosis. Report
+        // only the typed event fields, never historical free-form log lines.
+        let tail = PlayerTelemetryLogUploadPolicy.remoteTail(from: [])
         let report = BackendAPI.PlayerTelemetryReport(
             gameId: gameID ?? "",
             runtimeVersion: "ios-player-1.1",
@@ -1078,6 +1175,7 @@ enum PlayerWebViewPool {
     private static let prewarmMetricName = "hephaestusRunResult"
     private static let prewarmMetricHandler = PoolMetricRouter()
     private static var prewarmSceneGate = PlayerPrewarmV2SceneMetricGate()
+    private static var sceneMilestoneLedger = PlayerPrewarmSceneMilestoneLedger()
 
     static func playerURL(gameID: String, quality: String? = nil) -> URL? {
         // Do not construct a player URL for an empty identifier, and never
@@ -1104,6 +1202,7 @@ enum PlayerWebViewPool {
     static func prepareDocumentNavigation(_ webView: WKWebView) {
         guard pooledView === webView else { return }
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         transferringLease = nil
         let nonce = documentEpochGate.prepareNavigation()
         // Only installed native code can issue a fresh current-document
@@ -1126,6 +1225,7 @@ enum PlayerWebViewPool {
     static func didStartDocumentNavigation(_ webView: WKWebView) {
         guard pooledView === webView else { return }
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         transferringLease = nil
         _ = documentEpochGate.didStartNavigation()
     }
@@ -1143,6 +1243,7 @@ enum PlayerWebViewPool {
         guard pooledView === webView else { return }
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         transferringLease = nil
     }
 
@@ -1255,6 +1356,7 @@ enum PlayerWebViewPool {
         transferringLease = nil
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
     }
 
     /// Trustworthy in-memory poster identity, never derived from JS session
@@ -1298,6 +1400,7 @@ enum PlayerWebViewPool {
         loadedURL = nil
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         webView.navigationDelegate = warmupDelegate
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
@@ -1341,6 +1444,7 @@ enum PlayerWebViewPool {
         isAttached = false
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         sessionFingerprint = credentialFingerprint()
         // Never let a newly created player WebView share persistent data or
         // a WebContent process pool with the retired Keychain identity.
@@ -1367,6 +1471,7 @@ enum PlayerWebViewPool {
         loadedURL = nil
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         stale?.stopLoading()
         stale?.navigationDelegate = nil
         stale?.loadHTMLString("", baseURL: nil)
@@ -1594,8 +1699,8 @@ struct PixiPlayerSheet: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Handoff state (#58): the hold fades out once, on the first
-    /// navigation finish. Reloads and retries never re-show it.
+    /// Poster holds until a native-admitted scene submission (or bounded recovery).
+    /// Navigation finish alone is only a document-loading milestone.
     @State private var holdOpacity = 1.0
     @State private var holdVisible = true
     @State private var prewarmHit = false
@@ -1618,7 +1723,7 @@ struct PixiPlayerSheet: View {
     // Any retry/sheet epoch revokes the diagnostic immediately.
     @State private var firstSceneSubmittedForAttempt: (epoch: Int, milliseconds: Int)?
     // Native-host-derived document URL/nonce/credential/lease only; not JS.
-    // This has no visual effect until the separate trusted poster #566 patch.
+    // The current sheet's poster policy binds to this immutable identity.
     @State private var posterAttemptForEpoch: (epoch: Int, identity: PlayerPosterHoldPolicy.Attempt)?
     @State private var posterPolicy: PlayerPosterHoldPolicy?
     @State private var didTrackGameplayStart = false
@@ -1870,6 +1975,7 @@ struct PixiPlayerSheet: View {
                                 callbackEpoch: callbackEpoch
                             )
                         },
+
                         onFirstInput: {
                             guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
