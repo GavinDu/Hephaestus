@@ -3010,6 +3010,127 @@ struct HephaestusTests {
     ))
 }
 
+@Test func permanentPoolWebKitRoutingSeparatesSpeculativeHandoffAndAttachedAcross160Leases() {
+    typealias Recipient = PlayerPrewarmMessageOwnershipPolicy
+    let nativeBackend = URL(string: "https://games.example.test")!
+    let gameURL = URL(string: "https://games.example.test/player?game=published-game&quality=low&presentation=play")!
+    // A real schema-v2 first-scene payload: no generic native-control or
+    // browser-owned run result is ever legal in the speculative collector.
+    for n in 1...160 {
+        let lease = UInt64(n)
+        let nonce = String(format: "%032x", n)
+        let valid: [String: Any] = [
+            "schema": 2, "type": "player_metric",
+            "sessionId": "current-credential-session",
+            "gameId": "published-game", "documentNonce": nonce,
+            "metric": "first_scene_render_submit",
+            "sequence": 1, "ms": 24,
+        ]
+        let speculative = Recipient.recipient(
+            isAttached: false, transferringLease: nil,
+            currentLease: lease, hasAttachedReceiver: false,
+            credentialScopeCurrent: true
+        )
+        let transferring = Recipient.recipient(
+            isAttached: true, transferringLease: lease,
+            currentLease: lease, hasAttachedReceiver: false,
+            credentialScopeCurrent: true
+        )
+        let originDuringTransfer = PlayerPrewarmMessageOriginPolicy.allows(
+            isCurrentPooledView: true,
+            isAttached: false, // native pool still owns the exact transfer lease
+            expectedURL: gameURL, actualURL: gameURL,
+            isMainFrame: true, originScheme: "https",
+            originHost: "games.example.test", originPort: 0,
+            backendURL: nativeBackend
+        )
+        var scene = PlayerPrewarmV2SceneMetricGate()
+        let first = scene.record(
+            valid, expectedGameID: "published-game",
+            currentDocumentNonce: nonce,
+            isTrustedMainFrame: true, isSameOrigin: originDuringTransfer,
+            navigationStarted: true, credentialScopeCurrent: true
+        )
+        let duplicate = scene.record(
+            valid, expectedGameID: "published-game",
+            currentDocumentNonce: nonce,
+            isTrustedMainFrame: true, isSameOrigin: originDuringTransfer,
+            navigationStarted: true, credentialScopeCurrent: true
+        )
+        #expect(speculative == .speculative)
+        #expect(transferring == .speculative)
+        #expect(originDuringTransfer)
+        #expect(first && !duplicate && scene.firstMilliseconds == 24)
+
+        // The pool stops collecting after acknowledging the current
+        // Coordinator and forwards ONLY to the existing native bridge gate.
+        let attached = Recipient.recipient(
+            isAttached: true, transferringLease: nil,
+            currentLease: lease, hasAttachedReceiver: true,
+            credentialScopeCurrent: true
+        )
+        let noReceiver = Recipient.recipient(
+            isAttached: true, transferringLease: nil,
+            currentLease: lease, hasAttachedReceiver: false,
+            credentialScopeCurrent: true
+        )
+        let oldLease = Recipient.recipient(
+            isAttached: true, transferringLease: lease - 1,
+            currentLease: lease, hasAttachedReceiver: false,
+            credentialScopeCurrent: true
+        )
+        let rotatedCredential = Recipient.recipient(
+            isAttached: true, transferringLease: nil,
+            currentLease: lease, hasAttachedReceiver: true,
+            credentialScopeCurrent: false
+        )
+        let retired = Recipient.recipient(
+            isAttached: false, transferringLease: nil,
+            currentLease: lease, hasAttachedReceiver: true,
+            credentialScopeCurrent: true
+        )
+        #expect(attached == .attached)
+        #expect(noReceiver == .drop)
+        #expect(oldLease == .drop)
+        #expect(rotatedCredential == .drop)
+        #expect(retired == .drop)
+
+        // A future navigation epoch must use a new nonce; stale input is
+        // refused even if the sender reuses the same game ID and sequence.
+        scene.reset()
+        let oldDocumentAfterRetry = scene.record(
+            valid, expectedGameID: "published-game",
+            currentDocumentNonce: String(repeating: "f", count: 32),
+            isTrustedMainFrame: true, isSameOrigin: true,
+            navigationStarted: true, credentialScopeCurrent: true
+        )
+        #expect(!oldDocumentAfterRetry)
+    }
+}
+
+@Test func staleRejectedWebKitHandoffNeverBlanksSuccessorAcross160LeaseRotations() {
+    typealias Cleanup = PlayerRejectedHandoffCleanupPolicy
+    for lease in UInt64(1)...UInt64(160) {
+        // Old Coordinator has the SAME WKWebView instance but a retired
+        // attachment lease: no view mutation, because a successor owns it.
+        let oldOwns = PlayerAttachmentLeasePolicy.mayRecycle(
+            isCurrentPooledView: true, isAttached: true,
+            expectedLease: lease, currentLease: lease + 1
+        )
+        #expect(!oldOwns)
+        #expect(!Cleanup.mayBlank(isCurrentPooledView: true))
+
+        // Synchronous Keychain rotation invalidates/retire the old view;
+        // only THEN can the already-retired instance be stopped and blanked.
+        let oldViewStillPooled = false
+        #expect(Cleanup.mayBlank(isCurrentPooledView: oldViewStillPooled))
+
+        // A detached but still pooled view is neutralized by recycle()
+        // itself, not by an old in-flight makeUIView rejection callback.
+        #expect(!Cleanup.mayBlank(isCurrentPooledView: true))
+    }
+}
+
 @Test func webKitOriginPolicyAdmitsOnlyExactBackendOriginAcrossDefaultAndCustomPorts() {
     let https = URL(string: "https://games.example.test")!
     let http = URL(string: "http://games.example.test")!
