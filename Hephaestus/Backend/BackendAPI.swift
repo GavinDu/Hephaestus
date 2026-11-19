@@ -800,12 +800,25 @@ final class BackendAPI: ObservableObject {
         /// nil for ordinary sessions. Lets backend incidents be filtered
         /// to one simulator/physical run.
         var runId: String?
+
+        /// Defense in depth: even a future caller constructing a report
+        /// with raw DevLog lines cannot put those lines on the wire.
+        /// This is a transport privacy invariant, not an error-redaction
+        /// policy for the separately audited typed message field.
+        func sanitizedForTransport() -> Self {
+            var redacted = self
+            redacted.logTail = []
+            return redacted
+        }
     }
 
     /// Fire-and-forget: telemetry must never fail the user, so errors
     /// are swallowed by design (the dev log keeps the local record).
     func postPlayerTelemetry(_ report: PlayerTelemetryReport) async {
-        guard let req = try? makeRequest("v1/telemetry/runtime-error", method: "POST", body: report) else { return }
+        guard let req = try? makeRequest(
+            "v1/telemetry/runtime-error", method: "POST",
+            body: report.sanitizedForTransport()
+        ) else { return }
         _ = try? await session.data(for: req)
     }
 
