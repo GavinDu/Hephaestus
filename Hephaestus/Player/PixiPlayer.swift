@@ -756,6 +756,13 @@ enum PlayerLoadFailure {
         return "\(reason) category=\(category(for: error))"
     }
 
+    /// Free-form local logs must not include private game identifiers or
+    /// untrusted NSError metadata. Structured game identity, if needed by
+    /// telemetry, is carried separately through its audited typed field.
+    static func safeLocalLogMessage(for error: Error) -> String {
+        "player load failed: \(safeDiagnostic(for: error))"
+    }
+
     static func userMessage(for error: Error) -> String {
         switch category(for: error) {
         case .network:
@@ -1730,12 +1737,12 @@ struct PixiPlayerSheet: View {
                             isLoading = false
                             holdOpacity = 0
                             holdVisible = false
-                            // Raw detail goes to DevLog/telemetry;
-                            // the card shows only the mapped message.
+                            // Keep raw NSError metadata and game identity out
+                            // of local log text; show only fixed UI copy.
                             loadFailureCategory = PlayerLoadFailure.category(for: error)
                             loadError = PlayerLoadFailure.userMessage(for: error)
                             let diagnostic = PlayerLoadFailure.safeDiagnostic(for: error)
-                            DevLog.error(.player, "player load failed for \(gameID): \(diagnostic)")
+                            DevLog.error(.player, PlayerLoadFailure.safeLocalLogMessage(for: error))
                             PlayerTelemetry.report(gameID: gameID, kind: "ios-load-failed",
                                                    name: "LoadFailed", message: diagnostic)
                         },
