@@ -1395,16 +1395,23 @@ final class PlayerSmokeTests: XCTestCase {
         add(landscape)
         XCUIDevice.shared.orientation = .portrait
 
-        // Read-only actual navigation, never submit a made-up public comment.
-        if comments.isHittable {
-            comments.tap()
-            XCTAssertTrue(app.staticTexts["COMMENTS ON"].firstMatch.waitForExistence(timeout: 10),
-                          "The genuine Comments sheet must remain reachable from the grid.")
-            let commentsEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            commentsEvidence.name = "arcade-pulse-real-grid-comments-sheet"
-            commentsEvidence.lifetime = .keepAlways
-            add(commentsEvidence)
+        // Do not silently skip the actual navigation gate because SwiftUI
+        // virtualizes this real grid card during landscape→portrait rotation.
+        // Bring the same authentic result into view in its real scroll owner
+        // and require the native Comments sheet; no public POST is sent.
+        for _ in 0..<8 {
+            if comments.exists && comments.isHittable { break }
+            gridScroll.swipeUp()
         }
+        XCTAssertTrue(comments.waitForExistence(timeout: 5) && comments.isHittable,
+                      "The genuine Comments button must remain reachable after returning to portrait.")
+        comments.tap()
+        XCTAssertTrue(app.staticTexts["COMMENTS ON"].firstMatch.waitForExistence(timeout: 10),
+                      "The genuine Comments sheet must remain reachable from the grid.")
+        let commentsEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        commentsEvidence.name = "arcade-pulse-real-grid-comments-sheet"
+        commentsEvidence.lifetime = .keepAlways
+        add(commentsEvidence)
     }
 
     /// Verify the actual social sheet on a live feed, not the design render.
