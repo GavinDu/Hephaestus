@@ -644,8 +644,8 @@ struct PlayerVerifiedRunNotificationGate {
 ///   - the UI shows only a fixed message per category, never the raw
 ///     localizedDescription: that string can carry URLs, hostnames, and
 ///     backend detail the player has no use for;
-///   - the raw error still goes to DevLog and telemetry, so the detail
-///     is not lost, it is just not shown.
+///   - diagnostics must also be allowlisted before DevLog/telemetry:
+///     NSError descriptions and userInfo may contain credentials or URLs.
 /// Network failures get a retry-first message; anything else gets the
 /// generic message. Both states offer Retry and Return to feed, so a
 /// failed load never leaves a blank player with no next action.
@@ -739,6 +739,23 @@ enum PlayerLoadFailure {
         }
     }
 
+    /// Privacy-safe transport diagnostics. Never serialize NSError.userInfo,
+    /// localizedDescription, custom domains, URLs or response bodies into
+    /// persisted telemetry or developer logs. Numeric codes keep operational
+    /// grouping useful without leaking request/creator identity.
+    static func safeDiagnostic(for error: Error) -> String {
+        let ns = error as NSError
+        let reason: String
+        if ns.domain == httpErrorDomain && (100...599).contains(ns.code) {
+            reason = "http_status=\(ns.code)"
+        } else if ns.domain == NSURLErrorDomain && (-9999...9999).contains(ns.code) {
+            reason = "url_error_code=\(ns.code)"
+        } else {
+            reason = "other_error"
+        }
+        return "\(reason) category=\(category(for: error))"
+    }
+
     static func userMessage(for error: Error) -> String {
         switch category(for: error) {
         case .network:
@@ -830,13 +847,21 @@ enum PlayerRuntimeMetricPolicy {
 /// same store the web runtime beacons its errors to, so one incidents
 /// view covers web and native player health. Kinds: `perf` samples are
 /// filed server-side but never counted as incidents; the `ios-*` kinds
-/// are real failure signals and aggregate like web errors. Payloads
-/// carry no account identifiers and no user content — game id, event
-/// kind, a message, and the tail of the on-device dev log.
+/// are real failure signals and aggregate like web errors.
+/// Upload only explicitly structured event fields, never arbitrary on-device
+/// DevLog text. Other caller-supplied event messages require separate audit.
+enum PlayerTelemetryLogUploadPolicy {
+    /// Reject arbitrary log text; generic regex scrubbing cannot prove safety.
+    static func remoteTail(from localEntries: [String]) -> [String] {
+        []
+    }
+}
+
 enum PlayerTelemetry {
     static func report(gameID: String?, kind: String, name: String, message: String) {
-        let tail = DevLog.shared.exportText()
-            .split(separator: "\n").suffix(20).map(String.init)
+        // The DevLog remains on-device for authorized diagnosis. Report
+        // only the typed event fields, never historical free-form log lines.
+        let tail = PlayerTelemetryLogUploadPolicy.remoteTail(from: [])
         let report = BackendAPI.PlayerTelemetryReport(
             gameId: gameID ?? "",
             runtimeVersion: "ios-player-1.1",
@@ -1709,10 +1734,10 @@ struct PixiPlayerSheet: View {
                             // the card shows only the mapped message.
                             loadFailureCategory = PlayerLoadFailure.category(for: error)
                             loadError = PlayerLoadFailure.userMessage(for: error)
-                            let message = error.localizedDescription
-                            DevLog.error(.player, "player load failed for \(gameID): \(message)")
+                            let diagnostic = PlayerLoadFailure.safeDiagnostic(for: error)
+                            DevLog.error(.player, "player load failed for \(gameID): \(diagnostic)")
                             PlayerTelemetry.report(gameID: gameID, kind: "ios-load-failed",
-                                                   name: "LoadFailed", message: message)
+                                                   name: "LoadFailed", message: diagnostic)
                         },
                         onTerminate: {
                             guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,

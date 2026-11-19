@@ -848,6 +848,95 @@ struct HephaestusTests {
     }
 }
 
+@Test func nativePlayerTelemetryNeverUploadsUnstructuredDevLogTail() {
+    let privateLines = [
+        "Bearer private-bearer-token",
+        "https://private.example.test/games?token=very-secret",
+        "creator user private-identifier",
+        "NSError: connection failed on private host",
+        String(repeating: "S", count: 1000),
+        "first\\nsecond\\nAuthorization: secret"
+    ]
+    #expect(PlayerTelemetryLogUploadPolicy.remoteTail(from: privateLines).isEmpty)
+    #expect(PlayerTelemetryLogUploadPolicy.remoteTail(from: []).isEmpty)
+    for line in privateLines {
+        #expect(PlayerTelemetryLogUploadPolicy.remoteTail(from: [line]).isEmpty)
+    }
+}
+
+@Test func nativeTelemetryTransportRedactsFutureCallerLogTailBeforeEncoding() throws {
+    // A future or indirect caller might accidentally populate the DTO even
+    // though PlayerTelemetry.report itself no longer reads DevLog.
+    let secrets = [
+        "Bearer private-token-abc",
+        "https://private.example.test/player?access_token=secret",
+        "NSError auth-user-info private creator identity"
+    ]
+    var report = BackendAPI.PlayerTelemetryReport(
+        gameId: "public-game",
+        runtimeVersion: "ios-player-1.1",
+        kind: "ios-load-failed",
+        name: "LoadFailed",
+        message: "http_status=403 category=accessDenied"
+    )
+    report.logTail = secrets
+    let redacted = report.sanitizedForTransport()
+    #expect(redacted.logTail.isEmpty)
+    #expect(report.logTail == secrets) // caller value remains unmodified
+    let serialized = String(
+        decoding: try JSONEncoder().encode(redacted),
+        as: UTF8.self
+    )
+    #expect(serialized.contains(#""logTail":[]"#))
+    #expect(serialized.contains("http_status=403"))
+    for secret in secrets {
+        #expect(!serialized.contains(secret))
+    }
+}
+
+@Test func playerLoadDiagnosticsCannotLeakNSErrorDescriptionsOrPrivateURLs() {
+    let secret = "https://private.example.test/player?token=private-bearer-abc123"
+    let privateUserInfo: [String: Any] = [
+        NSLocalizedDescriptionKey: "Internal backend failure: \(secret)",
+        NSLocalizedFailureReasonErrorKey: "Authorization secret from \(secret)",
+        NSURLErrorFailingURLStringErrorKey: secret,
+    ]
+    let transport = NSError(
+        domain: NSURLErrorDomain, code: NSURLErrorTimedOut,
+        userInfo: privateUserInfo
+    )
+    let httpDenied = NSError(
+        domain: PlayerLoadFailure.httpErrorDomain, code: 403,
+        userInfo: privateUserInfo
+    )
+    let arbitraryDomain = NSError(
+        domain: "private-domain-\(secret)", code: -987_654,
+        userInfo: privateUserInfo
+    )
+    let invalidStatus = NSError(
+        domain: PlayerLoadFailure.httpErrorDomain, code: 999,
+        userInfo: privateUserInfo
+    )
+    #expect(PlayerLoadFailure.safeDiagnostic(for: transport) ==
+            "url_error_code=\(NSURLErrorTimedOut) category=network")
+    #expect(PlayerLoadFailure.safeDiagnostic(for: httpDenied) ==
+            "http_status=403 category=accessDenied")
+    #expect(PlayerLoadFailure.safeDiagnostic(for: arbitraryDomain) ==
+            "other_error category=unknown")
+    #expect(PlayerLoadFailure.safeDiagnostic(for: invalidStatus) ==
+            "other_error category=unknown")
+    let examples: [NSError] = [transport, httpDenied, arbitraryDomain, invalidStatus]
+    for error in examples {
+        let safe = PlayerLoadFailure.safeDiagnostic(for: error)
+        #expect(!safe.contains(secret))
+        #expect(!safe.contains("Authorization"))
+        #expect(!safe.contains("private-domain"))
+        #expect(!safe.contains("token="))
+        #expect(!safe.contains("backend"))
+        #expect(safe.count < 90)
+    }
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
