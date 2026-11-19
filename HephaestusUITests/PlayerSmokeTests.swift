@@ -502,6 +502,24 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8),
                       "The native Create keywords field must really receive keyboard focus.")
         keywords.typeText("puzzle")
+        // XCUITest can return from typeText before SwiftUI publishes the
+        // accessibility value. Wait for the *whole* actual native input,
+        // never accept a prefix such as "p" or inject a fake value.
+        let committed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "puzzle"),
+            object: keywords
+        )
+        let committedResult = XCTWaiter.wait(for: [committed], timeout: 5)
+        // Retain original native screenshot even when input commit fails.
+        let typedEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        typedEvidence.name = "arcade-pulse-create-keywords-a5-post-type-commit"
+        typedEvidence.lifetime = .keepAlways
+        add(typedEvidence)
+        XCTAssertEqual(
+            committedResult, .completed,
+            "Real Create field must commit every typed character within 5s; " +
+            "actual accessibility value: \(String(describing: keywords.value))"
+        )
         XCTAssertEqual(keywords.value as? String, "puzzle")
         let analyze = app.buttons["create.pick.analyze"].firstMatch
         XCTAssertTrue(analyze.exists && !analyze.isEnabled,
