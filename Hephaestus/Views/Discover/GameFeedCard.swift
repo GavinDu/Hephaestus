@@ -8,6 +8,33 @@ enum PlayableExpressionLayout {
     }
 }
 
+/// The feed grid displays only backend-owned topic strings. Reject malformed
+/// labels before choosing the three visible slots so they do not displace a
+/// later genuine tag; VoiceOver must announce the identical source subset.
+enum GameFeedCardTopicPolicy {
+    static func publicLabels(_ topics: [String]?) -> [String] {
+        let validated = (topics ?? []).lazy.compactMap { raw -> String? in
+            let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty,
+                  !label.unicodeScalars.contains(where: {
+                      CharacterSet.controlCharacters.contains($0)
+                  }) else { return nil }
+            return label
+        }
+        return Array(validated.prefix(3))
+    }
+
+    static func visualSummary(_ topics: [String]?) -> String? {
+        let labels = publicLabels(topics)
+        return labels.isEmpty ? nil : labels.map { "#\($0)" }.joined(separator: "  ")
+    }
+
+    static func accessibilitySummary(_ topics: [String]?) -> String? {
+        let labels = publicLabels(topics)
+        return labels.isEmpty ? nil : "Topics: " + labels.joined(separator: ", ")
+    }
+}
+
 /// A game-first social card. Until the API returns real preview assets and creator
 /// metadata, the cover is a branded visual rather than fabricated artwork.
 struct GameFeedCardSkeleton: View {
@@ -253,12 +280,14 @@ struct GameFeedCard: View {
                     if let caption = game.caption, !caption.isEmpty {
                         Text(caption).font(.subheadline).foregroundStyle(.white.opacity(0.94)).lineLimit(3)
                     }
-                    if let topics = game.topics, !topics.isEmpty {
-                        Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
+                    if let visualTopics = GameFeedCardTopicPolicy.visualSummary(game.topics) {
+                        Text(visualTopics)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.9))
                             .lineLimit(1)
-                            .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
+                            .accessibilityLabel(
+                                GameFeedCardTopicPolicy.accessibilitySummary(game.topics) ?? ""
+                            )
                     }
                 }
                 .padding(18)
