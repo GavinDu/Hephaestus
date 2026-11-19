@@ -1346,6 +1346,8 @@ final class PlayerSmokeTests: XCTestCase {
                                "Wrapped grid actions must not have overlapping touch rectangles.")
             }
         }
+        XCTAssertTrue(app.buttons["feed.grid.clearSearch"].firstMatch.waitForExistence(timeout: 8),
+                      "A submitted genuine filtered grid must provide an accessible Clear search exit.")
         let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         evidence.name = "arcade-pulse-real-grid-44pt-actions-portrait"
         evidence.lifetime = .keepAlways
@@ -1367,11 +1369,10 @@ final class PlayerSmokeTests: XCTestCase {
         // even though portrait source and >=44pt geometry had all passed.
         // Physically scroll the REAL grid owner to its real card; never
         // substitute a fake game or weaken the hitbox assertion.
-        // A submitted real game query must persist even if native
-        // .searchable transient text is cleared during orientation changes.
-        // The clear action is an explicit user-controlled return to the feed.
-        XCTAssertTrue(app.buttons["feed.grid.clearSearch"].firstMatch.waitForExistence(timeout: 8),
-                      "The filtered grid must expose an explicit clear-search exit.")
+        // A submitted real game query must persist when native .searchable
+        // transient text is cleared during rotation. Clear search is inside
+        // the genuine scrollable results, so it may be offscreen in a short
+        // landscape window; verify it in portrait before physical scrolling.
         let gridScroll = app.scrollViews["feed.grid.scroll"].firstMatch
         XCTAssertTrue(gridScroll.waitForExistence(timeout: 8),
                       "A real searched grid must own the landscape scroll surface.")
