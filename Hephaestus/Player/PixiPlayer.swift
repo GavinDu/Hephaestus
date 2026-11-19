@@ -965,6 +965,22 @@ enum PlayerWebKitSessionStoragePolicy {
     }
 }
 
+/// Only a trusted, same-epoch native-scene milestone may release poster.
+/// Navigation finish and speculative prewarm completion are NOT render.
+enum PlayerPosterVisualRevealPolicy {
+    static func allows(
+        expectedEpoch: Int, currentEpoch: Int, sessionRevoked: Bool,
+        hasLoadError: Bool, nativeAttemptMatches: Bool,
+        milliseconds: Int
+    ) -> Bool {
+        PlayerLaunchCallbackGate.accepts(
+            expectedEpoch: expectedEpoch, currentEpoch: currentEpoch,
+            sessionRevoked: sessionRevoked
+        ) && !hasLoadError && nativeAttemptMatches &&
+            (0...3_600_000).contains(milliseconds)
+    }
+}
+
 /// A scene-submission timestamp alone cannot identify the current game.
 /// Only native pool facts can create a poster attempt; page-owned JSON
 /// supplies no lease, credential fingerprint or document authorization.
@@ -1604,6 +1620,7 @@ struct PixiPlayerSheet: View {
     // Native-host-derived document URL/nonce/credential/lease only; not JS.
     // This has no visual effect until the separate trusted poster #566 patch.
     @State private var posterAttemptForEpoch: (epoch: Int, identity: PlayerPosterHoldPolicy.Attempt)?
+    @State private var posterPolicy: PlayerPosterHoldPolicy?
     @State private var didTrackGameplayStart = false
     @State private var verifiedResult: VerifiedRunResult?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
@@ -1677,53 +1694,62 @@ struct PixiPlayerSheet: View {
     /// version (with the #58 handoff block) timed out the compiler.
     /// @State assignment needs no `mutating` here: the wrappers'
     /// setters forward to external storage.
+    /// WK navigation finished, not a Pixi scene or GPU frame.
     private func handleLoadFinish() {
-        isLoading = false
-        loadError = nil
-        loadFailureCategory = nil
-        showSlowHint = false
-        let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
-        DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
+        let ms = max(0, Int(Date().timeIntervalSince(loadStartedAt) * 1000))
         PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
-                               message: "loaded in \(ms)ms quality=\(effectiveQuality)")
-        // Navigation completion is NOT proof that the game has rendered or
-        // can accept input. Only the trusted runtime reports player_ready;
-        // this native callback records PlayerLoad/TapToNavReady separately.
-        // The runtime's first accepted input owns the gameplay-start
-        // clock. Navigation finish may still precede the start card or
-        // rendering; starting a quick-exit timer here mislabels latency.
-        // #58 handoff, once: tap-to-nav-ready is tap time
-        // to navigation finish (the shell definition
-        // Gavin confirmed), and the hold poster fades
-        // out over the live web view. Reloads skip
-        // both: the hold is already gone by then.
+                               message: "navigation-finished-ms=\(ms) quality=\(effectiveQuality)")
         if !didReportHandoff {
             didReportHandoff = true
             if let tappedAt {
-                let ms = max(0, Int(Date().timeIntervalSince(tappedAt) * 1000))
+                let tapMS = max(0, Int(Date().timeIntervalSince(tappedAt) * 1000))
                 PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "TapToNavReady",
-                                       message: "tap-to-nav-ready in \(ms)ms prewarmHit=\(prewarmHit) quality=\(effectiveQuality)")
+                                       message: "tap-to-nav-ready in \(tapMS)ms prewarmHit=\(prewarmHit) quality=\(effectiveQuality)")
             }
-            if holdPosterURL != nil, holdVisible {
-                if reduceMotion {
-                    holdOpacity = 0
-                    holdVisible = false
-                } else {
-                    withAnimation(.easeOut(duration: 0.25)) { holdOpacity = 0 }
-                    // A retry/account swap can occur during the 300 ms fade.
-                    // The old sheet must never mutate its successor's poster.
-                    let fadeEpoch = attempt
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(300))
-                        guard !Task.isCancelled,
-                              PlayerTransientPresentationPolicy.mayFinishPosterFade(
-                                expectedEpoch: fadeEpoch, currentEpoch: attempt,
-                                sessionRevoked: sessionRevoked,
-                                isLoading: isLoading, hasLoadError: loadError != nil
-                              ) else { return }
-                        holdVisible = false
-                    }
-                }
+        }
+        // Do not clear isLoading, dismiss poster or reset a prior failure.
+    }
+
+    /// Called only after the narrow Coordinator has validated the real
+    /// current WebKit scene and recomputed its native document/lease identity.
+    private func revealCurrentTrustedScene(
+        milliseconds: Int, identity: PlayerPosterHoldPolicy.Attempt,
+        callbackEpoch: Int
+    ) {
+        guard PlayerPosterVisualRevealPolicy.allows(
+            expectedEpoch: callbackEpoch, currentEpoch: attempt,
+            sessionRevoked: sessionRevoked, hasLoadError: loadError != nil,
+            nativeAttemptMatches:
+                posterAttemptForEpoch?.epoch == callbackEpoch &&
+                posterAttemptForEpoch?.identity == identity,
+            milliseconds: milliseconds
+        ), var next = posterPolicy,
+           next.acceptTrustedSceneSubmission(
+               for: identity, validatedByNativeGate: true,
+               ownsCurrentAttachment: true
+           ),
+           next.consumeReveal(for: identity, ownsCurrentAttachment: true)
+        else { return }
+        posterPolicy = next
+        firstSceneSubmittedForAttempt = (epoch: callbackEpoch, milliseconds: milliseconds)
+        isLoading = false
+        showSlowHint = false
+        guard holdPosterURL != nil, holdVisible else { return }
+        if reduceMotion {
+            holdOpacity = 0
+            holdVisible = false
+        } else {
+            withAnimation(.easeOut(duration: 0.25)) { holdOpacity = 0 }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled,
+                      PlayerTransientPresentationPolicy.mayFinishPosterFade(
+                          expectedEpoch: callbackEpoch, currentEpoch: attempt,
+                          sessionRevoked: sessionRevoked,
+                          isLoading: isLoading, hasLoadError: loadError != nil
+                      ),
+                      posterPolicy?.state == .revealed else { return }
+                holdVisible = false
             }
         }
     }
