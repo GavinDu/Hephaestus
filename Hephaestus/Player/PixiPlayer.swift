@@ -660,7 +660,6 @@ enum PlayerPrewarmHandoffPolicy {
     }
 }
 
-/// A game may not navigate the main frame to another document.
 /// Local free-form diagnostics are intentionally identity-free. The logger
 /// does not need an authored/private game identifier; structured telemetry
 /// carries game identity through a separately governed API.
@@ -690,6 +689,7 @@ enum PlayerLocalLifecycleLog {
     }
 }
 
+/// A game may not navigate the main frame to another document.
 enum PlayerMainFrameNavigationPolicy {
     static func shouldAllow(
         requestURL: URL?, expectedURL: URL?,
