@@ -848,6 +848,52 @@ struct HephaestusTests {
     }
 }
 
+@Test func nativePlayerTelemetryNeverUploadsUnstructuredDevLogTail() {
+    let privateLines = [
+        "Bearer private-bearer-token",
+        "https://private.example.test/games?token=very-secret",
+        "creator user private-identifier",
+        "NSError: connection failed on private host",
+        String(repeating: "S", count: 1000),
+        "first\\nsecond\\nAuthorization: secret"
+    ]
+    #expect(PlayerTelemetryLogUploadPolicy.remoteTail(from: privateLines).isEmpty)
+    #expect(PlayerTelemetryLogUploadPolicy.remoteTail(from: []).isEmpty)
+    for line in privateLines {
+        #expect(PlayerTelemetryLogUploadPolicy.remoteTail(from: [line]).isEmpty)
+    }
+}
+
+@Test func nativeTelemetryTransportRedactsFutureCallerLogTailBeforeEncoding() throws {
+    // A future or indirect caller might accidentally populate the DTO even
+    // though PlayerTelemetry.report itself no longer reads DevLog.
+    let secrets = [
+        "Bearer private-token-abc",
+        "https://private.example.test/player?access_token=secret",
+        "NSError auth-user-info private creator identity"
+    ]
+    var report = BackendAPI.PlayerTelemetryReport(
+        gameId: "public-game",
+        runtimeVersion: "ios-player-1.1",
+        kind: "ios-load-failed",
+        name: "LoadFailed",
+        message: "http_status=403 category=accessDenied"
+    )
+    report.logTail = secrets
+    let redacted = report.sanitizedForTransport()
+    #expect(redacted.logTail.isEmpty)
+    #expect(report.logTail == secrets) // caller value remains unmodified
+    let serialized = String(
+        decoding: try JSONEncoder().encode(redacted),
+        as: UTF8.self
+    )
+    #expect(serialized.contains(#""logTail":[]"#))
+    #expect(serialized.contains("http_status=403"))
+    for secret in secrets {
+        #expect(!serialized.contains(secret))
+    }
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
@@ -3441,6 +3487,7 @@ struct HephaestusTests {
 }
 
 
+
 @Test func speculativePrewarmSceneRecordCommitsOnlyStrictTrustedV2Document() {
     typealias Capture = PlayerPrewarmSceneLedgerCapturePolicy
     let nonce = String(repeating: "a", count: 32)
@@ -3461,7 +3508,7 @@ struct HephaestusTests {
     #expect(identity.isValid)
 
     // A rejected untrusted callback must not burn either one-shot slot.
-    for mutation in 0..<12 {
+    for mutation in 0..<14 {
         var body = valid
         var trustedFrame = true
         var sameOrigin = true
@@ -3480,7 +3527,9 @@ struct HephaestusTests {
         case 8: trustedFrame = false
         case 9: sameOrigin = false
         case 10: beganNavigation = false
-        default: credentialCurrent = false
+        case 11: credentialCurrent = false
+        case 12: body["sequence"] = 100_001 // malformed high mark never poisons either gate
+        default: body["ms"] = 3_600_001 // a too-late scene cannot become readiness
         }
         let accepted = Capture.capture(
             body, identity: identity, currentDocumentNonce: nonce,
@@ -3572,6 +3621,7 @@ struct HephaestusTests {
         previousNonce = nonce
     }
 }
+
 
 
 @Test func strictPrewarmAttachedIdentityMatchesOnlyCurrentNativeLeaseAcross160Transfers() {
