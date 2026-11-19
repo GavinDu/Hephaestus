@@ -3245,3 +3245,621 @@ struct HephaestusTests {
         originPort: 0, backendURL: backend
     ))
 }
+
+
+@Test func nativePosterAttemptAdmissionNeverAcceptsJSOrRetiredOwnershipAcross160Leases() {
+    typealias Policy = PlayerNativePosterAttemptAdmission
+    let url = URL(string: "https://games.example.test/player?game=sky&quality=low&presentation=play")!
+    for n in 1...160 {
+        let nonce = String(format: "%032x", n)
+        let lease = UInt64(n)
+        let current = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: true, navigationStarted: true
+        )
+        #expect(current != nil)
+        #expect(current?.isValid == true)
+        #expect(current?.documentNonce == nonce)
+        #expect(current?.attachmentLease == lease)
+        let badLease = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease + 1,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: true, navigationStarted: true
+        )
+        let beforeNavigation = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: true, navigationStarted: false
+        )
+        let oldView = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: false,
+            isAttached: true, navigationStarted: true
+        )
+        let retired = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: false, navigationStarted: true
+        )
+        let revokedNonce = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nil,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: true, navigationStarted: true
+        )
+        let revokedCredential = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: nil,
+            offeredLease: lease, currentLease: lease,
+            currentURL: url, isCurrentPooledView: true,
+            isAttached: true, navigationStarted: true
+        )
+        let changedURL = Policy.make(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "hashed-native-credential-epoch",
+            offeredLease: lease, currentLease: lease,
+            currentURL: URL(string: "https://games.example.test/player?game=sky&quality=high"),
+            isCurrentPooledView: true, isAttached: true, navigationStarted: true
+        )
+        #expect(badLease == nil && beforeNavigation == nil && oldView == nil)
+        #expect(retired == nil && revokedNonce == nil && revokedCredential == nil)
+        #expect(changedURL == nil)
+    }
+}
+
+
+
+@Test func prewarmSceneLedgerRequiresCurrentDocumentIdentityAndLease() {
+    let nonce = String(repeating: "a", count: 32)
+    let url = URL(string: "https://games.example.test/player?game=sky&quality=low")!
+    let expected = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: nonce,
+        credentialFingerprint: "anonymous-session-digest",
+        runtimeSessionID: "session-1"
+    )
+    var ledger = PlayerPrewarmSceneMilestoneLedger()
+    #expect(expected.isValid)
+    let observedLedgerTransition1 = !ledger.record(identity: expected, expected: expected, sequence: 1,
+                           milliseconds: 20, isMainFrame: false, isSpeculative: true,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition1)
+    let observedLedgerTransition2 = !ledger.record(identity: expected, expected: expected, sequence: 1,
+                           milliseconds: 20, isMainFrame: true, isSpeculative: false,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition2)
+    let observedLedgerTransition3 = !ledger.record(identity: expected, expected: expected, sequence: 1,
+                           milliseconds: 20, isMainFrame: true, isSpeculative: true,
+                           navigationStarted: false)
+    #expect(observedLedgerTransition3)
+    let observedLedgerTransition4 = !ledger.record(identity: expected, expected: expected, sequence: -1,
+                           milliseconds: 20, isMainFrame: true, isSpeculative: true,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition4)
+    let observedLedgerTransition5 = !ledger.record(identity: expected, expected: expected, sequence: 1,
+                           milliseconds: 3_600_001, isMainFrame: true, isSpeculative: true,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition5)
+    let observedLedgerTransition6 = ledger.record(identity: expected, expected: expected, sequence: 1,
+                          milliseconds: 20, isMainFrame: true, isSpeculative: true,
+                          navigationStarted: true)
+    #expect(observedLedgerTransition6)
+    let observedLedgerTransition7 = !ledger.record(identity: expected, expected: expected, sequence: 2,
+                           milliseconds: 30, isMainFrame: true, isSpeculative: true,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition7)
+    #expect(ledger.candidate?.milliseconds == 20)
+
+    let sameGameDifferentQuality = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky",
+        playerURL: URL(string: "https://games.example.test/player?game=sky&quality=high")!,
+        documentNonce: nonce, credentialFingerprint: "anonymous-session-digest",
+        runtimeSessionID: "session-1"
+    )
+    let accountChanged = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: nonce,
+        credentialFingerprint: "new-account-digest", runtimeSessionID: "session-1"
+    )
+    let otherGame = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "other", playerURL: url, documentNonce: nonce,
+        credentialFingerprint: "anonymous-session-digest", runtimeSessionID: "session-1"
+    )
+    let otherNonce = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: String(repeating: "b", count: 32),
+        credentialFingerprint: "anonymous-session-digest", runtimeSessionID: "session-1"
+    )
+    let otherSession = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: nonce,
+        credentialFingerprint: "anonymous-session-digest", runtimeSessionID: "session-2"
+    )
+    for wrong in [sameGameDifferentQuality, accountChanged, otherGame, otherNonce, otherSession] {
+        let observedLedgerTransition8 = ledger.consume(
+            expected: wrong, offeredLease: 15, currentLease: 15,
+            isCurrentPooledView: true, isAttached: true
+        ) == nil
+        #expect(observedLedgerTransition8)
+    }
+    let observedLedgerTransition9 = ledger.consume(
+        expected: expected, offeredLease: 14, currentLease: 15,
+        isCurrentPooledView: true, isAttached: true
+    ) == nil
+    #expect(observedLedgerTransition9)
+    let observedLedgerTransition10 = ledger.consume(
+        expected: expected, offeredLease: 0, currentLease: 0,
+        isCurrentPooledView: true, isAttached: true
+    ) == nil
+    #expect(observedLedgerTransition10)
+    let observedLedgerTransition11 = ledger.consume(
+        expected: expected, offeredLease: 15, currentLease: 15,
+        isCurrentPooledView: false, isAttached: true
+    ) == nil
+    #expect(observedLedgerTransition11)
+    let observedLedgerTransition12 = ledger.consume(
+        expected: expected, offeredLease: 15, currentLease: 15,
+        isCurrentPooledView: true, isAttached: false
+    ) == nil
+    #expect(observedLedgerTransition12)
+    #expect(ledger.candidate?.identity == expected)
+    let accepted = ledger.consume(
+        expected: expected, offeredLease: 15, currentLease: 15,
+        isCurrentPooledView: true, isAttached: true
+    )
+    #expect(accepted?.sequence == 1)
+    #expect(accepted?.milliseconds == 20)
+    #expect(ledger.hasTransferred)
+    #expect(ledger.candidate == nil)
+    let observedLedgerTransition13 = ledger.consume(
+        expected: expected, offeredLease: 15, currentLease: 15,
+        isCurrentPooledView: true, isAttached: true
+    ) == nil
+    #expect(observedLedgerTransition13)
+    let observedLedgerTransition14 = !ledger.record(identity: expected, expected: expected, sequence: 2,
+                           milliseconds: 30, isMainFrame: true, isSpeculative: true,
+                           navigationStarted: true)
+    #expect(observedLedgerTransition14)
+    ledger.invalidate()
+    #expect(!ledger.hasTransferred && ledger.candidate == nil)
+    let observedLedgerTransition15 = ledger.record(identity: expected, expected: expected, sequence: 0,
+                          milliseconds: 0, isMainFrame: true, isSpeculative: true,
+                          navigationStarted: true)
+    #expect(observedLedgerTransition15)
+}
+
+@Test func prewarmSceneLedgerRejectsMalformedIdentityAndStaleNonceAcross160Navigations() {
+    let url = URL(string: "https://games.example.test/player?game=sky")!
+    var epoch = PlayerNativeDocumentEpochGate()
+    var ledger = PlayerPrewarmSceneMilestoneLedger()
+    var previousNonce: String?
+    for sequence in 0..<160 {
+        let nonce = epoch.prepareNavigation()
+        let observedLedgerTransition16 = epoch.didStartNavigation()
+        #expect(observedLedgerTransition16)
+        let now = PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "credential-epoch-1", runtimeSessionID: "session-1"
+        )
+        if let oldNonce = previousNonce {
+            let stale = PlayerPrewarmSceneMilestoneLedger.Identity(
+                gameID: "sky", playerURL: url, documentNonce: oldNonce,
+                credentialFingerprint: "credential-epoch-1", runtimeSessionID: "session-1"
+            )
+            let observedLedgerTransition17 = !ledger.record(identity: stale, expected: now, sequence: sequence,
+                                   milliseconds: 1, isMainFrame: true, isSpeculative: true,
+                                   navigationStarted: true)
+            #expect(observedLedgerTransition17)
+        }
+        let observedLedgerTransition18 = ledger.record(identity: now, expected: now, sequence: sequence,
+                              milliseconds: 1, isMainFrame: true, isSpeculative: true,
+                              navigationStarted: true)
+        #expect(observedLedgerTransition18)
+        // A new navigation or credential epoch always drops the candidate.
+        ledger.invalidate()
+        #expect(ledger.candidate == nil)
+        previousNonce = nonce
+    }
+    let invalidNonce = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: "invalid",
+        credentialFingerprint: "credential-epoch-1", runtimeSessionID: "session-1"
+    )
+    let emptySession = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url, documentNonce: String(repeating: "c", count: 32),
+        credentialFingerprint: "credential-epoch-1", runtimeSessionID: ""
+    )
+    let insecureURL = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: URL(string: "http://games.example.test/player")!,
+        documentNonce: String(repeating: "c", count: 32),
+        credentialFingerprint: "credential-epoch-1", runtimeSessionID: "session-1"
+    )
+    let malformedURLs = [
+        "https://games.example.test/another?game=sky",
+        "https://games.example.test/player?game=sky&game=sky",
+        "https://games.example.test/player?game=foreign",
+        "https://games.example.test/player?game=sky#fragment",
+        "https://user:secret@games.example.test/player?game=sky"
+    ]
+    let forgedURLIdentities = malformedURLs.map { player in
+        PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: URL(string: player)!,
+            documentNonce: String(repeating: "c", count: 32),
+            credentialFingerprint: "credential-epoch-1",
+            runtimeSessionID: "session-1"
+        )
+    }
+    let invalidSessionIdentities = [
+        "contains space", String(repeating: "😀", count: 128),
+        String(repeating: "s", count: 129),
+        "e\u{301}"
+    ].map { session in
+        PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: url,
+            documentNonce: String(repeating: "c", count: 32),
+            credentialFingerprint: "credential-epoch-1",
+            runtimeSessionID: session
+        )
+    }
+    let overlongCredential = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky", playerURL: url,
+        documentNonce: String(repeating: "c", count: 32),
+        credentialFingerprint: String(repeating: "x", count: 257),
+        runtimeSessionID: "session-1"
+    )
+    for invalid in [invalidNonce, emptySession, insecureURL, overlongCredential] +
+        forgedURLIdentities + invalidSessionIdentities {
+        #expect(!invalid.isValid)
+        let observedLedgerTransition19 = !ledger.record(identity: invalid, expected: invalid,
+                               sequence: 1, milliseconds: 1,
+                               isMainFrame: true, isSpeculative: true,
+                               navigationStarted: true)
+        #expect(observedLedgerTransition19)
+    }
+}
+
+@Test func prewarmSceneLedgerRequiresCanonicalGameBinding() {
+    let nonce = String(repeating: "a", count: 32)
+    let legitimate = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "sky",
+        playerURL: URL(string: "https://games.example.test/player?game=sky&quality=low")!,
+        documentNonce: nonce, credentialFingerprint: "digest",
+        runtimeSessionID: "session"
+    )
+    #expect(legitimate.isValid)
+    for rawURL in [
+        "https://games.example.test/player?game=other",
+        "https://games.example.test/player?quality=low",
+        "https://games.example.test/player?game=sky&game=other",
+        "https://games.example.test/player?game=sky#stale-document",
+        "https://user:secret@games.example.test/player?game=sky",
+    ] {
+        let identity = PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: URL(string: rawURL)!,
+            documentNonce: nonce, credentialFingerprint: "digest",
+            runtimeSessionID: "session"
+        )
+        #expect(!identity.isValid)
+        var ledger = PlayerPrewarmSceneMilestoneLedger()
+        // Even if both observed and expected identities have the same
+        // malformed URL, they must never be eligible for transfer.
+        let accepted = ledger.record(
+            identity: identity, expected: identity,
+            sequence: 1, milliseconds: 20, isMainFrame: true,
+            isSpeculative: true, navigationStarted: true
+        )
+        #expect(!accepted)
+        #expect(ledger.candidate == nil)
+    }
+}
+
+
+
+@Test func posterVisualReleaseRequiresNativeSceneNotNavigationOrPrewarmHitAcross160Epochs() {
+    typealias Policy = PlayerPosterVisualRevealPolicy
+    let identity = PlayerPosterHoldPolicy.Attempt(
+        gameID: "sky",
+        playerURL: URL(string: "https://games.example.test/player?game=sky")!,
+        documentNonce: String(repeating: "a", count: 32),
+        credentialFingerprint: "hashed-native-epoch",
+        attachmentLease: 5
+    )
+    #expect(identity.isValid)
+    var poster = PlayerPosterHoldPolicy(attempt: identity)
+    poster.noteNavigationFinish(for: identity)
+    #expect(poster.mustHoldPoster) // didFinish must never release a scene
+    for epoch in 1...160 {
+        let wrongEpoch = Policy.allows(
+            expectedEpoch: epoch, currentEpoch: epoch + 1,
+            sessionRevoked: false, hasLoadError: false,
+            nativeAttemptMatches: true, milliseconds: 20
+        )
+        let revoked = Policy.allows(
+            expectedEpoch: epoch, currentEpoch: epoch,
+            sessionRevoked: true, hasLoadError: false,
+            nativeAttemptMatches: true, milliseconds: 20
+        )
+        let wrongIdentity = Policy.allows(
+            expectedEpoch: epoch, currentEpoch: epoch,
+            sessionRevoked: false, hasLoadError: false,
+            nativeAttemptMatches: false, milliseconds: 20
+        )
+        let activeError = Policy.allows(
+            expectedEpoch: epoch, currentEpoch: epoch,
+            sessionRevoked: false, hasLoadError: true,
+            nativeAttemptMatches: true, milliseconds: 20
+        )
+        #expect(!wrongEpoch && !revoked && !wrongIdentity && !activeError)
+        #expect(poster.mustHoldPoster)
+    }
+    let tooLate = Policy.allows(
+        expectedEpoch: 1, currentEpoch: 1, sessionRevoked: false,
+        hasLoadError: false, nativeAttemptMatches: true,
+        milliseconds: 3_600_001
+    )
+    #expect(!tooLate)
+    let accepted = Policy.allows(
+        expectedEpoch: 1, currentEpoch: 1, sessionRevoked: false,
+        hasLoadError: false, nativeAttemptMatches: true, milliseconds: 20
+    )
+    #expect(accepted)
+    let scene = poster.acceptTrustedSceneSubmission(
+        for: identity, validatedByNativeGate: accepted,
+        ownsCurrentAttachment: true
+    )
+    #expect(scene)
+    let firstReveal = poster.consumeReveal(for: identity, ownsCurrentAttachment: true)
+    #expect(firstReveal)
+    let secondReveal = poster.consumeReveal(for: identity, ownsCurrentAttachment: true)
+    #expect(!secondReveal)
+}
+
+
+
+@Test func speculativePrewarmSceneRecordCommitsOnlyStrictTrustedV2Document() {
+    typealias Capture = PlayerPrewarmSceneLedgerCapturePolicy
+    let nonce = String(repeating: "a", count: 32)
+    let identity = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "real-game",
+        playerURL: URL(string: "https://games.example.test/player?game=real-game&quality=low&presentation=play")!,
+        documentNonce: nonce, credentialFingerprint: "native-scope-hash",
+        runtimeSessionID: "strict-session-1"
+    )
+    let valid: [String: Any] = [
+        "schema": 2, "type": "player_metric",
+        "sessionId": "strict-session-1", "gameId": "real-game",
+        "documentNonce": nonce, "metric": "first_scene_render_submit",
+        "sequence": 1, "ms": 42
+    ]
+    var scene = PlayerPrewarmV2SceneMetricGate()
+    var ledger = PlayerPrewarmSceneMilestoneLedger()
+    #expect(identity.isValid)
+
+    // A rejected untrusted callback must not burn either one-shot slot.
+    for mutation in 0..<14 {
+        var body = valid
+        var trustedFrame = true
+        var sameOrigin = true
+        var beganNavigation = true
+        var credentialCurrent = true
+        let speculative = true
+        switch mutation {
+        case 0: body["schema"] = 1
+        case 1: body["documentNonce"] = String(repeating: "b", count: 32)
+        case 2: body["gameId"] = "another-game"
+        case 3: body["sessionId"] = "foreign-session"
+        case 4: body["metric"] = "first_input"
+        case 5: body["ms"] = true
+        case 6: body["sequence"] = true
+        case 7: body["type"] = "verified_run_available"
+        case 8: trustedFrame = false
+        case 9: sameOrigin = false
+        case 10: beganNavigation = false
+        case 11: credentialCurrent = false
+        case 12: body["sequence"] = 100_001 // malformed high mark never poisons either gate
+        default: body["ms"] = 3_600_001 // a too-late scene cannot become readiness
+        }
+        let accepted = Capture.capture(
+            body, identity: identity, currentDocumentNonce: nonce,
+            isTrustedMainFrame: trustedFrame, isSameOrigin: sameOrigin,
+            navigationStarted: beganNavigation,
+            credentialScopeCurrent: credentialCurrent,
+            isSpeculative: speculative,
+            gate: &scene, ledger: &ledger
+        )
+        #expect(!accepted)
+        #expect(scene.firstMilliseconds == nil)
+        #expect(ledger.candidate == nil)
+    }
+    let notPrewarm = Capture.capture(
+        valid, identity: identity, currentDocumentNonce: nonce,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true,
+        isSpeculative: false, gate: &scene, ledger: &ledger
+    )
+    #expect(!notPrewarm)
+    #expect(scene.firstMilliseconds == nil)
+    #expect(ledger.candidate == nil)
+
+    let accepted = Capture.capture(
+        valid, identity: identity, currentDocumentNonce: nonce,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true,
+        isSpeculative: true, gate: &scene, ledger: &ledger
+    )
+    #expect(accepted)
+    #expect(scene.firstMilliseconds == 42)
+    #expect(scene.firstSequence == 1)
+    #expect(scene.firstSessionID == "strict-session-1")
+    #expect(ledger.candidate?.identity == identity)
+    let duplicate = Capture.capture(
+        valid, identity: identity, currentDocumentNonce: nonce,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true,
+        isSpeculative: true, gate: &scene, ledger: &ledger
+    )
+    #expect(!duplicate)
+    #expect(ledger.candidate?.milliseconds == 42)
+}
+
+@Test func speculativePrewarmSceneRecordRejectsStaleDocumentsAcross160Nonces() {
+    typealias Capture = PlayerPrewarmSceneLedgerCapturePolicy
+    var epoch = PlayerNativeDocumentEpochGate()
+    var scene = PlayerPrewarmV2SceneMetricGate()
+    var ledger = PlayerPrewarmSceneMilestoneLedger()
+    var previousNonce: String?
+    for iteration in 1...160 {
+        let nonce = epoch.prepareNavigation()
+        let began = epoch.didStartNavigation()
+        #expect(began)
+        scene.reset()
+        ledger.invalidate()
+        let identity = PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "real-game",
+            playerURL: URL(string: "https://games.example.test/player?game=real-game")!,
+            documentNonce: nonce, credentialFingerprint: "native-scope",
+            runtimeSessionID: "session-1"
+        )
+        let body: [String: Any] = [
+            "schema": 2, "type": "player_metric",
+            "sessionId": "session-1", "gameId": "real-game",
+            "documentNonce": nonce, "metric": "first_scene_render_submit",
+            "sequence": iteration, "ms": 0
+        ]
+        if let old = previousNonce {
+            var staleBody = body
+            staleBody["documentNonce"] = old
+            let staleAccepted = Capture.capture(
+                staleBody, identity: identity, currentDocumentNonce: nonce,
+                isTrustedMainFrame: true, isSameOrigin: true,
+                navigationStarted: true, credentialScopeCurrent: true,
+                isSpeculative: true, gate: &scene, ledger: &ledger
+            )
+            #expect(!staleAccepted)
+            #expect(ledger.candidate == nil)
+        }
+        let accepted = Capture.capture(
+            body, identity: identity, currentDocumentNonce: nonce,
+            isTrustedMainFrame: true, isSameOrigin: true,
+            navigationStarted: true, credentialScopeCurrent: true,
+            isSpeculative: true, gate: &scene, ledger: &ledger
+        )
+        #expect(accepted)
+        #expect(ledger.candidate?.identity.documentNonce == nonce)
+        previousNonce = nonce
+    }
+}
+
+
+
+@Test func strictPrewarmAttachedIdentityMatchesOnlyCurrentNativeLeaseAcross160Transfers() {
+    typealias Policy = PlayerPrewarmAttachedSceneIdentityPolicy
+    let url = URL(string: "https://games.example.test/player?game=sky&quality=low")!
+    var ledger = PlayerPrewarmSceneMilestoneLedger()
+    for iteration in 1...160 {
+        ledger.invalidate()
+        let nonce = String(format: "%032x", iteration)
+        let identity = PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "credential-epoch-1",
+            runtimeSessionID: "current-session"
+        )
+        let recorded = ledger.record(
+            identity: identity, expected: identity,
+            sequence: iteration, milliseconds: 20,
+            isMainFrame: true, isSpeculative: true, navigationStarted: true
+        )
+        #expect(recorded)
+        guard let submission = ledger.candidate else {
+            Issue.record("Expected one speculative scene candidate")
+            continue
+        }
+        let lease = UInt64(iteration)
+        let valid = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        #expect(valid)
+        let oldLease = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease + 1,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let otherGame = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "other", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let otherNonce = Policy.matches(
+            submission, currentURL: url,
+            currentDocumentNonce: String(repeating: "f", count: 32),
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let rotatedAuth = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-2",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let newURL = Policy.matches(
+            submission,
+            currentURL: URL(string: "https://games.example.test/player?game=sky&quality=high"),
+            currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let unattached = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: false
+        )
+        let oldView = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: false, isAttached: true
+        )
+        let missingCredential = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: nil,
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let noLease = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: 0, currentLease: 0,
+            isCurrentPooledView: true, isAttached: true
+        )
+        #expect(!oldLease && !otherGame && !otherNonce && !rotatedAuth)
+        #expect(!newURL && !unattached && !oldView && !missingCredential && !noLease)
+        #expect(ledger.candidate == submission) // negatives never consume
+        let consumed = ledger.consume(
+            expected: identity, offeredLease: lease,
+            currentLease: lease, isCurrentPooledView: true, isAttached: true
+        )
+        #expect(consumed == submission)
+        let duplicate = ledger.consume(
+            expected: identity, offeredLease: lease,
+            currentLease: lease, isCurrentPooledView: true, isAttached: true
+        )
+        #expect(duplicate == nil)
+        #expect(ledger.hasTransferred && ledger.candidate == nil)
+    }
+}
+
