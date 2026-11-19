@@ -1470,7 +1470,7 @@ final class PlayerSmokeTests: XCTestCase {
                 blockedPlay.name = "arcade-pulse-real-play-obscured-by-native-tabs"
                 blockedPlay.lifetime = .keepAlways
                 add(blockedPlay)
-                print("GRID_REAL_PLAY_UNDER_TABS play=\\(play.frame) tabs=\\(nativeTabs.frame) scroll=\\(gridScroll.frame)")
+                print("GRID_REAL_PLAY_UNDER_TABS play=\(play.frame) tabs=\(nativeTabs.frame) scroll=\(gridScroll.frame)")
             }
             XCTAssertTrue(play.exists && play.isHittable,
                           "Real published game Play now must be physically reachable.")
