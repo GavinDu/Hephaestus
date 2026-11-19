@@ -848,6 +848,49 @@ struct HephaestusTests {
     }
 }
 
+@Test func playerLoadDiagnosticsCannotLeakNSErrorDescriptionsOrPrivateURLs() {
+    let secret = "https://private.example.test/player?token=private-bearer-abc123"
+    let privateUserInfo: [String: Any] = [
+        NSLocalizedDescriptionKey: "Internal backend failure: \(secret)",
+        NSLocalizedFailureReasonErrorKey: "Authorization secret from \(secret)",
+        NSURLErrorFailingURLStringErrorKey: secret,
+    ]
+    let transport = NSError(
+        domain: NSURLErrorDomain, code: NSURLErrorTimedOut,
+        userInfo: privateUserInfo
+    )
+    let httpDenied = NSError(
+        domain: PlayerLoadFailure.httpErrorDomain, code: 403,
+        userInfo: privateUserInfo
+    )
+    let arbitraryDomain = NSError(
+        domain: "private-domain-\(secret)", code: -987_654,
+        userInfo: privateUserInfo
+    )
+    let invalidStatus = NSError(
+        domain: PlayerLoadFailure.httpErrorDomain, code: 999,
+        userInfo: privateUserInfo
+    )
+    #expect(PlayerLoadFailure.safeDiagnostic(for: transport) ==
+            "url_error_code=\(NSURLErrorTimedOut) category=network")
+    #expect(PlayerLoadFailure.safeDiagnostic(for: httpDenied) ==
+            "http_status=403 category=accessDenied")
+    #expect(PlayerLoadFailure.safeDiagnostic(for: arbitraryDomain) ==
+            "other_error category=unknown")
+    #expect(PlayerLoadFailure.safeDiagnostic(for: invalidStatus) ==
+            "other_error category=unknown")
+    let examples: [NSError] = [transport, httpDenied, arbitraryDomain, invalidStatus]
+    for error in examples {
+        let safe = PlayerLoadFailure.safeDiagnostic(for: error)
+        #expect(!safe.contains(secret))
+        #expect(!safe.contains("Authorization"))
+        #expect(!safe.contains("private-domain"))
+        #expect(!safe.contains("token="))
+        #expect(!safe.contains("backend"))
+        #expect(safe.count < 90)
+    }
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
