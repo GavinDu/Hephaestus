@@ -3199,3 +3199,89 @@ struct HephaestusTests {
         originPort: 0, backendURL: backend
     ))
 }
+
+
+@Test func nativeLaunchReducerExhausts160OrderingAndRetirementSchedules() {
+    for index in 0..<160 {
+        var state = PlayerHostLaunchReducer()
+        #expect(state.phase == .navigating)
+        let inputMS = 10 + index
+        switch index % 4 {
+        case 0:
+            let nav = state.navigationFinished()
+            #expect(nav && state.phase == .documentLoaded)
+            let scene = state.sceneSubmitted()
+            #expect(scene && state.phase == .sceneSubmitted)
+            let input = state.firstInput(milliseconds: inputMS)
+            #expect(input && state.phase == .interactive)
+        case 1:
+            let input = state.firstInput(milliseconds: inputMS)
+            #expect(input && state.phase == .interactive)
+            let scene = state.sceneSubmitted()
+            let nav = state.navigationFinished()
+            #expect(scene && nav && state.phase == .interactive)
+        case 2:
+            let scene = state.sceneSubmitted()
+            #expect(scene && state.phase == .sceneSubmitted)
+            let nav = state.navigationFinished()
+            #expect(nav && state.phase == .sceneSubmitted)
+            let input = state.firstInput(milliseconds: inputMS)
+            #expect(input && state.phase == .interactive)
+        default:
+            let scene = state.sceneSubmitted()
+            let input = state.firstInput(milliseconds: inputMS)
+            let nav = state.navigationFinished()
+            #expect(scene && input && nav && state.phase == .interactive)
+        }
+        #expect(state.observedTerminalNavigation)
+        let duplicateNav = state.navigationFinished()
+        let duplicateScene = state.sceneSubmitted()
+        let duplicateInput = state.firstInput(milliseconds: inputMS + 1)
+        #expect(!duplicateNav && !duplicateScene && !duplicateInput)
+        #expect(state.phase == .interactive)
+        if index.isMultiple(of: 3) {
+            state.navigationStarted()
+            #expect(state.phase == .navigating)
+            #expect(!state.observedTerminalNavigation)
+            let freshScene = state.sceneSubmitted()
+            let freshInput = state.firstInput(milliseconds: inputMS)
+            #expect(freshScene && freshInput && state.phase == .interactive)
+        }
+        if index.isMultiple(of: 2) {
+            let terminated = state.webProcessTerminated()
+            #expect(terminated && state.phase == .webProcessTerminated)
+        } else {
+            state.detach()
+            #expect(state.phase == .detached)
+        }
+        let terminalPhase = state.phase
+        #expect(!state.permitsRuntimeEvents)
+        state.navigationStarted()
+        let staleNav = state.navigationFinished()
+        let staleScene = state.sceneSubmitted()
+        let staleInput = state.firstInput(milliseconds: inputMS + 3)
+        let repeatCrash = state.webProcessTerminated()
+        #expect(!staleNav && !staleScene && !staleInput && !repeatCrash)
+        #expect(state.phase == terminalPhase)
+        #expect(!PlayerHostCallbackDeliveryPolicy.mayDeliver(
+            ownsCurrentAttachment: true,
+            acceptsRuntimeEvents: state.permitsRuntimeEvents
+        ))
+    }
+}
+@Test func nativeLaunchReducerRejects160FatalNavigationResurrections() {
+    for index in 0..<160 {
+        var state = PlayerHostLaunchReducer()
+        let failed = state.navigationFailed()
+        #expect(failed && state.phase == .navigationFailed)
+        state.navigationStarted()
+        let nav = state.navigationFinished()
+        let scene = state.sceneSubmitted()
+        let input = state.firstInput(milliseconds: index)
+        let crash = state.webProcessTerminated()
+        #expect(!nav && !scene && !input && !crash)
+        #expect(state.phase == .navigationFailed)
+        #expect(!state.permitsRuntimeEvents)
+    }
+}
+
