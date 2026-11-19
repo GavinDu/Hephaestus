@@ -6,6 +6,12 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+/// Source-owned minimum for actual native Discover toolbar Button labels.
+/// An external ToolbarItem wrapper's size is NOT its accessible hitbox.
+enum DiscoverToolbarActionLayout {
+    static let minimumHitSize: CGFloat = ArcadePulseTheme.minimumTarget
+}
+
 // MARK: - Discover
 
 private struct PlayerResultPresentation: Identifiable {
@@ -197,8 +203,8 @@ struct DiscoverView: View {
     @State private var isLoading = false
     @State private var isSlowLoading = false
     @State private var searchText = ""
-    // .searchable may clear its transient text on a native landscape
-    // dismissal. Preserve a submitted query until a real Clear search.
+    // The native searchable draft can disappear on rotation; keep the actual
+    // user-submitted filter until they explicitly clear it.
     @State private var committedSearchQuery = ""
     @State private var savedGameIDs = Set<String>()
     @State private var followedCreatorIDs = Set<String>()
@@ -415,10 +421,8 @@ struct DiscoverView: View {
                         .accessibilityElement(children: .combine)
                     }
 
-                    // Native search can dismiss and clear its transient
-                    // input after a real landscape scroll. Keep a submitted
-                    // game's true result and offer an explicit 44pt exit,
-                    // rather than jumping the user back to For You mid-swipe.
+                    // A real title query must survive UIKit's native
+                    // search drawer collapse until explicit user clearing.
                     if !committedSearchQuery.isEmpty {
                         HStack {
                             Spacer(minLength: 0)
@@ -586,15 +590,13 @@ struct DiscoverView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
-                .padding(.bottom, 28 + FeedGridTabClearancePolicy.trailingInset(
+.padding(.bottom, 28 + FeedGridTabClearancePolicy.trailingInset(
                     isPhone: UIDevice.current.userInterfaceIdiom == .phone,
                     isCompactHeight: verticalSizeClass == .compact
                 ))
                         }
-                        // Native Search results live in this actual
-                        // non-immersive scroll surface. Give XCUITest an
-                        // explicit scroll owner after device rotation instead
-                        // of swiping the root app or floating tab bar.
+                        // Real filtered grid ScrollView owner after rotation:
+                        // never swipe the floating native tab bar.
                         .accessibilityIdentifier("feed.grid.scroll")
                     }
                 }
@@ -618,9 +620,6 @@ struct DiscoverView: View {
             .modifier(FeedSearchVisibilityModifier(
                 text: $searchText, hidesNativeSearch: usesCompactLandscapeOverlay))
             .onSubmit(of: .search) {
-                // A genuine keyboard Search is a committed user choice.
-                // UIKit may subsequently dismiss .searchable while the
-                // real filtered grid must remain available across rotation.
                 committedSearchQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             }
             .toolbar {
@@ -651,24 +650,39 @@ struct DiscoverView: View {
                         isFeedPreferencesPresented = true
                     } label: {
                         Image(systemName: "slider.horizontal.3")
+                            .frame(width: DiscoverToolbarActionLayout.minimumHitSize,
+                                   height: DiscoverToolbarActionLayout.minimumHitSize)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Tune feed recommendations")
+                    .accessibilityIdentifier("feed.toolbar.preferences")
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         isCreatorDiscoveryPresented = true
                     } label: {
                         Image(systemName: "person.2")
+                            .frame(width: DiscoverToolbarActionLayout.minimumHitSize,
+                                   height: DiscoverToolbarActionLayout.minimumHitSize)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Discover creators")
+                    .accessibilityIdentifier("feed.toolbar.creators")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await load() }
                     } label: {
                         Image(systemName: "arrow.clockwise")
+                            .frame(width: DiscoverToolbarActionLayout.minimumHitSize,
+                                   height: DiscoverToolbarActionLayout.minimumHitSize)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Refresh games")
+                    .accessibilityIdentifier("feed.toolbar.refresh")
                     .disabled(isLoading)
                 }
         }
@@ -2494,7 +2508,7 @@ private struct CreatorDiscoverySheet: View {
                         topicText: $topicText,
                         isLoading: isLoading
                     ) {
-                        Task { await load(reset: true) }
+                        submitCreatorQueryFromUI()
                     }
                 } header: {
                     Text("Topic")
@@ -2551,8 +2565,11 @@ private struct CreatorDiscoverySheet: View {
                                 CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
                                     for: creator.creator_id) == nil
                                 ? "Creator unavailable: invalid public identity"
-                                : "View creator \(creator.creator_id), " +
-                                  CreatorDirectoryRowLayout.publicGameCount(creator.post_count)
+                                : CreatorDirectoryRowLayout.accessibilityLabel(
+                                    creatorID: creator.creator_id,
+                                    count: creator.post_count,
+                                    topics: creator.topics
+                                )
                             )
                             .accessibilityIdentifier(
                                 CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
@@ -2602,7 +2619,10 @@ private struct CreatorDiscoverySheet: View {
             .navigationTitle("Creators")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt: "Search creators or games")
-            .onSubmit(of: .search) { Task { await load(reset: true) } }
+            // Both native fields route through ONE host-owned Search action.
+            .onSubmit(of: .search) {
+                submitCreatorQueryFromUI()
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
@@ -2627,6 +2647,14 @@ private struct CreatorDiscoverySheet: View {
                 )
             }
         }
+    }
+
+    /// Mark the native UI busy synchronously before starting the real GET.
+    /// Two Search/Apply callbacks in one run-loop cannot duplicate a reset.
+    private func submitCreatorQueryFromUI() {
+        guard CreatorQuerySubmitPolicy.canSubmit(isLoading: isLoading) else { return }
+        isLoading = true
+        Task { await load(reset: true) }
     }
 
     private func load(reset: Bool) async {
