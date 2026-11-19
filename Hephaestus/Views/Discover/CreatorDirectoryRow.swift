@@ -25,6 +25,35 @@ enum CreatorDirectoryRowLayout {
         let formatted = count.formatted()
         return count == 1 ? "\(formatted) public game" : "\(formatted) public games"
     }
+
+    /// Only a real, printable server topic earns a public "#" label.
+    /// Validate BEFORE taking five so invalid earlier tokens cannot hide a
+    /// later genuine topic. The backend still owns every displayed string.
+    static func publicTopicSummary(_ topics: [String]) -> String? {
+        let visible = topics.lazy.compactMap { raw -> String? in
+            let topic = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !topic.isEmpty,
+                  !topic.unicodeScalars.contains(where: {
+                      CharacterSet.controlCharacters.contains($0)
+                  }) else { return nil }
+            return "#\(topic)"
+        }.prefix(5)
+        let summary = visible.joined(separator: "  ")
+        return summary.isEmpty ? nil : summary
+    }
+
+    /// The parent Creator row button provides an explicit accessibility
+    /// label; it must include the very same filtered topics visible on screen
+    /// or VoiceOver users will lose all real topic information.
+    static func accessibilityLabel(
+        creatorID: String,
+        count: Int,
+        topics: [String]
+    ) -> String {
+        let base = "View creator \(creatorID), \(publicGameCount(count))"
+        guard let summary = publicTopicSummary(topics) else { return base }
+        return base + ", topics: " + summary
+    }
 }
 
 struct CreatorDirectoryRow: View {
@@ -64,8 +93,8 @@ struct CreatorDirectoryRow: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if !topics.isEmpty {
-                Text(topics.prefix(5).map { "#\($0)" }.joined(separator: "  "))
+            if let topicSummary = CreatorDirectoryRowLayout.publicTopicSummary(topics) {
+                Text(topicSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
