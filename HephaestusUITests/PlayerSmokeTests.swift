@@ -388,6 +388,62 @@ final class PlayerSmokeTests: XCTestCase {
         }
     }
 
+    /// Native keyboard Search and Topic Apply are the same real Creator
+    /// query. Never seed an artificial Creator when the deployed API fails.
+    @MainActor
+    func testArcadePulseCreatorTopicSearchKeyboardAndApplyAreReachable() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-feed-error-state")
+        app.launch()
+
+        let discover = app.buttons["Discover creators"].firstMatch
+        XCTAssertTrue(discover.waitForExistence(timeout: 15) && discover.isHittable,
+                      "Real Discover must expose the Creator Directory destination.")
+        discover.tap()
+
+        let topic = app.textFields["creator.discovery.topicInput"].firstMatch
+        let apply = app.buttons["creator.discovery.topicApply"].firstMatch
+        XCTAssertTrue(topic.waitForExistence(timeout: 10) && topic.isHittable)
+        XCTAssertTrue(apply.waitForExistence(timeout: 10) && apply.isHittable)
+        // These must be actual hit targets, not only oversized outer layout.
+        XCTAssertGreaterThanOrEqual(topic.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(apply.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(apply.frame.height, 44)
+
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "arcade-pulse-creator-native-apply-before-keyboard"
+        before.lifetime = .keepAlways
+        add(before)
+
+        topic.tap()
+        topic.typeText("puzzle\n")
+        XCTAssertEqual(topic.value as? String, "puzzle",
+                       "The actual topic input must preserve the typed query.")
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "arcade-pulse-creator-topic-search-portrait"
+        after.lifetime = .keepAlways
+        add(after)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let deadline = Date().addingTimeInterval(10)
+        while window.frame.width <= window.frame.height && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "Record actual landscape viewport, not rotated image metadata.")
+        XCTAssertTrue(topic.waitForExistence(timeout: 10))
+        XCTAssertTrue(apply.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(apply.frame.height, 44)
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-creator-topic-search-landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// Accessibility5 must not turn a readable dark Create prompt into an
     /// unreachable decorative field. Preserve original actual native pixels
     /// without picking a private photo, granting consent, or publishing.
@@ -446,6 +502,24 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8),
                       "The native Create keywords field must really receive keyboard focus.")
         keywords.typeText("puzzle")
+        // XCUITest can return from typeText before SwiftUI publishes the
+        // accessibility value. Wait for the *whole* actual native input,
+        // never accept a prefix such as "p" or inject a fake value.
+        let committed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "puzzle"),
+            object: keywords
+        )
+        let committedResult = XCTWaiter.wait(for: [committed], timeout: 5)
+        // Retain original native screenshot even when input commit fails.
+        let typedEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        typedEvidence.name = "arcade-pulse-create-keywords-a5-post-type-commit"
+        typedEvidence.lifetime = .keepAlways
+        add(typedEvidence)
+        XCTAssertEqual(
+            committedResult, .completed,
+            "Real Create field must commit every typed character within 5s; " +
+            "actual accessibility value: \(String(describing: keywords.value))"
+        )
         XCTAssertEqual(keywords.value as? String, "puzzle")
         let analyze = app.buttons["create.pick.analyze"].firstMatch
         XCTAssertTrue(analyze.exists && !analyze.isEnabled,
@@ -862,6 +936,76 @@ final class PlayerSmokeTests: XCTestCase {
                       "Returning from Library must restore the Discover navigation stack.")
     }
 
+    /// Native toolbar acceptance on actual Library/account state.
+    /// Assert disabled only when the genuine recent shelf is observed empty;
+    /// never fake a recent game or clear server-owned saved games to pass.
+    @MainActor
+    func testArcadePulseLibraryClearRecentToolbarHasReal44ptTarget() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-library-entry")
+        app.launch()
+
+        let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 15),
+                      "Native Library destination must be presented, not a toolbar fixture.")
+        let clear = app.buttons["library.toolbar.clearRecent"].firstMatch
+        XCTAssertTrue(clear.waitForExistence(timeout: 10),
+                      "The actual Library clear action must have a stable native identity.")
+        XCTAssertEqual(clear.label, "Clear recent")
+        XCTAssertEqual(app.buttons.matching(identifier: "library.toolbar.clearRecent").count, 1,
+                       "Exactly one native destructive toolbar action is allowed.")
+        // Native simulator history may legitimately contain a recently
+        // played REAL game from an earlier test. Test the disabled-state
+        // contract only when the actual Library declares its list empty,
+        // never reset/forge account history just to make this test green.
+        let actualEmptyRecent = app.staticTexts["No recent games"].firstMatch.exists
+        if actualEmptyRecent {
+            XCTAssertFalse(clear.isEnabled,
+                           "An actually empty Library must disable destructive Clear recent.")
+        }
+        func assertActualTarget(_ orientation: String) {
+            XCTAssertTrue(clear.exists, "Native Library toolbar action missing in \\(orientation).")
+            let rect = clear.frame
+            XCTAssertFalse(rect.isNull || rect.isEmpty)
+            XCTAssertGreaterThanOrEqual(rect.width + 0.000001, 44,
+                                        "Inner Clear recent action is narrower than 44pt.")
+            XCTAssertGreaterThanOrEqual(rect.height + 0.000001, 44,
+                                        "Inner Clear recent action is shorter than 44pt.")
+            XCTAssertTrue(app.windows.firstMatch.frame.intersects(rect),
+                          "Clear recent must remain within the genuine app window.")
+            let tabs = app.tabBars.firstMatch
+            if tabs.exists {
+                XCTAssertLessThan(rect.maxY, tabs.frame.minY,
+                                  "Destructive toolbar action cannot overlap native bottom tabs.")
+            }
+        }
+        assertActualTarget("portrait")
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-library-clear-recent-real-44pt-portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let deadline = Date().addingTimeInterval(12)
+        while window.frame.width <= window.frame.height && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "Real landscape view must not be a rotated portrait screenshot.")
+        assertActualTarget("landscape")
+        if actualEmptyRecent {
+            XCTAssertFalse(clear.isEnabled, "Rotation cannot enable an empty recent shelf's clear action.")
+        }
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-library-clear-recent-real-44pt-landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// The final privacy notice must remain readable in the native iPhone
     /// Library list, not disappear under the translucent bottom tab bar.
     /// This exercises real guest/session UI; it injects no saved games.
@@ -942,8 +1086,23 @@ final class PlayerSmokeTests: XCTestCase {
                              "A true native landscape frame is required for overlay evidence.")
         let tabs = app.tabBars.firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 8))
-        XCTAssertTrue(library.waitForExistence(timeout: 8),
-                      "Library must remain selected after physical rotation.")
+        // The exact same genuine guest CTA is now hosted in the top safe
+        // area instead of the Lazy List at compact A5. Previous exact-head
+        // CI proved a visual reorder alone still left its AX node absent.
+        // Require the CTA immediately after native rotation, and keep the
+        // subsequent real List gesture + one-action + Apple route assertions.
+        XCTAssertTrue(signIn.waitForExistence(timeout: 8) && signIn.isHittable,
+                      "Library must keep its genuine guest sign-in in native A5 landscape safe area.")
+        XCTAssertEqual(app.buttons.matching(identifier: "library.signIn").count, 1,
+                       "Only one real guest sign-in action may exist at landscape A5.")
+        XCTAssertGreaterThanOrEqual(signIn.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        XCTAssertLessThanOrEqual(signIn.frame.maxY, tabs.frame.minY - 4,
+                                 "Pinned guest route must remain wholly above native tab bar.")
+        let prioritized = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        prioritized.name = "arcade-pulse-library-a5-guest-first-landscape-before-scroll"
+        prioritized.lifetime = .keepAlways
+        add(prioritized)
 
         // SwiftUI List is lazy: the genuine sign-in row can be absent from
         // the accessibility tree until scrolled on-screen. Original failed
@@ -973,6 +1132,8 @@ final class PlayerSmokeTests: XCTestCase {
         add(afterPhysicalScroll)
         XCTAssertTrue(signIn.exists,
                       "Real Library sign-in must materialize after actual native scrolling.")
+        XCTAssertEqual(app.buttons.matching(identifier: "library.signIn").count, 1,
+                       "Guest Library must own exactly one real Profile sign-in action.")
         XCTAssertTrue(signIn.isHittable,
                       "Real Library sign-in must be reachable at Accessibility5 in landscape.")
         XCTAssertGreaterThanOrEqual(signIn.frame.width, 44)
@@ -1257,266 +1418,6 @@ final class PlayerSmokeTests: XCTestCase {
                       "Dismissing Details must return to the original browsable post.")
     }
 
-    /// Read the title of a real settled backend game, filter by its own
-    /// published title, then measure the actual GRID buttons. A concept,
-    /// test-only game or empty feed cannot satisfy this regression.
-    @MainActor
-    func testArcadePulseGameGridSocialActionsHaveTrue44ptTargets() throws {
-        XCUIDevice.shared.orientation = .portrait
-        let app = XCUIApplication()
-        self.app = app
-        app.launch()
-
-        let publishedTitle = app.staticTexts.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@",
-                        "feed.page.title.")
-        ).firstMatch
-        let retry = app.buttons["Try again"].firstMatch
-        let deadline = Date().addingTimeInterval(90)
-        var lastRetry = Date.distantPast
-        while !publishedTitle.exists && Date() < deadline {
-            if retry.exists && retry.isHittable &&
-               Date().timeIntervalSince(lastRetry) >= 20 {
-                retry.tap()
-                lastRetry = Date()
-            }
-            _ = publishedTitle.waitForExistence(timeout: 3)
-        }
-        if !publishedTitle.exists {
-            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            failure.name = "arcade-pulse-grid-no-genuine-published-game"
-            failure.lifetime = .keepAlways
-            add(failure)
-        }
-        XCTAssertTrue(publishedTitle.exists,
-                      "A genuine published game must exist before validating its grid actions.")
-        let title = publishedTitle.label
-        let firstWord = title.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).first
-        let query = String((firstWord.map(String.init) ?? title).prefix(8))
-        XCTAssertFalse(query.isEmpty)
-
-        let search = app.searchFields.firstMatch
-        if !search.exists { app.swipeDown() }
-        XCTAssertTrue(search.waitForExistence(timeout: 10) && search.isHittable,
-                      "Native Discover search must be reachable for genuine grid browsing.")
-        search.tap()
-        search.typeText(query)
-        // Native search results must be usable after the actual Search key,
-        // not merely geometrically present underneath the software keyboard.
-        let keyboardSearch = app.keyboards.buttons.matching(
-            NSPredicate(format: "label CONTAINS[c] %@", "search")
-        ).firstMatch
-        XCTAssertTrue(keyboardSearch.waitForExistence(timeout: 8),
-                      "Real searchable grid must provide the native Search action.")
-        keyboardSearch.tap()
-        let keyboardDeadline = Date().addingTimeInterval(8)
-        while app.keyboards.firstMatch.exists && Date() < keyboardDeadline {
-            Thread.sleep(forTimeInterval: 0.2)
-        }
-        XCTAssertFalse(app.keyboards.firstMatch.exists,
-                       "Search must dismiss the keyboard before evaluating grid reachability.")
-
-        let like = app.buttons["grid.game.social.like"].firstMatch
-        let comments = app.buttons["grid.game.social.comments"].firstMatch
-        let more = app.buttons["grid.game.social.more"].firstMatch
-        let save = app.buttons["grid.game.social.save"].firstMatch
-        let share = app.buttons["grid.game.social.share"].firstMatch
-        let actions = [like, comments, more, save, share]
-        for _ in 0..<5 where !like.exists || !like.isHittable {
-            app.swipeUp()
-        }
-        XCTAssertTrue(like.waitForExistence(timeout: 10) && like.isHittable,
-                      "A real filtered grid card must expose an actual Like action.")
-        for control in actions {
-            XCTAssertTrue(control.waitForExistence(timeout: 5),
-                          "All original grid actions must remain present after wrapping.")
-            let rect = control.frame
-            // XCUI frame conversion can encode an exact 44pt UIKit
-            // layout width as 43.999999999999986. Only forgive sub-micropt
-            // binary rounding; a genuinely 43.99pt target still fails.
-            let coordinateRoundingTolerance = 0.000001
-            XCTAssertGreaterThanOrEqual(rect.width + coordinateRoundingTolerance, 44,
-                                        "Actual grid action hitbox must be at least 44pt wide.")
-            XCTAssertGreaterThanOrEqual(rect.height + coordinateRoundingTolerance, 44,
-                                        "Actual grid action hitbox must be at least 44pt high.")
-        }
-        for i in actions.indices {
-            for j in actions.indices where i < j {
-                XCTAssertFalse(actions[i].frame.intersects(actions[j].frame),
-                               "Wrapped grid actions must not have overlapping touch rectangles.")
-            }
-        }
-        XCTAssertTrue(app.buttons["feed.grid.clearSearch"].firstMatch.waitForExistence(timeout: 8),
-                      "A submitted genuine filtered grid must provide an accessible Clear search exit.")
-        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        evidence.name = "arcade-pulse-real-grid-44pt-actions-portrait"
-        evidence.lifetime = .keepAlways
-        add(evidence)
-
-        // The same real search/grid must survive physical compact-landscape
-        // rotation; a larger picture export cannot prove tappable geometry.
-        XCUIDevice.shared.orientation = .landscapeLeft
-        let window = app.windows.firstMatch
-        let rotateDeadline = Date().addingTimeInterval(10)
-        while window.frame.width <= window.frame.height && Date() < rotateDeadline {
-            Thread.sleep(forTimeInterval: 0.2)
-        }
-        XCTAssertGreaterThan(window.frame.width, window.frame.height)
-        // The live grid is below the truthful Discover hero. In a genuine
-        // 874x402 landscape window, SwiftUI can remove the LazyVGrid row
-        // from the accessibility tree while it is offscreen. The previous
-        // test expected five controls to exist immediately after rotation
-        // even though portrait source and >=44pt geometry had all passed.
-        // Physically scroll the REAL grid owner to its real card; never
-        // substitute a fake game or weaken the hitbox assertion.
-        // A submitted real game query must persist when native .searchable
-        // transient text is cleared during rotation. Clear search is inside
-        // the genuine scrollable results, so it may be offscreen in a short
-        // landscape window; verify it in portrait before physical scrolling.
-        let gridScroll = app.scrollViews["feed.grid.scroll"].firstMatch
-        XCTAssertTrue(gridScroll.waitForExistence(timeout: 8),
-                      "A real searched grid must own the landscape scroll surface.")
-        /// XCUIElement.swipeUp() can choose a press origin underneath the
-        /// floating Create tab in the 874x402 compact window. The original
-        /// exact-head screenshot proved Create actually became selected.
-        /// Physically drag the real scroll surface using measured on-screen
-        /// coordinates exclusively above the floating tab bar; then verify
-        /// native Discover ownership after every gesture, never recover by
-        /// secretly switching tabs back.
-        func dragRealGridAboveTabs(_ phase: String) {
-            XCTAssertTrue(gridScroll.exists, "Real grid must exist before a \(phase) drag.")
-            let scrollFrame = gridScroll.frame
-            let appFrame = app.windows.firstMatch.frame
-            let tabs = app.tabBars.firstMatch
-            let top = max(scrollFrame.minY + 12, appFrame.minY + 42)
-            let bottom = min(scrollFrame.maxY - 12,
-                             tabs.exists ? tabs.frame.minY - 18 : appFrame.maxY - 24)
-            guard bottom - top > 90 else {
-                let noSafeArea = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-                noSafeArea.name = "arcade-pulse-no-safe-scroll-area-\(phase)"
-                noSafeArea.lifetime = .keepAlways
-                add(noSafeArea)
-                XCTFail("No usable Discover scroll region clear of the native floating tabs.")
-                return
-            }
-            let x = min(max(scrollFrame.midX, scrollFrame.minX + 30),
-                        scrollFrame.maxX - 30)
-            let fromY = bottom - 8
-            let toY = top + 8
-            print("GRID_NATIVE_SAFE_DRAG phase=\(phase) scroll=\(scrollFrame) tabs=\(tabs.frame) app=\(appFrame) from=(\(x),\(fromY)) to=(\(x),\(toY))")
-            let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-            let start = origin.withOffset(CGVector(dx: x, dy: fromY))
-            let finish = origin.withOffset(CGVector(dx: x, dy: toY))
-            start.press(forDuration: 0.12, thenDragTo: finish)
-            let stillDiscover = app.tabBars.buttons["Discover"].firstMatch.isSelected
-            if !stillDiscover || !gridScroll.exists {
-                let wrongDestination = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-                wrongDestination.name = "arcade-pulse-grid-native-drag-left-discover-\(phase)"
-                wrongDestination.lifetime = .keepAlways
-                add(wrongDestination)
-            }
-            XCTAssertTrue(stillDiscover,
-                          "Real grid scroll must not inadvertently activate Create or another tab.")
-            XCTAssertTrue(gridScroll.exists,
-                          "Actual filtered game grid cannot disappear after a safe Discover drag.")
-        }
-        for _ in 0..<8 {
-            if like.exists && like.isHittable { break }
-            if !gridScroll.exists {
-                let missingGrid = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-                missingGrid.name = "arcade-pulse-real-grid-scroll-owner-disappeared"
-                missingGrid.lifetime = .keepAlways
-                add(missingGrid)
-                XCTFail("Real Discover grid vanished during landscape; record selected tab and gesture hit region, do not assume search cleared.")
-                return
-            }
-            dragRealGridAboveTabs("compact-landscape")
-        }
-        if !like.exists || !like.isHittable {
-            let missingLandscapeCard = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            missingLandscapeCard.name = "arcade-pulse-real-grid-landscape-card-not-reachable"
-            missingLandscapeCard.lifetime = .keepAlways
-            add(missingLandscapeCard)
-            print("GRID_LANDSCAPE_NATIVE frame=\(window.frame) scroll=\(gridScroll.frame) like_exists=\(like.exists)")
-        }
-        XCTAssertTrue(like.exists && like.isHittable,
-                      "Genuine rotated grid must offer reachable social action after native scrolling.")
-        for control in actions {
-            XCTAssertTrue(control.waitForExistence(timeout: 5))
-            // Same sub-micropt binary frame tolerance in landscape.
-            XCTAssertGreaterThanOrEqual(control.frame.width + 0.000001, 44)
-            XCTAssertGreaterThanOrEqual(control.frame.height + 0.000001, 44)
-        }
-        // Original exact-head 874x402 screenshot found the floating
-        // native tabs sitting ON TOP OF the orange real Play now CTA,
-        // even while the social actions and safe grid drag all passed.
-        // Prove an actual user can now scroll Play fully ABOVE the tabs.
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            let nativeTabs = app.tabBars.firstMatch
-            let play = app.buttons["game.play"].firstMatch
-            XCTAssertTrue(nativeTabs.exists,
-                          "Compact iPhone must retain the real native tabs.")
-            let upperEdge = nativeTabs.frame.minY - 8
-            for _ in 0..<6 {
-                if play.exists && play.isHittable &&
-                    play.frame.minY >= gridScroll.frame.minY &&
-                    play.frame.maxY <= upperEdge { break }
-                dragRealGridAboveTabs("uncover-real-play")
-            }
-            if !play.exists || !play.isHittable ||
-                play.frame.minY < gridScroll.frame.minY ||
-                play.frame.maxY > upperEdge {
-                let blockedPlay = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-                blockedPlay.name = "arcade-pulse-real-play-obscured-by-native-tabs"
-                blockedPlay.lifetime = .keepAlways
-                add(blockedPlay)
-                print("GRID_REAL_PLAY_UNDER_TABS play=\(play.frame) tabs=\(nativeTabs.frame) scroll=\(gridScroll.frame)")
-            }
-            XCTAssertTrue(play.exists && play.isHittable,
-                          "Real published game Play now must be physically reachable.")
-            XCTAssertGreaterThanOrEqual(play.frame.minY, gridScroll.frame.minY,
-                                        "Play must be wholly inside its visible native grid.")
-            XCTAssertLessThanOrEqual(play.frame.maxY, upperEdge,
-                                     "Play now cannot remain occluded by floating native tabs.")
-            XCTAssertFalse(play.frame.intersects(nativeTabs.frame),
-                           "Play and native tabs cannot own the same physical touch region.")
-            XCTAssertTrue(app.tabBars.buttons["Discover"].firstMatch.isSelected,
-                          "Uncovering real Play cannot switch Discover to Create.")
-        }
-
-        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        landscape.name = "arcade-pulse-real-grid-44pt-actions-landscape"
-        landscape.lifetime = .keepAlways
-        add(landscape)
-        XCUIDevice.shared.orientation = .portrait
-
-        // Do not silently skip the actual navigation gate because SwiftUI
-        // virtualizes this real grid card during landscape→portrait rotation.
-        // Bring the same authentic result into view in its real scroll owner
-        // and require the native Comments sheet; no public POST is sent.
-        for _ in 0..<8 {
-            if comments.exists && comments.isHittable { break }
-            if !gridScroll.exists {
-                let missingGrid = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-                missingGrid.name = "arcade-pulse-real-grid-scroll-owner-lost-after-return"
-                missingGrid.lifetime = .keepAlways
-                add(missingGrid)
-                XCTFail("Real Discover grid missing after portrait return; do not bypass the genuine Comments action.")
-                return
-            }
-            dragRealGridAboveTabs("portrait-return")
-        }
-        XCTAssertTrue(comments.waitForExistence(timeout: 5) && comments.isHittable,
-                      "The genuine Comments button must remain reachable after returning to portrait.")
-        comments.tap()
-        XCTAssertTrue(app.staticTexts["COMMENTS ON"].firstMatch.waitForExistence(timeout: 10),
-                      "The genuine Comments sheet must remain reachable from the grid.")
-        let commentsEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        commentsEvidence.name = "arcade-pulse-real-grid-comments-sheet"
-        commentsEvidence.lifetime = .keepAlways
-        add(commentsEvidence)
-    }
-
     /// Verify the actual social sheet on a live feed, not the design render.
     /// No synthetic comments or engagement counters are injected.
     @MainActor
@@ -1647,6 +1548,80 @@ final class PlayerSmokeTests: XCTestCase {
         arrived.name = "arcade-pulse-ipad-after-studio-to-profile"
         arrived.lifetime = .keepAlways
         add(arrived)
+    }
+
+    /// Original iPad AX snapshots showed Refresh games as only 27x36pt
+    /// inside the native ToolbarItem. Verify the REAL inner buttons and
+    /// navigation, not merely source frame modifiers or a fake feed card.
+    @MainActor
+    func testArcadePulseDiscoverToolbarButtonsOwnFull44ptTargets() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+
+        let prefs = app.buttons["feed.toolbar.preferences"].firstMatch
+        let creators = app.buttons["feed.toolbar.creators"].firstMatch
+        let refresh = app.buttons["feed.toolbar.refresh"].firstMatch
+        let controls = [prefs, creators, refresh]
+
+        func requireActualHitTargets(_ orientation: String) {
+            for control in controls {
+                XCTAssertTrue(control.waitForExistence(timeout: 10),
+                              "Actual Discover toolbar must preserve all three controls in \(orientation).")
+                let rect = control.frame
+                XCTAssertGreaterThanOrEqual(rect.width + 0.000001, 44,
+                          "Actual toolbar Button must be at least 44pt wide, not its wrapper.")
+                XCTAssertGreaterThanOrEqual(rect.height + 0.000001, 44,
+                          "Actual toolbar Button must be at least 44pt high, not its wrapper.")
+            }
+            // Real 44pt controls must fit together, not merely report
+            // adequate dimensions while covering Search or each other.
+            for i in controls.indices {
+                for j in controls.indices where i < j {
+                    XCTAssertFalse(controls[i].frame.intersects(controls[j].frame),
+                                   "Discover toolbar touch rectangles must not overlap.")
+                }
+            }
+            let nativeSearch = app.searchFields.firstMatch
+            if nativeSearch.exists && nativeSearch.frame.width > 0 {
+                for control in controls {
+                    XCTAssertFalse(control.frame.intersects(nativeSearch.frame),
+                                   "Native toolbar buttons must not cover Find a game.")
+                }
+            }
+        }
+        requireActualHitTargets("portrait")
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-discover-toolbar-44pt-portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let window = app.windows.firstMatch
+            let until = Date().addingTimeInterval(12)
+            while window.frame.width <= window.frame.height && Date() < until {
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+            XCTAssertGreaterThan(window.frame.width, window.frame.height)
+            requireActualHitTargets("iPad landscape")
+            let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            landscape.name = "arcade-pulse-ipad-discover-toolbar-44pt-landscape"
+            landscape.lifetime = .keepAlways
+            add(landscape)
+        }
+
+        // Real owner-backed sheets work even if public feed data is offline.
+        XCTAssertTrue(creators.isHittable)
+        creators.tap()
+        XCTAssertTrue(app.navigationBars["Creators"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(prefs.waitForExistence(timeout: 10) && prefs.isHittable)
+        prefs.tap()
+        XCTAssertTrue(app.navigationBars["Tune your feed"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Done"].firstMatch.tap()
+        XCUIDevice.shared.orientation = .portrait
     }
 
     /// P1 #425: old 250pt sidebar at Accessibility5 broke real destination
@@ -1909,6 +1884,266 @@ final class PlayerSmokeTests: XCTestCase {
     /// Evaluate the native feed on both phone/tablet size classes and both
     /// orientations. Each profile launches from the first page so a swipe must
     /// prove a real page transition rather than inheriting a previous scroll.
+    /// Read the title of a real settled backend game, filter by its own
+    /// published title, then measure the actual GRID buttons. A concept,
+    /// test-only game or empty feed cannot satisfy this regression.
+    @MainActor
+    func testArcadePulseGameGridSocialActionsHaveTrue44ptTargets() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+
+        let publishedTitle = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@",
+                        "feed.page.title.")
+        ).firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let deadline = Date().addingTimeInterval(90)
+        var lastRetry = Date.distantPast
+        while !publishedTitle.exists && Date() < deadline {
+            if retry.exists && retry.isHittable &&
+               Date().timeIntervalSince(lastRetry) >= 20 {
+                retry.tap()
+                lastRetry = Date()
+            }
+            _ = publishedTitle.waitForExistence(timeout: 3)
+        }
+        if !publishedTitle.exists {
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "arcade-pulse-grid-no-genuine-published-game"
+            failure.lifetime = .keepAlways
+            add(failure)
+        }
+        XCTAssertTrue(publishedTitle.exists,
+                      "A genuine published game must exist before validating its grid actions.")
+        let title = publishedTitle.label
+        let firstWord = title.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).first
+        let query = String((firstWord.map(String.init) ?? title).prefix(8))
+        XCTAssertFalse(query.isEmpty)
+
+        let search = app.searchFields.firstMatch
+        if !search.exists { app.swipeDown() }
+        XCTAssertTrue(search.waitForExistence(timeout: 10) && search.isHittable,
+                      "Native Discover search must be reachable for genuine grid browsing.")
+        search.tap()
+        search.typeText(query)
+        // Native search results must be usable after the actual Search key,
+        // not merely geometrically present underneath the software keyboard.
+        let keyboardSearch = app.keyboards.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "search")
+        ).firstMatch
+        XCTAssertTrue(keyboardSearch.waitForExistence(timeout: 8),
+                      "Real searchable grid must provide the native Search action.")
+        keyboardSearch.tap()
+        let keyboardDeadline = Date().addingTimeInterval(8)
+        while app.keyboards.firstMatch.exists && Date() < keyboardDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertFalse(app.keyboards.firstMatch.exists,
+                       "Search must dismiss the keyboard before evaluating grid reachability.")
+
+        let like = app.buttons["grid.game.social.like"].firstMatch
+        let comments = app.buttons["grid.game.social.comments"].firstMatch
+        let more = app.buttons["grid.game.social.more"].firstMatch
+        let save = app.buttons["grid.game.social.save"].firstMatch
+        let share = app.buttons["grid.game.social.share"].firstMatch
+        let actions = [like, comments, more, save, share]
+        for _ in 0..<5 where !like.exists || !like.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(like.waitForExistence(timeout: 10) && like.isHittable,
+                      "A real filtered grid card must expose an actual Like action.")
+        for control in actions {
+            XCTAssertTrue(control.waitForExistence(timeout: 5),
+                          "All original grid actions must remain present after wrapping.")
+            let rect = control.frame
+            // XCUI frame conversion can encode an exact 44pt UIKit
+            // layout width as 43.999999999999986. Only forgive sub-micropt
+            // binary rounding; a genuinely 43.99pt target still fails.
+            let coordinateRoundingTolerance = 0.000001
+            XCTAssertGreaterThanOrEqual(rect.width + coordinateRoundingTolerance, 44,
+                                        "Actual grid action hitbox must be at least 44pt wide.")
+            XCTAssertGreaterThanOrEqual(rect.height + coordinateRoundingTolerance, 44,
+                                        "Actual grid action hitbox must be at least 44pt high.")
+        }
+        for i in actions.indices {
+            for j in actions.indices where i < j {
+                XCTAssertFalse(actions[i].frame.intersects(actions[j].frame),
+                               "Wrapped grid actions must not have overlapping touch rectangles.")
+            }
+        }
+        XCTAssertTrue(app.buttons["feed.grid.clearSearch"].firstMatch.waitForExistence(timeout: 8),
+                      "A submitted genuine filtered grid must provide an accessible Clear search exit.")
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "arcade-pulse-real-grid-44pt-actions-portrait"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+
+        // The same real search/grid must survive physical compact-landscape
+        // rotation; a larger picture export cannot prove tappable geometry.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let rotateDeadline = Date().addingTimeInterval(10)
+        while window.frame.width <= window.frame.height && Date() < rotateDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height)
+        // The live grid is below the truthful Discover hero. In a genuine
+        // 874x402 landscape window, SwiftUI can remove the LazyVGrid row
+        // from the accessibility tree while it is offscreen. The previous
+        // test expected five controls to exist immediately after rotation
+        // even though portrait source and >=44pt geometry had all passed.
+        // Physically scroll the REAL grid owner to its real card; never
+        // substitute a fake game or weaken the hitbox assertion.
+        // A submitted real game query must persist when native .searchable
+        // transient text is cleared during rotation. Clear search is inside
+        // the genuine scrollable results, so it may be offscreen in a short
+        // landscape window; verify it in portrait before physical scrolling.
+        let gridScroll = app.scrollViews["feed.grid.scroll"].firstMatch
+        XCTAssertTrue(gridScroll.waitForExistence(timeout: 8),
+                      "A real searched grid must own the landscape scroll surface.")
+        /// XCUIElement.swipeUp() can choose a press origin underneath the
+        /// floating Create tab in the 874x402 compact window. The original
+        /// exact-head screenshot proved Create actually became selected.
+        /// Physically drag the real scroll surface using measured on-screen
+        /// coordinates exclusively above the floating tab bar; then verify
+        /// native Discover ownership after every gesture, never recover by
+        /// secretly switching tabs back.
+        func dragRealGridAboveTabs(_ phase: String) {
+            XCTAssertTrue(gridScroll.exists, "Real grid must exist before a \(phase) drag.")
+            let scrollFrame = gridScroll.frame
+            let appFrame = app.windows.firstMatch.frame
+            let tabs = app.tabBars.firstMatch
+            let top = max(scrollFrame.minY + 12, appFrame.minY + 42)
+            let bottom = min(scrollFrame.maxY - 12,
+                             tabs.exists ? tabs.frame.minY - 18 : appFrame.maxY - 24)
+            guard bottom - top > 90 else {
+                let noSafeArea = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                noSafeArea.name = "arcade-pulse-no-safe-scroll-area-\(phase)"
+                noSafeArea.lifetime = .keepAlways
+                add(noSafeArea)
+                XCTFail("No usable Discover scroll region clear of the native floating tabs.")
+                return
+            }
+            let x = min(max(scrollFrame.midX, scrollFrame.minX + 30),
+                        scrollFrame.maxX - 30)
+            let fromY = bottom - 8
+            let toY = top + 8
+            print("GRID_NATIVE_SAFE_DRAG phase=\(phase) scroll=\(scrollFrame) tabs=\(tabs.frame) app=\(appFrame) from=(\(x),\(fromY)) to=(\(x),\(toY))")
+            let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            let start = origin.withOffset(CGVector(dx: x, dy: fromY))
+            let finish = origin.withOffset(CGVector(dx: x, dy: toY))
+            start.press(forDuration: 0.12, thenDragTo: finish)
+            let stillDiscover = app.tabBars.buttons["Discover"].firstMatch.isSelected
+            if !stillDiscover || !gridScroll.exists {
+                let wrongDestination = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                wrongDestination.name = "arcade-pulse-grid-native-drag-left-discover-\(phase)"
+                wrongDestination.lifetime = .keepAlways
+                add(wrongDestination)
+            }
+            XCTAssertTrue(stillDiscover,
+                          "Real grid scroll must not inadvertently activate Create or another tab.")
+            XCTAssertTrue(gridScroll.exists,
+                          "Actual filtered game grid cannot disappear after a safe Discover drag.")
+        }
+        for _ in 0..<8 {
+            if like.exists && like.isHittable { break }
+            if !gridScroll.exists {
+                let missingGrid = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                missingGrid.name = "arcade-pulse-real-grid-scroll-owner-disappeared"
+                missingGrid.lifetime = .keepAlways
+                add(missingGrid)
+                XCTFail("Real Discover grid vanished during landscape; record selected tab and gesture hit region, do not assume search cleared.")
+                return
+            }
+            dragRealGridAboveTabs("compact-landscape")
+        }
+        if !like.exists || !like.isHittable {
+            let missingLandscapeCard = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            missingLandscapeCard.name = "arcade-pulse-real-grid-landscape-card-not-reachable"
+            missingLandscapeCard.lifetime = .keepAlways
+            add(missingLandscapeCard)
+            print("GRID_LANDSCAPE_NATIVE frame=\(window.frame) scroll=\(gridScroll.frame) like_exists=\(like.exists)")
+        }
+        XCTAssertTrue(like.exists && like.isHittable,
+                      "Genuine rotated grid must offer reachable social action after native scrolling.")
+        for control in actions {
+            XCTAssertTrue(control.waitForExistence(timeout: 5))
+            // Same sub-micropt binary frame tolerance in landscape.
+            XCTAssertGreaterThanOrEqual(control.frame.width + 0.000001, 44)
+            XCTAssertGreaterThanOrEqual(control.frame.height + 0.000001, 44)
+        }
+        // Original exact-head 874x402 screenshot found the floating
+        // native tabs sitting ON TOP OF the orange real Play now CTA,
+        // even while the social actions and safe grid drag all passed.
+        // Prove an actual user can now scroll Play fully ABOVE the tabs.
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let nativeTabs = app.tabBars.firstMatch
+            let play = app.buttons["game.play"].firstMatch
+            XCTAssertTrue(nativeTabs.exists,
+                          "Compact iPhone must retain the real native tabs.")
+            let upperEdge = nativeTabs.frame.minY - 8
+            for _ in 0..<6 {
+                if play.exists && play.isHittable &&
+                    play.frame.minY >= gridScroll.frame.minY &&
+                    play.frame.maxY <= upperEdge { break }
+                dragRealGridAboveTabs("uncover-real-play")
+            }
+            if !play.exists || !play.isHittable ||
+                play.frame.minY < gridScroll.frame.minY ||
+                play.frame.maxY > upperEdge {
+                let blockedPlay = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                blockedPlay.name = "arcade-pulse-real-play-obscured-by-native-tabs"
+                blockedPlay.lifetime = .keepAlways
+                add(blockedPlay)
+                print("GRID_REAL_PLAY_UNDER_TABS play=\(play.frame) tabs=\(nativeTabs.frame) scroll=\(gridScroll.frame)")
+            }
+            XCTAssertTrue(play.exists && play.isHittable,
+                          "Real published game Play now must be physically reachable.")
+            XCTAssertGreaterThanOrEqual(play.frame.minY, gridScroll.frame.minY,
+                                        "Play must be wholly inside its visible native grid.")
+            XCTAssertLessThanOrEqual(play.frame.maxY, upperEdge,
+                                     "Play now cannot remain occluded by floating native tabs.")
+            XCTAssertFalse(play.frame.intersects(nativeTabs.frame),
+                           "Play and native tabs cannot own the same physical touch region.")
+            XCTAssertTrue(app.tabBars.buttons["Discover"].firstMatch.isSelected,
+                          "Uncovering real Play cannot switch Discover to Create.")
+        }
+
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-real-grid-44pt-actions-landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+        XCUIDevice.shared.orientation = .portrait
+
+        // Do not silently skip the actual navigation gate because SwiftUI
+        // virtualizes this real grid card during landscape→portrait rotation.
+        // Bring the same authentic result into view in its real scroll owner
+        // and require the native Comments sheet; no public POST is sent.
+        for _ in 0..<8 {
+            if comments.exists && comments.isHittable { break }
+            if !gridScroll.exists {
+                let missingGrid = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                missingGrid.name = "arcade-pulse-real-grid-scroll-owner-lost-after-return"
+                missingGrid.lifetime = .keepAlways
+                add(missingGrid)
+                XCTFail("Real Discover grid missing after portrait return; do not bypass the genuine Comments action.")
+                return
+            }
+            dragRealGridAboveTabs("portrait-return")
+        }
+        XCTAssertTrue(comments.waitForExistence(timeout: 5) && comments.isHittable,
+                      "The genuine Comments button must remain reachable after returning to portrait.")
+        comments.tap()
+        XCTAssertTrue(app.staticTexts["COMMENTS ON"].firstMatch.waitForExistence(timeout: 10),
+                      "The genuine Comments sheet must remain reachable from the grid.")
+        let commentsEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        commentsEvidence.name = "arcade-pulse-real-grid-comments-sheet"
+        commentsEvidence.lifetime = .keepAlways
+        add(commentsEvidence)
+    }
+
     @MainActor
     func testDiscoverFeedUIEvaluationAndSwipe() throws {
         let app = XCUIApplication()
@@ -2441,6 +2676,27 @@ final class PlayerSmokeTests: XCTestCase {
             print("UI_EVALUATOR_CREATOR_LARGE_TEXT source=no_hittable_creator; no fake test account")
         }
         actions.tap()
+        // #581: source defines Save and other native actions, but an original
+        // iPhone Accessibility5 failure showed the For You page still visible
+        // after tapping Actions: the native Game actions sheet had not mounted.
+        // Require the real sheet BEFORE querying its child rows so an absent
+        // presentation can never be mistaken for a missing Save label.
+        let mountedActionsDone = app.buttons["feed.actions.dismiss"].firstMatch
+        let actionSheetMounted = mountedActionsDone.waitForExistence(timeout: 10)
+        let actionMountEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        actionMountEvidence.name = actionSheetMounted
+            ? "feed-accessibility-xxxl-actions-sheet-mounted"
+            : "feed-accessibility-xxxl-actions-sheet-did-not-mount"
+        actionMountEvidence.lifetime = .keepAlways
+        add(actionMountEvidence)
+        if !actionSheetMounted {
+            let tabs = app.tabBars.firstMatch
+            print("A5_ACTION_SHEET_MOUNT_FAILURE actions_exists=\(actions.exists) actions_hittable=\(actions.isHittable) actions_frame=\(actions.frame) sheet_count=\(app.sheets.count) done_exists=\(mountedActionsDone.exists) tabs_exist=\(tabs.exists)")
+            XCTFail("The real Game actions sheet failed to mount after a genuine Actions tap; inspect original XCUIScreen rather than treating this as a missing Save row.")
+            return
+        }
+        XCTAssertTrue(mountedActionsDone.isHittable,
+                      "Actual mounted Game actions sheet must expose a hittable Done control.")
         // This menu reflects the *real* backend viewer state: previously
         // saved/liked games correctly show the inverse action, not a mock.
         for (name, allowed) in [
