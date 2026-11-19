@@ -438,6 +438,9 @@ enum PlayerPrewarmSceneLedgerCapturePolicy {
     ) -> Bool {
         guard identity.isValid,
               identity.documentNonce == currentDocumentNonce,
+              // Pin the stored candidate to the *exact* admitted session,
+              // not a different valid-but-attacker-selected message session.
+              body["sessionId"] as? String == identity.runtimeSessionID,
               let sequence = PlayerNativeMetricPayload.strictInt(body["sequence"]),
               let payload = PlayerNativeMetricPayload.parse(body),
               case let .firstSceneRenderSubmit(milliseconds) = payload
