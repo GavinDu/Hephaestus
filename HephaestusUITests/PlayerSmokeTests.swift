@@ -1367,11 +1367,24 @@ final class PlayerSmokeTests: XCTestCase {
         // even though portrait source and >=44pt geometry had all passed.
         // Physically scroll the REAL grid owner to its real card; never
         // substitute a fake game or weaken the hitbox assertion.
+        // A submitted real game query must persist even if native
+        // .searchable transient text is cleared during orientation changes.
+        // The clear action is an explicit user-controlled return to the feed.
+        XCTAssertTrue(app.buttons["feed.grid.clearSearch"].firstMatch.waitForExistence(timeout: 8),
+                      "The filtered grid must expose an explicit clear-search exit.")
         let gridScroll = app.scrollViews["feed.grid.scroll"].firstMatch
         XCTAssertTrue(gridScroll.waitForExistence(timeout: 8),
                       "A real searched grid must own the landscape scroll surface.")
         for _ in 0..<8 {
             if like.exists && like.isHittable { break }
+            if !gridScroll.exists {
+                let missingGrid = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                missingGrid.name = "arcade-pulse-real-grid-scroll-owner-disappeared"
+                missingGrid.lifetime = .keepAlways
+                add(missingGrid)
+                XCTFail("A committed real-game search must not turn into immersive For You during landscape scroll.")
+                return
+            }
             gridScroll.swipeUp()
         }
         if !like.exists || !like.isHittable {
@@ -1401,6 +1414,14 @@ final class PlayerSmokeTests: XCTestCase {
         // and require the native Comments sheet; no public POST is sent.
         for _ in 0..<8 {
             if comments.exists && comments.isHittable { break }
+            if !gridScroll.exists {
+                let missingGrid = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                missingGrid.name = "arcade-pulse-real-grid-scroll-owner-lost-after-return"
+                missingGrid.lifetime = .keepAlways
+                add(missingGrid)
+                XCTFail("Committed real-game search must survive return to portrait; do not bypass Comments navigation.")
+                return
+            }
             gridScroll.swipeUp()
         }
         XCTAssertTrue(comments.waitForExistence(timeout: 5) && comments.isHittable,
