@@ -13,6 +13,23 @@
 import XCTest
 import UIKit
 
+/// A fixed, privacy-safe code for live player-smoke failures.
+/// Never print game titles, backend URLs, bearer values, arbitrary NSError,
+/// creator profile text, or the full XCUI accessibility hierarchy.
+private func safePlayerSmokeFailureCode(_ message: String) -> String {
+    switch message {
+    case "Check your connection and try again.": return "network"
+    case "This game is no longer available. Return to the feed to try another game.": return "unavailable"
+    case "This game package is invalid or exceeds its resource limits. Return to the feed to try another game.": return "invalid_package"
+    case "This game needs a newer version of the app. Update the app and try again.": return "incompatible"
+    case "You don't have access to this game. Return to the feed or sign in again.": return "access_denied"
+    case "The player couldn't load this game.": return "unknown"
+    case "Your account session changed. Return to the feed and reopen this game.": return "session_revoked"
+    case "The game has not drawn its first scene. Tap Retry or return to the feed.": return "no_scene_timeout"
+    default: return "unclassified"
+    }
+}
+
 final class PlayerSmokeTests: XCTestCase {
 
     private var app: XCUIApplication?
@@ -37,6 +54,20 @@ final class PlayerSmokeTests: XCTestCase {
         }
         app = nil
         try super.tearDownWithError()
+    }
+
+    func testPlayerSmokeFailureClassificationRedactsUnknownErrorContent() {
+        XCTAssertEqual(safePlayerSmokeFailureCode("Check your connection and try again."), "network")
+        XCTAssertEqual(safePlayerSmokeFailureCode("The player couldn't load this game."), "unknown")
+        XCTAssertEqual(
+            safePlayerSmokeFailureCode("The game has not drawn its first scene. Tap Retry or return to the feed."),
+            "no_scene_timeout"
+        )
+        // Future arbitrary server/creator/URL messages are NEVER copied
+        // into the permanent CI log as an untrusted failure "reason".
+        let userSupplied = "token=private-value https://example.test/?creator=private"
+        XCTAssertEqual(safePlayerSmokeFailureCode(userSupplied), "unclassified")
+        XCTAssertEqual(safePlayerSmokeFailureCode(""), "unclassified")
     }
 
     @MainActor
@@ -148,10 +179,14 @@ final class PlayerSmokeTests: XCTestCase {
         while loading.exists && !failed.exists && Date() < navigationDeadline {
             Thread.sleep(forTimeInterval: 1)
         }
+        let errorText = app.staticTexts["player.error.message"].firstMatch
+        let safeReason = errorText.exists
+            ? safePlayerSmokeFailureCode(errorText.label) : "no_error_text"
+        let safeEvidence = "reason=\(safeReason) loading=\(loading.exists) retry=\(failed.exists) web=\(web.exists) done=\(done.exists)"
         XCTAssertFalse(failed.exists,
-                       "Player entered a recoverable failure instead of loading its game. UI: \\(app.debugDescription)")
+                       "Player entered a recoverable failure instead of loading its game. \(safeEvidence)")
         XCTAssertFalse(loading.exists,
-                       "Player remained on the loading overlay for 90 seconds. UI: \\(app.debugDescription)")
+                       "Player remained on the loading overlay for 90 seconds. \(safeEvidence)")
         // This certifies native navigation/overlay readiness, not a verified
         // in-game win or first-render frame. Browser playtest owns that gate.
         // The old source-only .frame on the toolbar Button passed existence,
