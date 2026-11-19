@@ -212,6 +212,7 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSocialWriteFailureDoesNotHideLiveGame \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseGameGridSocialActionsHaveTrue44ptTargets \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedPreferencesFailureStaysEditable \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseDiscoverToolbarButtonsOwnFull44ptTargets \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutState \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutAccessibilityTextSize \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateEntryConsentAndControls \
@@ -220,10 +221,12 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStalledTransportReachesHonestRecovery \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSlowLiveFeedCanOpenLibraryBeforeTimeout \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryCompactLandscapeSignInClearOfTabBar \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryClearRecentToolbarHasReal44ptTarget \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadSidebarXXLDestinationsAndProfileRoute \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadAccessibilityFiveSidebarHasRoomForWholeWords \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorGuestSignInRoutesToProfileAfterDismiss \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorTopicSearchKeyboardAndApplyAreReachable \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorDirectoryNormalDoneKeepsFeedDestination \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadGameDetailsAdaptiveLayout \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
