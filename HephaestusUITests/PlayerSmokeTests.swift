@@ -1447,6 +1447,43 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(control.frame.width + 0.000001, 44)
             XCTAssertGreaterThanOrEqual(control.frame.height + 0.000001, 44)
         }
+        // Original exact-head 874x402 screenshot found the floating
+        // native tabs sitting ON TOP OF the orange real Play now CTA,
+        // even while the social actions and safe grid drag all passed.
+        // Prove an actual user can now scroll Play fully ABOVE the tabs.
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let nativeTabs = app.tabBars.firstMatch
+            let play = app.buttons["game.play"].firstMatch
+            XCTAssertTrue(nativeTabs.exists,
+                          "Compact iPhone must retain the real native tabs.")
+            let upperEdge = nativeTabs.frame.minY - 8
+            for _ in 0..<6 {
+                if play.exists && play.isHittable &&
+                    play.frame.minY >= gridScroll.frame.minY &&
+                    play.frame.maxY <= upperEdge { break }
+                dragRealGridAboveTabs("uncover-real-play")
+            }
+            if !play.exists || !play.isHittable ||
+                play.frame.minY < gridScroll.frame.minY ||
+                play.frame.maxY > upperEdge {
+                let blockedPlay = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                blockedPlay.name = "arcade-pulse-real-play-obscured-by-native-tabs"
+                blockedPlay.lifetime = .keepAlways
+                add(blockedPlay)
+                print("GRID_REAL_PLAY_UNDER_TABS play=\\(play.frame) tabs=\\(nativeTabs.frame) scroll=\\(gridScroll.frame)")
+            }
+            XCTAssertTrue(play.exists && play.isHittable,
+                          "Real published game Play now must be physically reachable.")
+            XCTAssertGreaterThanOrEqual(play.frame.minY, gridScroll.frame.minY,
+                                        "Play must be wholly inside its visible native grid.")
+            XCTAssertLessThanOrEqual(play.frame.maxY, upperEdge,
+                                     "Play now cannot remain occluded by floating native tabs.")
+            XCTAssertFalse(play.frame.intersects(nativeTabs.frame),
+                           "Play and native tabs cannot own the same physical touch region.")
+            XCTAssertTrue(app.tabBars.buttons["Discover"].firstMatch.isSelected,
+                          "Uncovering real Play cannot switch Discover to Create.")
+        }
+
         let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         landscape.name = "arcade-pulse-real-grid-44pt-actions-landscape"
         landscape.lifetime = .keepAlways
