@@ -998,13 +998,19 @@ final class PlayerSmokeTests: XCTestCase {
                              "A true native landscape frame is required for overlay evidence.")
         let tabs = app.tabBars.firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 8))
-        // At A5 compact landscape, the actual Saved games guest route now
-        // precedes the decorative arcade intro. Do not require the intro to
-        // remain at the top of a lazy List after rotation.
-        let savedHeading = app.staticTexts["Saved games"].firstMatch
-        XCTAssertTrue(savedHeading.waitForExistence(timeout: 8) ||
-                      signIn.waitForExistence(timeout: 8),
-                      "Library must show the genuine saved-games guest entry after rotation.")
+        // The exact same genuine guest CTA is now hosted in the top safe
+        // area instead of the Lazy List at compact A5. Previous exact-head
+        // CI proved a visual reorder alone still left its AX node absent.
+        // Require the CTA immediately after native rotation, and keep the
+        // subsequent real List gesture + one-action + Apple route assertions.
+        XCTAssertTrue(signIn.waitForExistence(timeout: 8) && signIn.isHittable,
+                      "Library must keep its genuine guest sign-in in native A5 landscape safe area.")
+        XCTAssertEqual(app.buttons.matching(identifier: "library.signIn").count, 1,
+                       "Only one real guest sign-in action may exist at landscape A5.")
+        XCTAssertGreaterThanOrEqual(signIn.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        XCTAssertLessThanOrEqual(signIn.frame.maxY, tabs.frame.minY - 4,
+                                 "Pinned guest route must remain wholly above native tab bar.")
         let prioritized = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         prioritized.name = "arcade-pulse-library-a5-guest-first-landscape-before-scroll"
         prioritized.lifetime = .keepAlways
