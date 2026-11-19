@@ -53,7 +53,7 @@ struct CreatorStudioView: View {
                                 Text(filter.label).tag(filter)
                             }
                         }
-                        .pickerStyle(.segmented)
+                        .modifier(CreatorStudioProjectFilterPresentation())
                         .accessibilityIdentifier("studio.project.filter")
                         .onChange(of: selectedStatus) { _, _ in
                             Task { await load(reset: true) }
