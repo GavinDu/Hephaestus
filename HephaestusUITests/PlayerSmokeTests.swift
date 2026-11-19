@@ -1624,6 +1624,90 @@ final class PlayerSmokeTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    /// #578: default-size 44pt toolbar smoke alone cannot prove the real
+    /// iPhone/iPad Accessibility5 hitboxes and visual title/search clearance.
+    /// Use genuine system AccessibilityXXXL, original screen captures and
+    /// real native Creator/Preferences routes; no mocked public feed rows.
+    @MainActor
+    func testArcadePulseDiscoverToolbarAccessibilityFiveKeepsNative44ptActions() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+
+        let prefs = app.buttons["feed.toolbar.preferences"].firstMatch
+        let creators = app.buttons["feed.toolbar.creators"].firstMatch
+        let refresh = app.buttons["feed.toolbar.refresh"].firstMatch
+        let actions = [prefs, creators, refresh]
+        let window = app.windows.firstMatch
+
+        func validateActualButtons(_ context: String) {
+            let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            image.name = "arcade-pulse-discover-toolbar-a5-\(context)"
+            image.lifetime = .keepAlways
+            add(image)
+
+            XCTAssertTrue(window.exists)
+            let bounds = window.frame
+            for control in actions {
+                XCTAssertTrue(control.waitForExistence(timeout: 10),
+                              "Accessibility5 must retain all real toolbar controls in \(context).")
+                let rect = control.frame
+                print("DISCOVER_A5_TOOLBAR context=\(context) label=\(control.label) rect=\(rect) window=\(bounds)")
+                XCTAssertGreaterThanOrEqual(rect.width + 0.000001, 44,
+                                             "Actual toolbar Button width must be >=44pt at A5.")
+                XCTAssertGreaterThanOrEqual(rect.height + 0.000001, 44,
+                                             "Actual toolbar Button height must be >=44pt at A5.")
+                XCTAssertTrue(control.isHittable,
+                              "Actual A5 toolbar Button must be physically usable, not just in the AX tree.")
+                XCTAssertGreaterThanOrEqual(rect.minX, bounds.minX - 0.000001)
+                XCTAssertLessThanOrEqual(rect.maxX, bounds.maxX + 0.000001)
+                XCTAssertGreaterThanOrEqual(rect.minY, bounds.minY - 0.000001)
+                XCTAssertLessThanOrEqual(rect.maxY, bounds.maxY + 0.000001)
+            }
+            for i in actions.indices {
+                for j in actions.indices where i < j {
+                    XCTAssertFalse(actions[i].frame.intersects(actions[j].frame),
+                                   "Real Accessibility5 toolbar buttons cannot overlap.")
+                }
+            }
+            let search = app.searchFields.firstMatch
+            if search.exists && search.frame.width > 0 {
+                for control in actions {
+                    XCTAssertFalse(control.frame.intersects(search.frame),
+                                   "A5 toolbar button cannot cover native Find a game.")
+                }
+            }
+        }
+        validateActualButtons("portrait")
+
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let deadline = Date().addingTimeInterval(12)
+            while window.frame.width <= window.frame.height && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+            XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                                 "Actual iPad simulator must rotate before measuring A5.")
+            validateActualButtons("ipad-landscape")
+        }
+
+        // Check real routes independently of unavailable public creators.
+        XCTAssertTrue(creators.isHittable)
+        creators.tap()
+        XCTAssertTrue(app.navigationBars["Creators"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(prefs.waitForExistence(timeout: 10) && prefs.isHittable)
+        prefs.tap()
+        XCTAssertTrue(app.navigationBars["Tune your feed"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Done"].firstMatch.tap()
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// P1 #425: old 250pt sidebar at Accessibility5 broke real destination
     /// names *inside words* despite green route smoke. Inspect the untouched
     /// full-screen native frame; do not accept the XCUI label string alone.
