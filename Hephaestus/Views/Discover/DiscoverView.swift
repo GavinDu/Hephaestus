@@ -6,6 +6,12 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+/// Source-owned minimum for actual native Discover toolbar Button labels.
+/// An external ToolbarItem wrapper's size is NOT its accessible hitbox.
+enum DiscoverToolbarActionLayout {
+    static let minimumHitSize: CGFloat = ArcadePulseTheme.minimumTarget
+}
+
 // MARK: - Discover
 
 private struct PlayerResultPresentation: Identifiable {
@@ -585,24 +591,39 @@ struct DiscoverView: View {
                         isFeedPreferencesPresented = true
                     } label: {
                         Image(systemName: "slider.horizontal.3")
+                            .frame(width: DiscoverToolbarActionLayout.minimumHitSize,
+                                   height: DiscoverToolbarActionLayout.minimumHitSize)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Tune feed recommendations")
+                    .accessibilityIdentifier("feed.toolbar.preferences")
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         isCreatorDiscoveryPresented = true
                     } label: {
                         Image(systemName: "person.2")
+                            .frame(width: DiscoverToolbarActionLayout.minimumHitSize,
+                                   height: DiscoverToolbarActionLayout.minimumHitSize)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Discover creators")
+                    .accessibilityIdentifier("feed.toolbar.creators")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await load() }
                     } label: {
                         Image(systemName: "arrow.clockwise")
+                            .frame(width: DiscoverToolbarActionLayout.minimumHitSize,
+                                   height: DiscoverToolbarActionLayout.minimumHitSize)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Refresh games")
+                    .accessibilityIdentifier("feed.toolbar.refresh")
                     .disabled(isLoading)
                 }
         }
