@@ -376,13 +376,28 @@ struct VerifiedOnlyLeaderboardUnavailable: Decodable {
     let metric: String
     let order: String
 
-    enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case gameID = "gameId"
         case irHash, irSHA256 = "irSha256", window, metric, order
         case rankingScope, attestationAvailable, entries
     }
 
+    private struct AnyKey: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
     init(from decoder: Decoder) throws {
+        let allKeys = try decoder.container(keyedBy: AnyKey.self)
+        let exactKeys = Set(CodingKeys.allCases.map(\.stringValue))
+        guard Set(allKeys.allKeys.map(\.stringValue)) == exactKeys else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Unknown or missing verified leaderboard fields"
+            ))
+        }
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let gameID = try c.decode(String.self, forKey: .gameID)
         let irSHA256 = try c.decode(String.self, forKey: .irSHA256)
@@ -697,17 +712,24 @@ final class BackendAPI: ObservableObject {
     /// silently substitute the legacy provisional (browser-claimed) board.
     /// This method intentionally exposes no numeric rank or attested score.
     func fetchUnavailableVerifiedLeaderboard(
-        gameID: String, window: VerifiedLeaderboardWindow = .week
+        gameID: String, expectedIRSHA256: String,
+        window: VerifiedLeaderboardWindow = .week
     ) async throws -> VerifiedOnlyLeaderboardUnavailable {
-        guard VerifiedLeaderboardGameIDPolicy.valid(gameID) else {
-            throw APIError.invalidInput("Invalid game identifier.")
+        guard VerifiedLeaderboardGameIDPolicy.valid(gameID),
+              expectedIRSHA256.utf8.count == 64,
+              expectedIRSHA256.utf8.allSatisfy({ byte in
+                  (0x30...0x39).contains(byte) || (0x61...0x66).contains(byte)
+              })
+        else {
+            throw APIError.invalidInput("Invalid game or published IR identity.")
         }
         let req = try makeRequest(
             "v1/games/\(gameID)/leaderboard/verified?window=\(window.rawValue)"
         )
         let response = try await send(VerifiedOnlyLeaderboardUnavailable.self, req)
-        guard response.matchesRequest(gameID: gameID, window: window) else {
-            throw APIError.invalidInput("Verified leaderboard identity mismatch.")
+        guard response.matchesRequest(gameID: gameID, window: window),
+              response.irSHA256 == expectedIRSHA256 else {
+            throw APIError.invalidInput("Verified leaderboard package identity mismatch.")
         }
         return response
     }
