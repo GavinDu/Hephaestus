@@ -758,7 +758,7 @@ enum PlayerLoadFailure {
 
     /// Free-form local logs must not include private game identifiers or
     /// untrusted NSError metadata. Structured game identity, if needed by
-    /// telemetry, is carried separately through its audited typed field.
+    /// telemetry, uses its existing typed field (privacy audited separately).
     static func safeLocalLogMessage(for error: Error) -> String {
         "player load failed: \(safeDiagnostic(for: error))"
     }
