@@ -3245,3 +3245,75 @@ struct HephaestusTests {
         originPort: 0, backendURL: backend
     ))
 }
+
+@Test func nativeVerifiedOnlyLeaderboardRejectsProvisionalRankAndForgedPackage() {
+    let digest = String(repeating: "a", count: 64)
+    let shortDigest = String(repeating: "a", count: 12)
+    let payload = """
+    {"gameId":"real_game","irHash":"\(shortDigest)","irSha256":"\(digest)",
+     "window":"week","metric":"score","order":"desc",
+     "rankingScope":"verified_only","attestationAvailable":false,"entries":[]}
+    """
+    let decoder = JSONDecoder()
+    let valid = try? decoder.decode(
+        VerifiedOnlyLeaderboardUnavailable.self, from: Data(payload.utf8)
+    )
+    #expect(valid != nil)
+    #expect(valid?.gameID == "real_game")
+    #expect(valid?.irSHA256 == digest)
+    #expect(valid?.matchesRequest(gameID: "real_game", window: .week) == true)
+    #expect(valid?.matchesRequest(gameID: "real_game", window: .all) == false)
+    #expect(valid?.matchesRequest(gameID: "another", window: .week) == false)
+
+    // A legacy provisional board or browser-controlled rank cannot be
+    // promoted to verified simply by adding a convincing-looking field.
+    let malformed = [
+        payload.replacingOccurrences(
+            of: "\"rankingScope\":\"verified_only\"",
+            with: "\"rankingScope\":\"provisional\""),
+        payload.replacingOccurrences(
+            of: "\"attestationAvailable\":false",
+            with: "\"attestationAvailable\":true"),
+        payload.replacingOccurrences(
+            of: "\"attestationAvailable\":false",
+            with: "\"attestationAvailable\":\"false\""),
+        payload.replacingOccurrences(
+            of: "\"entries\":[]",
+            with: "\"entries\":[{\"position\":1,\"score\":999999}]"),
+        payload.replacingOccurrences(
+            of: "\"entries\":[]", with: "\"entries\":{\"position\":1}"),
+        payload.replacingOccurrences(
+            of: "\"entries\":[]", with: ""),
+        payload.replacingOccurrences(
+            of: "\"entries\":[]", with: "\"entries\":[],\"rank\":1"),
+        payload.replacingOccurrences(
+            of: "\"irHash\":\"\(shortDigest)\"",
+            with: "\"irHash\":\"bbbbbbbbbbbb\""),
+        payload.replacingOccurrences(
+            of: "\"irSha256\":\"\(digest)\"",
+            with: "\"irSha256\":\"\(digest.prefix(12))\""),
+        payload.replacingOccurrences(
+            of: "\"irSha256\":\"\(digest)\"",
+            with: "\"irSha256\":\"\(digest.uppercased())\""),
+        payload.replacingOccurrences(
+            of: "\"gameId\":\"real_game\"",
+            with: "\"gameId\":\"../../private\""),
+        payload.replacingOccurrences(
+            of: "\"window\":\"week\"",
+            with: "\"window\":\"last_year\"")
+    ]
+    for (caseIndex, json) in malformed.enumerated() {
+        let decoded = try? decoder.decode(
+            VerifiedOnlyLeaderboardUnavailable.self, from: Data(json.utf8)
+        )
+        #expect(decoded == nil, "malformed board case \(caseIndex) must fail closed")
+    }
+
+    for invalid in ["", ".", "..", "bad/path", "bad?window=all",
+                    "bad%2Fpath", "emoji💰", String(repeating: "x", count: 129)] {
+        #expect(!VerifiedLeaderboardGameIDPolicy.valid(invalid))
+    }
+    for allowed in ["published-game", "owner_game", "G1"] {
+        #expect(VerifiedLeaderboardGameIDPolicy.valid(allowed))
+    }
+}
