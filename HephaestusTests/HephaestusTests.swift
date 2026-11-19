@@ -3269,6 +3269,33 @@ struct HephaestusTests {
         ))
     }
 }
+@Test func nativeLaunchReducerRejects160FatalNavigationAfterEarlyRuntimeSignals() {
+    // WebKit may deliver an authenticated renderer or input event before
+    // didFinish. A later fatal main-frame failure must still retire the
+    // attachment and refuse every subsequent stale runtime callback.
+    for index in 0..<160 {
+        var state = PlayerHostLaunchReducer()
+        if index.isMultiple(of: 2) {
+            #expect(state.sceneSubmitted())
+            #expect(state.phase == .sceneSubmitted)
+        } else {
+            #expect(state.firstInput(milliseconds: index))
+            #expect(state.phase == .interactive)
+        }
+        #expect(!state.observedTerminalNavigation)
+        #expect(state.navigationFailed())
+        #expect(state.phase == .navigationFailed)
+        #expect(state.observedTerminalNavigation)
+        #expect(!state.permitsRuntimeEvents)
+        #expect(!state.navigationFinished())
+        #expect(!state.sceneSubmitted())
+        #expect(!state.firstInput(milliseconds: index + 1))
+        #expect(!state.webProcessTerminated())
+        state.navigationStarted()
+        #expect(state.phase == .navigationFailed)
+    }
+}
+
 @Test func nativeLaunchReducerRejects160FatalNavigationResurrections() {
     for index in 0..<160 {
         var state = PlayerHostLaunchReducer()
