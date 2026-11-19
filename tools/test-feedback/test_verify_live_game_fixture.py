@@ -259,7 +259,7 @@ class LiveGameFixtureTests(unittest.TestCase):
 
 
     def test_badly_typed_quarantine_flags_never_count_as_published(self):
-        for value in (True, "true", 1, {"value": False}):
+        for value in (True, "true", 0, 1, {"value": False}):
             with self.subTest(value=value):
                 result = fixture.candidates_in_feed({
                     "games": [public_game(quarantined=value)]
