@@ -998,8 +998,17 @@ final class PlayerSmokeTests: XCTestCase {
                              "A true native landscape frame is required for overlay evidence.")
         let tabs = app.tabBars.firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 8))
-        XCTAssertTrue(library.waitForExistence(timeout: 8),
-                      "Library must remain selected after physical rotation.")
+        // At A5 compact landscape, the actual Saved games guest route now
+        // precedes the decorative arcade intro. Do not require the intro to
+        // remain at the top of a lazy List after rotation.
+        let savedHeading = app.staticTexts["Saved games"].firstMatch
+        XCTAssertTrue(savedHeading.waitForExistence(timeout: 8) ||
+                      signIn.waitForExistence(timeout: 8),
+                      "Library must show the genuine saved-games guest entry after rotation.")
+        let prioritized = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        prioritized.name = "arcade-pulse-library-a5-guest-first-landscape-before-scroll"
+        prioritized.lifetime = .keepAlways
+        add(prioritized)
 
         // SwiftUI List is lazy: the genuine sign-in row can be absent from
         // the accessibility tree until scrolled on-screen. Original failed
@@ -1029,6 +1038,8 @@ final class PlayerSmokeTests: XCTestCase {
         add(afterPhysicalScroll)
         XCTAssertTrue(signIn.exists,
                       "Real Library sign-in must materialize after actual native scrolling.")
+        XCTAssertEqual(app.buttons.matching(identifier: "library.signIn").count, 1,
+                       "Guest Library must own exactly one real Profile sign-in action.")
         XCTAssertTrue(signIn.isHittable,
                       "Real Library sign-in must be reachable at Accessibility5 in landscape.")
         XCTAssertGreaterThanOrEqual(signIn.frame.width, 44)
