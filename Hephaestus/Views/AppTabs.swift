@@ -106,26 +106,44 @@ struct LibraryView: View {
             .accessibilityLabel(savedCountCaption.accessibilityLabel)
     }
 
+    /// When text is enormous and the available height is short, the guest
+    /// needs the actual account route before the noninteractive arcade intro.
+    /// Both sections remain present; iPad and normal text order never change.
+    private var prioritizeGuestSignIn: Bool {
+        LibraryGuestSignInPriorityPolicy.putsSignInFirst(
+            isPhone: UIDevice.current.userInterfaceIdiom == .phone,
+            isCompactHeight: verticalSizeClass == .compact,
+            isAccessibilitySize: dynamicTypeSize.isAccessibilitySize,
+            isGuest: BackendConfig.currentUserID.isEmpty
+        )
+    }
+
+    private var arcadeIntroSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("YOUR ARCADE", systemImage: "gamecontroller.fill")
+                    .font(.caption.weight(.bold))
+                    .tracking(0.8)
+                    .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                Text("Jump back into play")
+                    .font(.system(.title2, design: .rounded).weight(.bold))
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("library.arcadePulse")
+                Text("Saved and recently played games in one place.")
+                    .font(.subheadline)
+                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 8)
+            .listRowBackground(ArcadePulseTheme.surface)
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("YOUR ARCADE", systemImage: "gamecontroller.fill")
-                            .font(.caption.weight(.bold))
-                            .tracking(0.8)
-                            .foregroundStyle(ArcadePulseTheme.neonMagenta)
-                        Text("Jump back into play")
-                            .font(.system(.title2, design: .rounded).weight(.bold))
-                            .accessibilityAddTraits(.isHeader)
-                            .accessibilityIdentifier("library.arcadePulse")
-                        Text("Saved and recently played games in one place.")
-                            .font(.subheadline)
-                            .foregroundStyle(ArcadePulseTheme.textSecondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 8)
-                    .listRowBackground(ArcadePulseTheme.surface)
+                if !prioritizeGuestSignIn {
+                    arcadeIntroSection
                 }
                 // The empty-state recovery already explains fetch errors;
                 // reserve this banner for failures while cards are visible.
@@ -227,6 +245,9 @@ struct LibraryView: View {
                     savedGamesSectionHeader
                 }
 
+                if prioritizeGuestSignIn {
+                    arcadeIntroSection
+                }
                 Section {
                     if visibleRecent.isEmpty {
                         ContentUnavailableView(
@@ -479,6 +500,18 @@ enum LibrarySavedCountCaption {
 /// A scroll-end inset is intentionally separate from the existing portrait
 /// footer spacing: it must be enough for an actual 48pt CTA plus breathing
 /// room above native tabs without taking space from the iPad sidebar.
+/// Keep the existing real Library CTA reachable on a short, huge-text
+/// iPhone guest screen without dropping, shrinking or duplicating content.
+/// Only visual order changes; identity and navigation are unchanged.
+enum LibraryGuestSignInPriorityPolicy {
+    static func putsSignInFirst(
+        isPhone: Bool, isCompactHeight: Bool,
+        isAccessibilitySize: Bool, isGuest: Bool
+    ) -> Bool {
+        isPhone && isCompactHeight && isAccessibilitySize && isGuest
+    }
+}
+
 enum LibraryTabBarClearancePolicy {
     static let compactPhoneTrailingInset: CGFloat = 72
 
