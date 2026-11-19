@@ -3273,3 +3273,63 @@ struct HephaestusTests {
     }
 }
 
+
+@Test func posterVisualReleaseRequiresNativeSceneNotNavigationOrPrewarmHitAcross160Epochs() {
+    typealias Policy = PlayerPosterVisualRevealPolicy
+    let identity = PlayerPosterHoldPolicy.Attempt(
+        gameID: "sky",
+        playerURL: URL(string: "https://games.example.test/player?game=sky")!,
+        documentNonce: String(repeating: "a", count: 32),
+        credentialFingerprint: "hashed-native-epoch",
+        attachmentLease: 5
+    )
+    #expect(identity.isValid)
+    var poster = PlayerPosterHoldPolicy(attempt: identity)
+    poster.noteNavigationFinish(for: identity)
+    #expect(poster.mustHoldPoster) // didFinish must never release a scene
+    for epoch in 1...160 {
+        let wrongEpoch = Policy.allows(
+            expectedEpoch: epoch, currentEpoch: epoch + 1,
+            sessionRevoked: false, hasLoadError: false,
+            nativeAttemptMatches: true, milliseconds: 20
+        )
+        let revoked = Policy.allows(
+            expectedEpoch: epoch, currentEpoch: epoch,
+            sessionRevoked: true, hasLoadError: false,
+            nativeAttemptMatches: true, milliseconds: 20
+        )
+        let wrongIdentity = Policy.allows(
+            expectedEpoch: epoch, currentEpoch: epoch,
+            sessionRevoked: false, hasLoadError: false,
+            nativeAttemptMatches: false, milliseconds: 20
+        )
+        let activeError = Policy.allows(
+            expectedEpoch: epoch, currentEpoch: epoch,
+            sessionRevoked: false, hasLoadError: true,
+            nativeAttemptMatches: true, milliseconds: 20
+        )
+        #expect(!wrongEpoch && !revoked && !wrongIdentity && !activeError)
+        #expect(poster.mustHoldPoster)
+    }
+    let tooLate = Policy.allows(
+        expectedEpoch: 1, currentEpoch: 1, sessionRevoked: false,
+        hasLoadError: false, nativeAttemptMatches: true,
+        milliseconds: 3_600_001
+    )
+    #expect(!tooLate)
+    let accepted = Policy.allows(
+        expectedEpoch: 1, currentEpoch: 1, sessionRevoked: false,
+        hasLoadError: false, nativeAttemptMatches: true, milliseconds: 20
+    )
+    #expect(accepted)
+    let scene = poster.acceptTrustedSceneSubmission(
+        for: identity, validatedByNativeGate: accepted,
+        ownsCurrentAttachment: true
+    )
+    #expect(scene)
+    let firstReveal = poster.consumeReveal(for: identity, ownsCurrentAttachment: true)
+    #expect(firstReveal)
+    let secondReveal = poster.consumeReveal(for: identity, ownsCurrentAttachment: true)
+    #expect(!secondReveal)
+}
+
