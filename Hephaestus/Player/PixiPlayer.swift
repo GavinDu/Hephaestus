@@ -2255,6 +2255,11 @@ struct PixiPlayerSheet: View {
                 DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView (quality \(activeQuality ?? effectiveQuality))")
             }
             .onDisappear {
+                // A dismissed sheet cannot be resurrected by a delayed scene
+                // callback or its 300ms poster fade task.
+                posterPolicy?.retire()
+                posterPolicy = nil
+                posterAttemptForEpoch = nil
                 guard let startedAt = gameplayStartedAt, didTrackGameplayStart else { return }
                 let durationMS = max(0, Int(Date().timeIntervalSince(startedAt) * 1000))
                 if GameplayTelemetryPolicy.shouldTrackQuickExit(durationMS: durationMS) {
