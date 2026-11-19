@@ -784,17 +784,38 @@ final class PlayerSmokeTests: XCTestCase {
                               "arcade-pulse-stalled-feed-iphone-portrait"
         timeout.lifetime = .keepAlways
         add(timeout)
-        // Retry starts a NEW genuine (in this test: deliberately stalled)
-        // transport. It must not be canceled by the old watchdog generation.
+        // Stable evidence comes from the genuine FeedRequestCoordinator.begin
+        // operation, not a loading spinner that may vanish between XCUI polls.
+        // Expiration increments generation but MUST NOT increment starts.
+        let prefix = "Request attempts "
+        guard let oldValue = retry.value as? String,
+              oldValue.hasPrefix(prefix),
+              let oldStarts = Int(oldValue.dropFirst(prefix.count)) else {
+            XCTFail("Real Retry must expose its started-transport count.")
+            return
+        }
         retry.tap()
-        // The loader HStack is intentionally one accessibility element
-        // labelled "Loading games", not a separately exposed static text.
-        let loading = app.descendants(matching: .any)["Loading games"].firstMatch
-        XCTAssertTrue(loading.waitForExistence(timeout: 6),
-                      "Retry must leave the prior error and start a new actual transport attempt.")
-        XCTAssertFalse(title.exists, "The old recovery must clear during a new request.")
-        XCTAssertTrue(title.waitForExistence(timeout: 20),
-                      "A new attempt must independently reach its own recovery without mock success.")
+        // A real second request deliberately stalls and reaches its own 10s
+        // watchdog. Poll only the final native Retry value; never fabricate a
+        // loading state, success response, game card, or network event.
+        let deadline = Date().addingTimeInterval(26)
+        var newStarts: Int?
+        while Date() < deadline {
+            if retry.exists,
+               let value = retry.value as? String,
+               value.hasPrefix(prefix),
+               let count = Int(value.dropFirst(prefix.count)),
+               count > oldStarts {
+                newStarts = count
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+        XCTAssertEqual(newStarts, oldStarts + 1,
+                       "One Retry must start exactly one new real transport attempt.")
+        XCTAssertTrue(title.exists,
+                      "The second real attempt must reach honest bounded recovery.")
+        XCTAssertTrue(retry.isHittable && library.isHittable)
         XCTAssertFalse(app.buttons["game.play"].firstMatch.exists)
         XCUIDevice.shared.orientation = .portrait
     }
