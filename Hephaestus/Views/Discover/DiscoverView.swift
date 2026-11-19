@@ -1,6 +1,7 @@
 import AuthenticationServices
 import AVFoundation
 import Combine
+import Foundation
 import Network
 import PhotosUI
 import SwiftUI
@@ -10,6 +11,27 @@ import UIKit
 /// An external ToolbarItem wrapper's size is NOT its accessible hitbox.
 enum DiscoverToolbarActionLayout {
     static let minimumHitSize: CGFloat = ArcadePulseTheme.minimumTarget
+}
+
+/// The immersive spotlight must not consume one of the three visible or
+/// spoken topic slots with blank or control-character producer data. A single
+/// original-order subset drives screen and VoiceOver; no categories invented.
+enum ForYouSpotlightTopicPolicy {
+    static func summary(_ topics: [String]?) -> (visual: String, spoken: String)? {
+        let genuine = Array((topics ?? []).lazy.compactMap { raw -> String? in
+            let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty,
+                  !label.unicodeScalars.contains(where: {
+                      CharacterSet.controlCharacters.contains($0)
+                  }) else { return nil }
+            return label
+        }.prefix(3))
+        guard !genuine.isEmpty else { return nil }
+        return (
+            visual: genuine.map { "#\($0)" }.joined(separator: "  "),
+            spoken: "Topics: " + genuine.joined(separator: ", ")
+        )
+    }
 }
 
 // MARK: - Discover
@@ -1660,12 +1682,12 @@ private struct ForYouGamePage: View {
                     .foregroundStyle(.white.opacity(0.94))
                     .lineLimit(2)
             }
-            if !isCompact, let topics = game.topics, !topics.isEmpty {
-                Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
+            if !isCompact, let topics = ForYouSpotlightTopicPolicy.summary(game.topics) {
+                Text(topics.visual)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
-                    .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
+                    .accessibilityLabel(topics.spoken)
             }
             if !isCompact, let expression = game.playableExpression, expression.source_visibility == "public" {
                 Button { showsExpressionDetails = true } label: {
