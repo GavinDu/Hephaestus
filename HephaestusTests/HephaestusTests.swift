@@ -3440,3 +3440,136 @@ struct HephaestusTests {
     }
 }
 
+
+@Test func speculativePrewarmSceneRecordCommitsOnlyStrictTrustedV2Document() {
+    typealias Capture = PlayerPrewarmSceneLedgerCapturePolicy
+    let nonce = String(repeating: "a", count: 32)
+    let identity = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "real-game",
+        playerURL: URL(string: "https://games.example.test/player?game=real-game&quality=low&presentation=play")!,
+        documentNonce: nonce, credentialFingerprint: "native-scope-hash",
+        runtimeSessionID: "strict-session-1"
+    )
+    let valid: [String: Any] = [
+        "schema": 2, "type": "player_metric",
+        "sessionId": "strict-session-1", "gameId": "real-game",
+        "documentNonce": nonce, "metric": "first_scene_render_submit",
+        "sequence": 1, "ms": 42
+    ]
+    var scene = PlayerPrewarmV2SceneMetricGate()
+    var ledger = PlayerPrewarmSceneMilestoneLedger()
+    #expect(identity.isValid)
+
+    // A rejected untrusted callback must not burn either one-shot slot.
+    for mutation in 0..<12 {
+        var body = valid
+        var trustedFrame = true
+        var sameOrigin = true
+        var beganNavigation = true
+        var credentialCurrent = true
+        var speculative = true
+        switch mutation {
+        case 0: body["schema"] = 1
+        case 1: body["documentNonce"] = String(repeating: "b", count: 32)
+        case 2: body["gameId"] = "another-game"
+        case 3: body["sessionId"] = "foreign-session"
+        case 4: body["metric"] = "first_input"
+        case 5: body["ms"] = true
+        case 6: body["sequence"] = true
+        case 7: body["type"] = "verified_run_available"
+        case 8: trustedFrame = false
+        case 9: sameOrigin = false
+        case 10: beganNavigation = false
+        default: credentialCurrent = false
+        }
+        let accepted = Capture.capture(
+            body, identity: identity, currentDocumentNonce: nonce,
+            isTrustedMainFrame: trustedFrame, isSameOrigin: sameOrigin,
+            navigationStarted: beganNavigation,
+            credentialScopeCurrent: credentialCurrent,
+            isSpeculative: speculative,
+            gate: &scene, ledger: &ledger
+        )
+        #expect(!accepted)
+        #expect(scene.firstMilliseconds == nil)
+        #expect(ledger.candidate == nil)
+    }
+    let notPrewarm = Capture.capture(
+        valid, identity: identity, currentDocumentNonce: nonce,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true,
+        isSpeculative: false, gate: &scene, ledger: &ledger
+    )
+    #expect(!notPrewarm)
+    #expect(scene.firstMilliseconds == nil)
+    #expect(ledger.candidate == nil)
+
+    let accepted = Capture.capture(
+        valid, identity: identity, currentDocumentNonce: nonce,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true,
+        isSpeculative: true, gate: &scene, ledger: &ledger
+    )
+    #expect(accepted)
+    #expect(scene.firstMilliseconds == 42)
+    #expect(scene.firstSequence == 1)
+    #expect(scene.firstSessionID == "strict-session-1")
+    #expect(ledger.candidate?.identity == identity)
+    let duplicate = Capture.capture(
+        valid, identity: identity, currentDocumentNonce: nonce,
+        isTrustedMainFrame: true, isSameOrigin: true,
+        navigationStarted: true, credentialScopeCurrent: true,
+        isSpeculative: true, gate: &scene, ledger: &ledger
+    )
+    #expect(!duplicate)
+    #expect(ledger.candidate?.milliseconds == 42)
+}
+
+@Test func speculativePrewarmSceneRecordRejectsStaleDocumentsAcross160Nonces() {
+    typealias Capture = PlayerPrewarmSceneLedgerCapturePolicy
+    var epoch = PlayerNativeDocumentEpochGate()
+    var scene = PlayerPrewarmV2SceneMetricGate()
+    var ledger = PlayerPrewarmSceneMilestoneLedger()
+    var previousNonce: String?
+    for iteration in 1...160 {
+        let nonce = epoch.prepareNavigation()
+        let began = epoch.didStartNavigation()
+        #expect(began)
+        scene.reset()
+        ledger.invalidate()
+        let identity = PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "real-game",
+            playerURL: URL(string: "https://games.example.test/player?game=real-game")!,
+            documentNonce: nonce, credentialFingerprint: "native-scope",
+            runtimeSessionID: "session-1"
+        )
+        let body: [String: Any] = [
+            "schema": 2, "type": "player_metric",
+            "sessionId": "session-1", "gameId": "real-game",
+            "documentNonce": nonce, "metric": "first_scene_render_submit",
+            "sequence": iteration, "ms": 0
+        ]
+        if let old = previousNonce {
+            var staleBody = body
+            staleBody["documentNonce"] = old
+            let staleAccepted = Capture.capture(
+                staleBody, identity: identity, currentDocumentNonce: nonce,
+                isTrustedMainFrame: true, isSameOrigin: true,
+                navigationStarted: true, credentialScopeCurrent: true,
+                isSpeculative: true, gate: &scene, ledger: &ledger
+            )
+            #expect(!staleAccepted)
+            #expect(ledger.candidate == nil)
+        }
+        let accepted = Capture.capture(
+            body, identity: identity, currentDocumentNonce: nonce,
+            isTrustedMainFrame: true, isSameOrigin: true,
+            navigationStarted: true, credentialScopeCurrent: true,
+            isSpeculative: true, gate: &scene, ledger: &ledger
+        )
+        #expect(accepted)
+        #expect(ledger.candidate?.identity.documentNonce == nonce)
+        previousNonce = nonce
+    }
+}
+
