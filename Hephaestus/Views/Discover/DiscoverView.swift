@@ -53,6 +53,17 @@ final class FeedRequestCoordinator {
     }
 }
 
+/// A submitted real game title must stay filtered after UIKit collapses the
+/// native searchable drawer during device rotation / ScrollView swipes.
+/// Drafting a new query takes precedence; explicit Clear search ends it.
+enum FeedCommittedSearchPolicy {
+    static func effectiveQuery(draft: String, committed: String) -> String {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? committed.trimmingCharacters(in: .whitespacesAndNewlines)
+                               : trimmed
+    }
+}
+
 /// Keep the native search drawer out of compact iPhone landscape's tiny
 /// media viewport. The floating 44pt search button opens an actual sheet,
 /// while search results return to the standard native searchable grid.
@@ -174,6 +185,9 @@ struct DiscoverView: View {
     @State private var isLoading = false
     @State private var isSlowLoading = false
     @State private var searchText = ""
+    // .searchable may clear its transient text on a native landscape
+    // dismissal. Preserve a submitted query until a real Clear search.
+    @State private var committedSearchQuery = ""
     @State private var savedGameIDs = Set<String>()
     @State private var followedCreatorIDs = Set<String>()
     @State private var mutedTopics = Set<String>()
@@ -193,8 +207,13 @@ struct DiscoverView: View {
     @State private var settledForYouGameID: String?
     @State private var resultPresentation: PlayerResultPresentation?
 
+    private var activeSearchQuery: String {
+        FeedCommittedSearchPolicy.effectiveQuery(
+            draft: searchText, committed: committedSearchQuery)
+    }
+
     private var visibleGames: [FeedGame] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = activeSearchQuery
         guard !query.isEmpty else { return games }
         return games.filter { $0.title.localizedCaseInsensitiveContains(query) }
     }
@@ -212,7 +231,7 @@ struct DiscoverView: View {
 
     private var showsImmersivePager: Bool {
         ForYouPageLayout.shouldShowImmersivePager(
-            searchText: searchText, hasGames: !visibleGames.isEmpty)
+            searchText: activeSearchQuery, hasGames: !visibleGames.isEmpty)
     }
 
     // The iPhone feed is content-first in both orientations. Search and
@@ -222,7 +241,7 @@ struct DiscoverView: View {
         ForYouPageLayout.prefersCompactScopeMenu(
             verticalSizeClass: verticalSizeClass,
             horizontalSizeClass: horizontalSizeClass,
-            searchText: searchText)
+            searchText: activeSearchQuery)
     }
 
     /// Compact phone landscape floats critical controls over the media stage.
@@ -257,7 +276,7 @@ struct DiscoverView: View {
             }
             .accessibilityIdentifier("feed.landscape.scope")
             Button {
-                compactSearchDraft = searchText
+                compactSearchDraft = activeSearchQuery
                 compactSearchPresented = true
             } label: {
                 Image(systemName: "magnifyingglass")
@@ -309,6 +328,7 @@ struct DiscoverView: View {
 
     private func applyCompactSearch() {
         searchText = compactSearchDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        committedSearchQuery = searchText
         compactSearchPresented = false
     }
 
@@ -381,6 +401,26 @@ struct DiscoverView: View {
                     }
                     .padding(.vertical, 6)
                         .accessibilityElement(children: .combine)
+                    }
+
+                    // Native search can dismiss and clear its transient
+                    // input after a real landscape scroll. Keep a submitted
+                    // game's true result and offer an explicit 44pt exit,
+                    // rather than jumping the user back to For You mid-swipe.
+                    if !committedSearchQuery.isEmpty {
+                        HStack {
+                            Spacer(minLength: 0)
+                            Button {
+                                searchText = ""
+                                committedSearchQuery = ""
+                            } label: {
+                                Label("Clear search", systemImage: "xmark.circle")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(minHeight: ArcadePulseTheme.minimumTarget)
+                                    .contentShape(Rectangle())
+                            }
+                            .accessibilityIdentifier("feed.grid.clearSearch")
+                        }
                     }
 
                     if isLoading && games.isEmpty {
@@ -497,7 +537,7 @@ struct DiscoverView: View {
                             }
                         }
                         .frame(maxWidth: 1120)
-                        if nextCursor != nil && searchText.isEmpty {
+                        if nextCursor != nil && activeSearchQuery.isEmpty {
                             if let loadMoreError {
                                 VStack(spacing: 8) {
                                     Label(loadMoreError, systemImage: "wifi.exclamationmark")
@@ -562,6 +602,12 @@ struct DiscoverView: View {
             .toolbar(usesCompactLandscapeOverlay ? .hidden : .visible, for: .navigationBar)
             .modifier(FeedSearchVisibilityModifier(
                 text: $searchText, hidesNativeSearch: usesCompactLandscapeOverlay))
+            .onSubmit(of: .search) {
+                // A genuine keyboard Search is a committed user choice.
+                // UIKit may subsequently dismiss .searchable while the
+                // real filtered grid must remain available across rotation.
+                committedSearchQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
             .toolbar {
                 if usesCompactFeedScopeMenu {
                     ToolbarItem(placement: .topBarTrailing) {
