@@ -798,7 +798,8 @@ final class PlayerSmokeTests: XCTestCase {
         // A real second request deliberately stalls and reaches its own 10s
         // watchdog. Poll only the final native Retry value; never fabricate a
         // loading state, success response, game card, or network event.
-        let deadline = Date().addingTimeInterval(26)
+        // The independent source acceptance requires <=20 seconds from Retry.
+        let deadline = Date().addingTimeInterval(20)
         var newStarts: Int?
         while Date() < deadline {
             if retry.exists,
