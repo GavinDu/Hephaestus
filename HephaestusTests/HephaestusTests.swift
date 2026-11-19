@@ -3461,7 +3461,7 @@ struct HephaestusTests {
     #expect(identity.isValid)
 
     // A rejected untrusted callback must not burn either one-shot slot.
-    for mutation in 0..<12 {
+    for mutation in 0..<14 {
         var body = valid
         var trustedFrame = true
         var sameOrigin = true
@@ -3480,7 +3480,9 @@ struct HephaestusTests {
         case 8: trustedFrame = false
         case 9: sameOrigin = false
         case 10: beganNavigation = false
-        default: credentialCurrent = false
+        case 11: credentialCurrent = false
+        case 12: body["sequence"] = 100_001 // malformed high mark never poisons either gate
+        default: body["ms"] = 3_600_001 // a too-late scene cannot become readiness
         }
         let accepted = Capture.capture(
             body, identity: identity, currentDocumentNonce: nonce,
