@@ -2210,9 +2210,16 @@ final class PlayerSmokeTests: XCTestCase {
                 // both iPhone orientations. Do NOT weaken the distinct real
                 // game, stable two-sample, hit-target or 55% media assertions.
                 // iPad uses its original scroll action and is unchanged.
-                let start = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.82))
-                let end = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.18))
-                print("UI_EVALUATOR_PHYSICAL_DRAG orientation=\(profile.1) device=iphone start=0.50,0.82 end=0.50,0.18")
+                // On iPhone portrait the 0.82 position can land inside the
+                // real Play CTA; begin over the noninteractive media stage
+                // instead. Preserve the already-proven landscape trajectory.
+                // Both traces stay physical and must settle a *different*
+                // backend game ID; no programmatic next-page shortcut.
+                let startY: CGFloat = expectedLandscape ? 0.82 : 0.55
+                let endY: CGFloat = expectedLandscape ? 0.18 : 0.20
+                let start = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: startY))
+                let end = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: endY))
+                print("UI_EVALUATOR_PHYSICAL_DRAG orientation=\(profile.1) device=iphone start=0.50,\(startY) end=0.50,\(endY)")
                 start.press(forDuration: 0.1, thenDragTo: end)
             } else {
                 // iPad portrait AND landscape retain their real accessibility
