@@ -1843,17 +1843,25 @@ struct PixiPlayerSheet: View {
                                 expectedEpoch: callbackEpoch, currentEpoch: attempt,
                                 sessionRevoked: sessionRevoked
                             ) else { return }
-                            posterAttemptForEpoch = identity.map {
-                                (epoch: callbackEpoch, identity: $0)
+                            if let identity {
+                                if posterAttemptForEpoch?.identity != identity {
+                                    posterPolicy = PlayerPosterHoldPolicy(attempt: identity)
+                                }
+                                posterAttemptForEpoch = (epoch: callbackEpoch, identity: identity)
+                            } else {
+                                posterPolicy?.retire()
+                                posterPolicy = nil
+                                posterAttemptForEpoch = nil
                             }
                         },
-                        onFirstSceneRenderSubmit: { ms in
+                        onFirstSceneRenderSubmit: { ms, nativeIdentity in
                             guard PlayerLaunchCallbackGate.accepts(
                                 expectedEpoch: callbackEpoch, currentEpoch: attempt,
                                 sessionRevoked: sessionRevoked
-                            ) else { return }
-                            firstSceneSubmittedForAttempt = (
-                                epoch: callbackEpoch, milliseconds: ms
+                            ), let nativeIdentity else { return }
+                            revealCurrentTrustedScene(
+                                milliseconds: ms, identity: nativeIdentity,
+                                callbackEpoch: callbackEpoch
                             )
                         },
                         onFirstInput: {
@@ -1883,7 +1891,7 @@ struct PixiPlayerSheet: View {
                     holdBackdrop
                 }
 
-                if isLoading && loadError == nil, !prewarmHit {
+                if isLoading && loadError == nil {
                     if holdPosterURL != nil, holdVisible {
                         holdLoadingOverlay
                     } else {
@@ -2101,6 +2109,10 @@ struct PixiPlayerSheet: View {
                 prewarmHit = false
                 firstSceneSubmittedForAttempt = nil
                 posterAttemptForEpoch = nil
+                posterPolicy?.retire()
+                posterPolicy = nil
+                holdOpacity = 1
+                holdVisible = holdPosterURL != nil
                 gameplayStartedAt = nil
                 didTrackGameplayStart = false
                 verifiedResult = nil
@@ -2169,6 +2181,8 @@ struct PixiPlayerSheet: View {
                 verifiedResult = nil
                 firstSceneSubmittedForAttempt = nil
                 posterAttemptForEpoch = nil
+                posterPolicy?.retire()
+                posterPolicy = nil
                 gameplayStartedAt = nil
                 didTrackGameplayStart = false
                 isLoading = false
@@ -2351,7 +2365,7 @@ private struct PlayerWebView: UIViewRepresentable {
     /// call-site argument order (Swift requires the same order).
     var onPrewarmHit: () -> Void = {}
     let onPosterAttempt: (PlayerPosterHoldPolicy.Attempt?) -> Void
-    let onFirstSceneRenderSubmit: (Int) -> Void
+    let onFirstSceneRenderSubmit: (Int, PlayerPosterHoldPolicy.Attempt?) -> Void
     let onFirstInput: () -> Void
     let onVerifiedRun: (VerifiedRunResult) -> Void
 
@@ -2453,7 +2467,7 @@ private struct PlayerWebView: UIViewRepresentable {
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
         let onPosterAttempt: (PlayerPosterHoldPolicy.Attempt?) -> Void
-        let onFirstSceneRenderSubmit: (Int) -> Void
+        let onFirstSceneRenderSubmit: (Int, PlayerPosterHoldPolicy.Attempt?) -> Void
         let onFirstInput: () -> Void
         let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
@@ -2485,7 +2499,7 @@ private struct PlayerWebView: UIViewRepresentable {
              onLoadFail: @escaping (Error) -> Void,
              onTerminate: @escaping () -> Void,
              onPosterAttempt: @escaping (PlayerPosterHoldPolicy.Attempt?) -> Void,
-             onFirstSceneRenderSubmit: @escaping (Int) -> Void,
+             onFirstSceneRenderSubmit: @escaping (Int, PlayerPosterHoldPolicy.Attempt?) -> Void,
              onFirstInput: @escaping () -> Void,
              onVerifiedRun: @escaping (VerifiedRunResult) -> Void) {
             self.expectedGameID = gameID
@@ -2616,7 +2630,12 @@ private struct PlayerWebView: UIViewRepresentable {
                 Task { @MainActor [weak self] in
                     guard let self, self.acceptsCurrentHostCallbacks,
                           self.runtimeSessionID == runtimeSessionID else { return }
-                    self.onFirstSceneRenderSubmit(ms)
+                    guard let view = self.attachedWebView else { return }
+                    let trustedIdentity = PlayerWebViewPool.currentPosterAttempt(
+                        webView: view, url: self.expectedURL,
+                        gameID: self.expectedGameID, lease: self.attachmentLease
+                    )
+                    self.onFirstSceneRenderSubmit(ms, trustedIdentity)
                 }
             case .firstInput(let ms):
                 guard launchLifecycle.firstInput(milliseconds: ms) else { return }
