@@ -2658,10 +2658,14 @@ private struct PlayerWebView: UIViewRepresentable {
                     guard let self, self.acceptsCurrentHostCallbacks,
                           self.runtimeSessionID == runtimeSessionID else { return }
                     guard let view = self.attachedWebView else { return }
-                    let trustedIdentity = PlayerWebViewPool.currentPosterAttempt(
-                        webView: view, url: self.expectedURL,
-                        gameID: self.expectedGameID, lease: self.attachmentLease
-                    )
+                    // A legacy schema-1 first-scene has no native document
+                    // nonce binding. It may remain a diagnostic, but it MUST
+                    // NOT release the poster or masquerade as trusted v2.
+                    let trustedIdentity = self.nativeBridgeVersionGate.acceptedV2
+                        ? PlayerWebViewPool.currentPosterAttempt(
+                            webView: view, url: self.expectedURL,
+                            gameID: self.expectedGameID, lease: self.attachmentLease
+                        ) : nil
                     self.onFirstSceneRenderSubmit(ms, trustedIdentity)
                 }
             case .firstInput(let ms):
