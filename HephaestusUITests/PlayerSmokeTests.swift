@@ -515,8 +515,10 @@ final class PlayerSmokeTests: XCTestCase {
             focusEvidence.lifetime = .keepAlways
             add(focusEvidence)
         }
-        XCTAssertTrue(keyboardVisible,
-                      "The native Create keywords field must really receive keyboard focus within 8s after at most two real taps.")
+        guard keyboardVisible else {
+            XCTFail("The native Create keywords field must really receive keyboard focus within 8s after at most two real taps.")
+            return
+        }
         keywords.typeText("puzzle")
         // XCUITest can return from typeText before SwiftUI publishes the
         // accessibility value. Wait for the *whole* actual native input,
