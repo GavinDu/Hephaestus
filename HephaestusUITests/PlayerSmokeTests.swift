@@ -1376,6 +1376,44 @@ final class PlayerSmokeTests: XCTestCase {
         let gridScroll = app.scrollViews["feed.grid.scroll"].firstMatch
         XCTAssertTrue(gridScroll.waitForExistence(timeout: 8),
                       "A real searched grid must own the landscape scroll surface.")
+        /// XCUIElement.swipeUp() can choose a press origin underneath the
+        /// floating Create tab in the 874x402 compact window. The original
+        /// exact-head screenshot proved Create actually became selected.
+        /// Physically drag the real scroll surface using measured on-screen
+        /// coordinates exclusively above the floating tab bar; then verify
+        /// native Discover ownership after every gesture, never recover by
+        /// secretly switching tabs back.
+        func dragRealGridAboveTabs(_ phase: String) {
+            XCTAssertTrue(gridScroll.exists, "Real grid must exist before a \(phase) drag.")
+            let scrollFrame = gridScroll.frame
+            let appFrame = app.windows.firstMatch.frame
+            let tabs = app.tabBars.firstMatch
+            let top = max(scrollFrame.minY + 12, appFrame.minY + 42)
+            let bottom = min(scrollFrame.maxY - 12,
+                             tabs.exists ? tabs.frame.minY - 18 : appFrame.maxY - 24)
+            XCTAssertGreaterThan(bottom - top, 90,
+                                 "No usable Discover scroll region safely clear of floating tabs.")
+            let x = min(max(scrollFrame.midX, scrollFrame.minX + 30),
+                        scrollFrame.maxX - 30)
+            let fromY = bottom - 8
+            let toY = top + 8
+            print("GRID_NATIVE_SAFE_DRAG phase=\(phase) scroll=\(scrollFrame) tabs=\(tabs.frame) app=\(appFrame) from=(\(x),\(fromY)) to=(\(x),\(toY))")
+            let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            let start = origin.withOffset(CGVector(dx: x, dy: fromY))
+            let finish = origin.withOffset(CGVector(dx: x, dy: toY))
+            start.press(forDuration: 0.12, thenDragTo: finish)
+            let stillDiscover = app.tabBars.buttons["Discover"].firstMatch.isSelected
+            if !stillDiscover || !gridScroll.exists {
+                let wrongDestination = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                wrongDestination.name = "arcade-pulse-grid-native-drag-left-discover-\(phase)"
+                wrongDestination.lifetime = .keepAlways
+                add(wrongDestination)
+            }
+            XCTAssertTrue(stillDiscover,
+                          "Real grid scroll must not inadvertently activate Create or another tab.")
+            XCTAssertTrue(gridScroll.exists,
+                          "Actual filtered game grid cannot disappear after a safe Discover drag.")
+        }
         for _ in 0..<8 {
             if like.exists && like.isHittable { break }
             if !gridScroll.exists {
@@ -1386,7 +1424,7 @@ final class PlayerSmokeTests: XCTestCase {
                 XCTFail("A committed real-game search must not turn into immersive For You during landscape scroll.")
                 return
             }
-            gridScroll.swipeUp()
+            dragRealGridAboveTabs("compact-landscape")
         }
         if !like.exists || !like.isHittable {
             let missingLandscapeCard = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -1423,7 +1461,7 @@ final class PlayerSmokeTests: XCTestCase {
                 XCTFail("Committed real-game search must survive return to portrait; do not bypass Comments navigation.")
                 return
             }
-            gridScroll.swipeUp()
+            dragRealGridAboveTabs("portrait-return")
         }
         XCTAssertTrue(comments.waitForExistence(timeout: 5) && comments.isHittable,
                       "The genuine Comments button must remain reachable after returning to portrait.")
