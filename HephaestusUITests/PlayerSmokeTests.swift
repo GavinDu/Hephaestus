@@ -499,8 +499,26 @@ final class PlayerSmokeTests: XCTestCase {
         add(before)
 
         keywords.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8),
-                      "The native Create keywords field must really receive keyboard focus.")
+        let nativeKeyboard = app.keyboards.firstMatch
+        // On Accessibility5 iPad, the first real tap can be consumed by
+        // SwiftUI focus/scroll settlement. One bounded second tap is allowed,
+        // but only on the same genuine, still-hittable input; never fabricate
+        // a focused field or bypass the actual native keyboard assertion.
+        var keyboardVisible = nativeKeyboard.waitForExistence(timeout: 4)
+        if !keyboardVisible && keywords.isHittable {
+            keywords.tap()
+            keyboardVisible = nativeKeyboard.waitForExistence(timeout: 4)
+        }
+        if !keyboardVisible {
+            let focusEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            focusEvidence.name = "arcade-pulse-create-keywords-a5-real-focus-failed"
+            focusEvidence.lifetime = .keepAlways
+            add(focusEvidence)
+        }
+        guard keyboardVisible else {
+            XCTFail("The native Create keywords field must really receive keyboard focus within 8s after at most two real taps.")
+            return
+        }
         keywords.typeText("puzzle")
         // XCUITest can return from typeText before SwiftUI publishes the
         // accessibility value. Wait for the *whole* actual native input,
