@@ -536,6 +536,11 @@ struct DiscoverView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 28)
                         }
+                        // Native Search results live in this actual
+                        // non-immersive scroll surface. Give XCUITest an
+                        // explicit scroll owner after device rotation instead
+                        // of swiping the root app or floating tab bar.
+                        .accessibilityIdentifier("feed.grid.scroll")
                     }
                 }
             // This observer remains active when compact landscape hides
