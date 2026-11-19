@@ -16,7 +16,58 @@ enum CreatorDiscoveryResultsPolicy {
 
     static func allowsNextPage(resultsMatchCurrentSearch: Bool,
                                hasNextCursor: Bool,
-                               isLoading: Bool) -> Bool {
-        resultsMatchCurrentSearch && hasNextCursor && !isLoading
+                               isLoading: Bool,
+                               hasError: Bool = false,
+                               draftMatchesAppliedQuery: Bool = true) -> Bool {
+        resultsMatchCurrentSearch && hasNextCursor && !isLoading &&
+            !hasError && draftMatchesAppliedQuery
+    }
+
+    /// Never offer a cursor-only retry for an auth/permission failure,
+    /// malformed JSON, or a redirect. These require a new authorized query
+    /// or deployment repair, not repeated use of the same cursor.
+    static func isTransientPageFailure(_ error: Error) -> Bool {
+        if let api = error as? APIError {
+            if case let .badStatus(status) = api {
+                return status == 429 || (500...599).contains(status)
+            }
+            return false
+        }
+        if let network = error as? URLError {
+            switch network.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                 .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
+    }
+
+    /// Retry only the failed page from an unchanged, backend-confirmed
+    /// query. A fresh search, edited draft or superseded cursor must instead
+    /// use the ordinary first-page search. Never invent a cursor.
+    static func canRetryFailedPage(
+        failedCursor: String?,
+        nextCursor: String?,
+        resultsMatchCurrentSearch: Bool,
+        draftMatchesAppliedQuery: Bool
+    ) -> Bool {
+        guard resultsMatchCurrentSearch,
+              draftMatchesAppliedQuery,
+              let failedCursor,
+              !failedCursor.isEmpty,
+              failedCursor == nextCursor else { return false }
+        return true
+    }
+}
+
+
+/// One owner for both the navigation search key and topic Apply.
+/// Keyboard submits must not bypass the visibly disabled Apply action.
+enum CreatorQuerySubmitPolicy {
+    static func canSubmit(isLoading: Bool) -> Bool {
+        !isLoading
     }
 }
