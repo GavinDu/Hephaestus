@@ -1786,6 +1786,12 @@ struct PixiPlayerSheet: View {
                             isLoading = false
                             holdOpacity = 0
                             holdVisible = false
+                            if var policy = posterPolicy {
+                                _ = policy.markFailure(
+                                    for: policy.attempt, ownsCurrentAttachment: true
+                                )
+                                posterPolicy = policy
+                            }
                             // Raw detail goes to DevLog/telemetry;
                             // the card shows only the mapped message.
                             loadFailureCategory = PlayerLoadFailure.category(for: error)
@@ -2221,6 +2227,27 @@ struct PixiPlayerSheet: View {
                         isLoading: isLoading, hasLoadError: loadError != nil
                       ) else { return }
                 showSlowHint = true
+                // Provisional 30s tap-to-first-scene recovery deadline.
+                // Hardware cohorts #276 must ratify or revise this budget.
+                try? await Task.sleep(nanoseconds: 22_000_000_000)
+                guard !Task.isCancelled,
+                      PlayerLaunchCallbackGate.accepts(
+                          expectedEpoch: hintEpoch, currentEpoch: attempt,
+                          sessionRevoked: sessionRevoked
+                      ),
+                      isLoading, loadError == nil else { return }
+                if var policy = posterPolicy {
+                    guard policy.markTimeout(
+                        for: policy.attempt, ownsCurrentAttachment: true
+                    ) else { return }
+                    posterPolicy = policy
+                }
+                isLoading = false
+                loadFailureCategory = .unknown
+                loadError = "The game has not drawn its first scene. Tap Retry or return to the feed."
+                holdOpacity = 0
+                holdVisible = false
+                showSlowHint = false
             }
             .onAppear {
                 loadStartedAt = Date()
