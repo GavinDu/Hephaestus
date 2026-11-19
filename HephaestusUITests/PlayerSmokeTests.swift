@@ -936,6 +936,76 @@ final class PlayerSmokeTests: XCTestCase {
                       "Returning from Library must restore the Discover navigation stack.")
     }
 
+    /// Native toolbar acceptance on actual Library/account state.
+    /// Assert disabled only when the genuine recent shelf is observed empty;
+    /// never fake a recent game or clear server-owned saved games to pass.
+    @MainActor
+    func testArcadePulseLibraryClearRecentToolbarHasReal44ptTarget() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-library-entry")
+        app.launch()
+
+        let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 15),
+                      "Native Library destination must be presented, not a toolbar fixture.")
+        let clear = app.buttons["library.toolbar.clearRecent"].firstMatch
+        XCTAssertTrue(clear.waitForExistence(timeout: 10),
+                      "The actual Library clear action must have a stable native identity.")
+        XCTAssertEqual(clear.label, "Clear recent")
+        XCTAssertEqual(app.buttons.matching(identifier: "library.toolbar.clearRecent").count, 1,
+                       "Exactly one native destructive toolbar action is allowed.")
+        // Native simulator history may legitimately contain a recently
+        // played REAL game from an earlier test. Test the disabled-state
+        // contract only when the actual Library declares its list empty,
+        // never reset/forge account history just to make this test green.
+        let actualEmptyRecent = app.staticTexts["No recent games"].firstMatch.exists
+        if actualEmptyRecent {
+            XCTAssertFalse(clear.isEnabled,
+                           "An actually empty Library must disable destructive Clear recent.")
+        }
+        func assertActualTarget(_ orientation: String) {
+            XCTAssertTrue(clear.exists, "Native Library toolbar action missing in \\(orientation).")
+            let rect = clear.frame
+            XCTAssertFalse(rect.isNull || rect.isEmpty)
+            XCTAssertGreaterThanOrEqual(rect.width + 0.000001, 44,
+                                        "Inner Clear recent action is narrower than 44pt.")
+            XCTAssertGreaterThanOrEqual(rect.height + 0.000001, 44,
+                                        "Inner Clear recent action is shorter than 44pt.")
+            XCTAssertTrue(app.windows.firstMatch.frame.intersects(rect),
+                          "Clear recent must remain within the genuine app window.")
+            let tabs = app.tabBars.firstMatch
+            if tabs.exists {
+                XCTAssertLessThan(rect.maxY, tabs.frame.minY,
+                                  "Destructive toolbar action cannot overlap native bottom tabs.")
+            }
+        }
+        assertActualTarget("portrait")
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-library-clear-recent-real-44pt-portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let deadline = Date().addingTimeInterval(12)
+        while window.frame.width <= window.frame.height && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "Real landscape view must not be a rotated portrait screenshot.")
+        assertActualTarget("landscape")
+        if actualEmptyRecent {
+            XCTAssertFalse(clear.isEnabled, "Rotation cannot enable an empty recent shelf's clear action.")
+        }
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-library-clear-recent-real-44pt-landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// The final privacy notice must remain readable in the native iPhone
     /// Library list, not disappear under the translucent bottom tab bar.
     /// This exercises real guest/session UI; it injects no saved games.

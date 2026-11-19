@@ -352,9 +352,19 @@ struct LibraryView: View {
             .navigationTitle("Library")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Clear recent", systemImage: "trash") {
+                    Button {
                         showClearRecentConfirmation = true
+                    } label: {
+                        Image(systemName: "trash")
+                            // The inner Button, not only its ToolbarItem,
+                            // must own a full native accessible touch target.
+                            .frame(width: LibraryToolbarActionLayout.minimumHitSize,
+                                   height: LibraryToolbarActionLayout.minimumHitSize)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear recent")
+                    .accessibilityIdentifier("library.toolbar.clearRecent")
                     .disabled(visibleRecent.isEmpty)
                     .accessibilityHint("Removes recent games from this device")
                 }
@@ -481,6 +491,12 @@ struct LibraryView: View {
             errorMessage = "Couldn't remove saved game. Please try again."
         }
     }
+}
+
+/// Make the actual native Library toolbar clear action target at least
+/// 44pt square, independent of a ToolbarItem's decorative outer bounds.
+enum LibraryToolbarActionLayout {
+    static let minimumHitSize: CGFloat = ArcadePulseTheme.minimumTarget
 }
 
 /// Responsive Library header: don't force unrelated labels into a cramped row.
