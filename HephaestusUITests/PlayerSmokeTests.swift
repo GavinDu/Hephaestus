@@ -505,21 +505,30 @@ final class PlayerSmokeTests: XCTestCase {
         // XCUITest can return from typeText before SwiftUI publishes the
         // accessibility value. Wait for the *whole* actual native input,
         // never accept a prefix such as "p" or inject a fake value.
-        let committed = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "puzzle"),
-            object: keywords
-        )
-        let committedResult = XCTWaiter.wait(for: [committed], timeout: 5)
+        // The XCUI predicate waiter sometimes reports .timedOut even after
+        // the remote field has already committed the complete "puzzle" value
+        // (native iPad CI evidence #574). Observe the *actual* accessibility
+        // value directly within the same five-second monotonic deadline:
+        // never accept just a typed prefix or set any value in the test.
+        let commitDeadline = ProcessInfo.processInfo.systemUptime + 5
+        var observedValue = keywords.value as? String
+        while observedValue != "puzzle" &&
+              ProcessInfo.processInfo.systemUptime < commitDeadline {
+            Thread.sleep(forTimeInterval: 0.1)
+            observedValue = keywords.value as? String
+        }
         // Retain original native screenshot even when input commit fails.
         let typedEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         typedEvidence.name = "arcade-pulse-create-keywords-a5-post-type-commit"
         typedEvidence.lifetime = .keepAlways
         add(typedEvidence)
         XCTAssertEqual(
-            committedResult, .completed,
+            observedValue, "puzzle",
             "Real Create field must commit every typed character within 5s; " +
-            "actual accessibility value: \(String(describing: keywords.value))"
+            "actual accessibility value: \(String(describing: observedValue))"
         )
+        // Re-read from the REAL UITextField; a saved local observation
+        // alone cannot prove the field retained its exact committed value.
         XCTAssertEqual(keywords.value as? String, "puzzle")
         let analyze = app.buttons["create.pick.analyze"].firstMatch
         XCTAssertTrue(analyze.exists && !analyze.isEnabled,
