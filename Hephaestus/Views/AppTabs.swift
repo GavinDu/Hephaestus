@@ -139,6 +139,23 @@ struct LibraryView: View {
         }
     }
 
+    /// One actual Profile destination is owned by this control. In a short
+    /// Accessibility5 landscape window it is hosted above the scroll view;
+    /// in every other configuration it belongs to the Saved games row.
+    /// Do not duplicate native accessibility actions or fake a signed-in state.
+    private var guestSignInButton: some View {
+        Button(action: onOpenProfile) {
+            Label("Go to Profile to sign in", systemImage: "person.crop.circle")
+                .font(.headline)
+                .foregroundStyle(ArcadePulseTheme.onElectricViolet)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(ArcadePulseTheme.electricViolet)
+        .accessibilityIdentifier("library.signIn")
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -163,17 +180,9 @@ struct LibraryView: View {
                             Text("Saved games belong to your account. Sign in from Profile to see and manage them here.")
                                 .font(.subheadline)
                                 .foregroundStyle(ArcadePulseTheme.textSecondary)
-                            Button(action: onOpenProfile) {
-                                Label("Go to Profile to sign in", systemImage: "person.crop.circle")
-                                    .font(.headline)
-                                    // Shared normal-text contrast-safe color
-                                    // for the same violet used by Studio.
-                                    .foregroundStyle(ArcadePulseTheme.onElectricViolet)
-                                    .frame(maxWidth: .infinity, minHeight: 48)
+                            if !prioritizeGuestSignIn {
+                                guestSignInButton
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(ArcadePulseTheme.electricViolet)
-                            .accessibilityIdentifier("library.signIn")
                         }
                         .padding(.vertical, 8)
                         .listRowBackground(ArcadePulseTheme.surface)
@@ -315,6 +324,19 @@ struct LibraryView: View {
             // SCROLLABLE trailing content space, not an overlay or a fake CTA:
             // the user can scroll the actual Library panel completely clear.
             // Regular iPad detail navigation keeps its native layout.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if prioritizeGuestSignIn {
+                    // The old real CTA could disappear entirely from the
+                    // Lazy List AX tree after a portrait→landscape rotation
+                    // even after twelve physical swipes. Keep exactly the
+                    // same real action in a measured, non-scrolling safe
+                    // area instead of adding a second or test-only button.
+                    guestSignInButton
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(ArcadePulseTheme.canvas)
+                }
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Color.clear
                     .frame(height: LibraryTabBarClearancePolicy.trailingScrollInset(
