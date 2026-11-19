@@ -86,7 +86,10 @@ def candidates_in_feed(payload):
             continue
         if entry.get("status") != "ready" or entry.get("visibility") != "public":
             continue
-        if entry.get("quarantined") is True:
+        # Badly typed quarantine flags are not proof of publication.
+        # Permit absence for historical public inventory; any non-boolean
+        # or explicitly true quarantine state must fail closed.
+        if entry.get("quarantined") not in (None, False):
             continue
         # Match the existing backend canDeliver gate. Older shipped
         # inventory has an unset moderation field; do not mistake it for
