@@ -258,5 +258,41 @@ class LiveGameFixtureTests(unittest.TestCase):
 
 
 
+    def test_badly_typed_quarantine_flags_never_count_as_published(self):
+        for value in (True, "true", 1, {"value": False}):
+            with self.subTest(value=value):
+                result = fixture.candidates_in_feed({
+                    "games": [public_game(quarantined=value)]
+                })
+                self.assertEqual(result, [])
+
+    def test_second_genuine_published_package_can_pass_after_broken_first(self):
+        second = public_game(game_id="another-real-game")
+        opener = FakeOpener({
+            self.FEED: {"games": [public_game(), second]},
+            self.PACKAGE: {**valid_package(), "packageFormatVersion": "1.0"},
+            "https://games.example.test/v1/games/another-real-game/package":
+                valid_package("another-real-game"),
+        })
+        self.assertEqual(
+            fixture.check_once(opener, self.FEED, 1),
+            ("another-real-game", 2, 2),
+        )
+
+    def test_oversized_public_json_and_redirects_fail_closed(self):
+        oversized = b" " * (fixture.MAX_JSON_BYTES + 1)
+        opener = FakeOpener({
+            self.FEED: (oversized, "application/json"),
+        })
+        with self.assertRaisesRegex(fixture.FixtureError, "exceeds"):
+            fixture.check_once(opener, self.FEED, 1)
+        redirector = fixture.NoRedirect()
+        with self.assertRaisesRegex(fixture.FixtureError, "redirected"):
+            redirector.redirect_request(
+                None, None, 302, "Found", {},
+                "https://outside.example.test/private", 
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
