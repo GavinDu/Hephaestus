@@ -67,4 +67,36 @@ struct ArcadePulseCreatorDirectoryRowLayoutTests {
         // The one shared formatter is used for the row and its VoiceOver
         // profile-action label, so no untrusted negative count is spoken.
     }
+
+    @Test func emptyOrNonPrintableServerTopicsDoNotBecomeHashtags() {
+        #expect(CreatorDirectoryRowLayout.publicTopicSummary([]) == nil)
+        #expect(CreatorDirectoryRowLayout.publicTopicSummary(["", " ", "\t", "\n"]) == nil)
+        #expect(CreatorDirectoryRowLayout.publicTopicSummary(
+            ["real", "bad\nlabel", " \u{0000} ", "legit"]
+        ) == "#real  #legit")
+    }
+
+    @Test func firstFiveActualPublicTopicsIgnoreBlankEarlierSlots() {
+        let topics = ["", " \t ", "art", "games", "design", "music", "science", "sixth"]
+        #expect(CreatorDirectoryRowLayout.publicTopicSummary(topics) ==
+                "#art  #games  #design  #music  #science")
+    }
+
+    @Test func genuineNonEnglishAndTrimmedTopicsKeepOriginalOrder() {
+        #expect(CreatorDirectoryRowLayout.publicTopicSummary(
+            ["  创意  ", "🎮", "c++", " ألعاب "]
+        ) == "#创意  #🎮  #c++  #ألعاب")
+    }
+    @Test func actualRowVoiceOverLabelUsesExactlyVisibleFilteredTopics() {
+        let topics = ["", "  游戏  ", " \t ", "art", "bad\nline", "design"]
+        let summary = CreatorDirectoryRowLayout.publicTopicSummary(topics)
+        #expect(summary == "#游戏  #art  #design")
+        let label = CreatorDirectoryRowLayout.accessibilityLabel(
+            creatorID: "server-owned-id", count: 2, topics: topics)
+        #expect(label == "View creator server-owned-id, 2 public games, topics: #游戏  #art  #design")
+        #expect(!label.contains("bad\nline"))
+        #expect(CreatorDirectoryRowLayout.accessibilityLabel(
+            creatorID: "server-owned-id", count: 0, topics: ["", "\n"]) ==
+            "View creator server-owned-id, 0 public games")
+    }
 }
