@@ -1391,8 +1391,14 @@ final class PlayerSmokeTests: XCTestCase {
             let top = max(scrollFrame.minY + 12, appFrame.minY + 42)
             let bottom = min(scrollFrame.maxY - 12,
                              tabs.exists ? tabs.frame.minY - 18 : appFrame.maxY - 24)
-            XCTAssertGreaterThan(bottom - top, 90,
-                                 "No usable Discover scroll region safely clear of floating tabs.")
+            guard bottom - top > 90 else {
+                let noSafeArea = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                noSafeArea.name = "arcade-pulse-no-safe-scroll-area-\(phase)"
+                noSafeArea.lifetime = .keepAlways
+                add(noSafeArea)
+                XCTFail("No usable Discover scroll region clear of the native floating tabs.")
+                return
+            }
             let x = min(max(scrollFrame.midX, scrollFrame.minX + 30),
                         scrollFrame.maxX - 30)
             let fromY = bottom - 8
@@ -1421,7 +1427,7 @@ final class PlayerSmokeTests: XCTestCase {
                 missingGrid.name = "arcade-pulse-real-grid-scroll-owner-disappeared"
                 missingGrid.lifetime = .keepAlways
                 add(missingGrid)
-                XCTFail("A committed real-game search must not turn into immersive For You during landscape scroll.")
+                XCTFail("Real Discover grid vanished during landscape; record selected tab and gesture hit region, do not assume search cleared.")
                 return
             }
             dragRealGridAboveTabs("compact-landscape")
@@ -1431,7 +1437,7 @@ final class PlayerSmokeTests: XCTestCase {
             missingLandscapeCard.name = "arcade-pulse-real-grid-landscape-card-not-reachable"
             missingLandscapeCard.lifetime = .keepAlways
             add(missingLandscapeCard)
-            print("GRID_LANDSCAPE_NATIVE frame=\\(window.frame) scroll=\\(gridScroll.frame) like_exists=\\(like.exists)")
+            print("GRID_LANDSCAPE_NATIVE frame=\(window.frame) scroll=\(gridScroll.frame) like_exists=\(like.exists)")
         }
         XCTAssertTrue(like.exists && like.isHittable,
                       "Genuine rotated grid must offer reachable social action after native scrolling.")
@@ -1458,7 +1464,7 @@ final class PlayerSmokeTests: XCTestCase {
                 missingGrid.name = "arcade-pulse-real-grid-scroll-owner-lost-after-return"
                 missingGrid.lifetime = .keepAlways
                 add(missingGrid)
-                XCTFail("Committed real-game search must survive return to portrait; do not bypass Comments navigation.")
+                XCTFail("Real Discover grid missing after portrait return; do not bypass the genuine Comments action.")
                 return
             }
             dragRealGridAboveTabs("portrait-return")
