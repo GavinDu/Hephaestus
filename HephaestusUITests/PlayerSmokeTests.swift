@@ -271,6 +271,49 @@ final class PlayerSmokeTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    /// Normal Done from a REAL Creator Directory must never send a guest to
+    /// Profile. The actual directory still calls the deployed endpoint; we
+    /// do not seed fake creator IDs or turn a failed JSON request into empty.
+    @MainActor
+    func testArcadePulseCreatorDirectoryNormalDoneKeepsFeedDestination() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        // Deterministic live-feed ERROR state only, not a fake Creator API.
+        app.launchArguments.append("--ui-test-feed-error-state")
+        app.launch()
+        let openDirectory = app.buttons["Discover creators"].firstMatch
+        XCTAssertTrue(openDirectory.waitForExistence(timeout: 15) &&
+                      openDirectory.isHittable,
+                      "Discover must offer the real Creator Directory entry even when feed is unavailable.")
+        openDirectory.tap()
+        let directory = app.navigationBars["Creators"].firstMatch
+        XCTAssertTrue(directory.waitForExistence(timeout: 10),
+                      "The actual native Creator Directory must open.")
+        let done = directory.buttons["Done"].firstMatch
+        XCTAssertTrue(done.exists && done.isHittable)
+        done.tap()
+        // waitForExistence succeeds while the exit animation is still visible.
+        // Explicitly wait for the real native sheet to disappear instead.
+        let sheetGone = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: directory
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [sheetGone], timeout: 8), .completed,
+                       "Normal Done must fully dismiss the Directory sheet.")
+        XCTAssertTrue(openDirectory.waitForExistence(timeout: 8) &&
+                      openDirectory.isHittable,
+                      "Closing Directory normally must return to Discover, not Profile.")
+        XCTAssertFalse(app.buttons["Sign in with Apple"].firstMatch.exists,
+                       "Normal Directory Done cannot trigger a guest sign-in route.")
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = UIDevice.current.userInterfaceIdiom == .pad
+            ? "arcade-pulse-ipad-creator-normal-done-returns-feed"
+            : "arcade-pulse-iphone-creator-normal-done-returns-feed"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+    }
+
     /// Prove the actual Create screen, not a marketing concept, exposes
     /// a reachable photo picker and blocks upload before consent and art.
     @MainActor
@@ -314,6 +357,16 @@ final class PlayerSmokeTests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
+        // Preserve the initial Create entry's original consent/navigation
+        // behavior; the focused keyboard and typed-value coverage runs in
+        // the dedicated A5 native test below, where the true ScrollView can
+        // move the field clear of floating tabs before tapping it.
+        let keywords = app.textFields["create.pick.keywords"].firstMatch
+        XCTAssertTrue(keywords.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(keywords.frame.height, 44)
+        XCTAssertTrue(keywords.label.contains("Optional keywords"),
+                      "The genuine dark-mode TextField needs a VoiceOver label.")
+
         if !isPad {
             let projects = app.buttons["create.myProjects"].firstMatch
             XCTAssertTrue(projects.waitForExistence(timeout: 10) && projects.isHittable,
@@ -333,6 +386,130 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertTrue(app.buttons["Sign in with Apple"].firstMatch.waitForExistence(timeout: 10),
                           "Studio must return to the real Profile authentication entry.")
         }
+    }
+
+    /// Native keyboard Search and Topic Apply are the same real Creator
+    /// query. Never seed an artificial Creator when the deployed API fails.
+    @MainActor
+    func testArcadePulseCreatorTopicSearchKeyboardAndApplyAreReachable() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments.append("--ui-test-feed-error-state")
+        app.launch()
+
+        let discover = app.buttons["Discover creators"].firstMatch
+        XCTAssertTrue(discover.waitForExistence(timeout: 15) && discover.isHittable,
+                      "Real Discover must expose the Creator Directory destination.")
+        discover.tap()
+
+        let topic = app.textFields["creator.discovery.topicInput"].firstMatch
+        let apply = app.buttons["creator.discovery.topicApply"].firstMatch
+        XCTAssertTrue(topic.waitForExistence(timeout: 10) && topic.isHittable)
+        XCTAssertTrue(apply.waitForExistence(timeout: 10) && apply.isHittable)
+        // These must be actual hit targets, not only oversized outer layout.
+        XCTAssertGreaterThanOrEqual(topic.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(apply.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(apply.frame.height, 44)
+
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "arcade-pulse-creator-native-apply-before-keyboard"
+        before.lifetime = .keepAlways
+        add(before)
+
+        topic.tap()
+        topic.typeText("puzzle\n")
+        XCTAssertEqual(topic.value as? String, "puzzle",
+                       "The actual topic input must preserve the typed query.")
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "arcade-pulse-creator-topic-search-portrait"
+        after.lifetime = .keepAlways
+        add(after)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let deadline = Date().addingTimeInterval(10)
+        while window.frame.width <= window.frame.height && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "Record actual landscape viewport, not rotated image metadata.")
+        XCTAssertTrue(topic.waitForExistence(timeout: 10))
+        XCTAssertTrue(apply.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(apply.frame.height, 44)
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "arcade-pulse-creator-topic-search-landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
+    /// Accessibility5 must not turn a readable dark Create prompt into an
+    /// unreachable decorative field. Preserve original actual native pixels
+    /// without picking a private photo, granting consent, or publishing.
+    @MainActor
+    func testArcadePulseCreateKeywordsAccessibility5ContrastAndInput() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            app.launchArguments.append("--ui-test-create-entry")
+        }
+        app.launch()
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let tab = app.tabBars.buttons["Create"].firstMatch
+            XCTAssertTrue(tab.waitForExistence(timeout: 15) && tab.isHittable)
+            tab.tap()
+        }
+        let keywords = app.textFields["create.pick.keywords"].firstMatch
+        XCTAssertTrue(keywords.waitForExistence(timeout: 15))
+        // A hittable accessibility node can still sit under translucent
+        // floating tabs. Scroll the REAL SwiftUI Create ScrollView, not app
+        // chrome, until the whole input is inside the unobscured viewport.
+        let scroll = app.scrollViews.firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 8),
+                      "Create must expose an actual scrollable form.")
+        let tabBar = app.tabBars.firstMatch
+        let window = app.windows.firstMatch
+        let unobscuredBottom = tabBar.exists ? tabBar.frame.minY : window.frame.maxY
+        for _ in 0..<10 {
+            let frame = keywords.frame
+            if keywords.isHittable &&
+               frame.minY >= window.frame.minY + 8 &&
+               frame.maxY <= unobscuredBottom - 28 {
+                break
+            }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(keywords.isHittable,
+                      "At Accessibility5 the genuine keyword prompt must be scroll-reachable.")
+        XCTAssertLessThanOrEqual(keywords.frame.maxY, unobscuredBottom - 28,
+                                 "Do not tap keywords through the floating tab bar.")
+        XCTAssertGreaterThanOrEqual(keywords.frame.height, 44)
+        let label = keywords.label
+        XCTAssertTrue(label.contains("Optional keywords"),
+                      "VoiceOver must describe the real input at Accessibility5.")
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "arcade-pulse-create-keywords-a5-native-prompt"
+        before.lifetime = .keepAlways
+        add(before)
+
+        keywords.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8),
+                      "The native Create keywords field must really receive keyboard focus.")
+        keywords.typeText("puzzle")
+        XCTAssertEqual(keywords.value as? String, "puzzle")
+        let analyze = app.buttons["create.pick.analyze"].firstMatch
+        XCTAssertTrue(analyze.exists && !analyze.isEnabled,
+                      "Keywords alone must not bypass actual image upload consent.")
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "arcade-pulse-create-keywords-a5-native-typed"
+        after.lifetime = .keepAlways
+        add(after)
     }
 
     /// The preferences modal may not claim a successful write until the
@@ -777,6 +954,104 @@ final class PlayerSmokeTests: XCTestCase {
         evidence.name = "arcade-pulse-library-privacy-footer-iphone"
         evidence.lifetime = .keepAlways
         add(evidence)
+    }
+
+    /// P1 #439: an actual compact-landscape iPhone Library guest CTA must
+    /// scroll entirely above the floating system tabs at maximum text size.
+    /// The tester physically taps the real sign-in route, no mocked data.
+    @MainActor
+    func testArcadePulseLibraryCompactLandscapeSignInClearOfTabBar() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("Compact landscape floating tab regression is iPhone-only.")
+        }
+
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "--ui-test-library-entry",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+        let library = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
+        XCTAssertTrue(library.waitForExistence(timeout: 15),
+                      "Test must start inside the actual signed-out Library destination.")
+        let signIn = app.buttons["library.signIn"].firstMatch
+        // In an Accessibility5 List, the real sign-in cell is lazily laid
+        // out below the oversized genuine hero: it is NOT present in the
+        // initial portrait accessibility tree. Do not demand existence
+        // before physically scrolling the actual CollectionView.
+
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "arcade-pulse-library-a5-iphone-portrait-before-rotation"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let until = Date().addingTimeInterval(12)
+        while window.frame.width <= window.frame.height && Date() < until {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "A true native landscape frame is required for overlay evidence.")
+        let tabs = app.tabBars.firstMatch
+        XCTAssertTrue(tabs.waitForExistence(timeout: 8))
+        XCTAssertTrue(library.waitForExistence(timeout: 8),
+                      "Library must remain selected after physical rotation.")
+
+        // SwiftUI List is lazy: the genuine sign-in row can be absent from
+        // the accessibility tree until scrolled on-screen. Original failed
+        // screenshot 14283548914 showed the Accessibility5 hero occupying
+        // the initial screen with Saved Games only just entering view.
+        // Scroll physically, then require real row existence and full
+        // geometry clearance; do not fabricate or bypass the CTA.
+        // At Accessibility5 the Library's giant hero can occupy multiple
+        // viewports. A root-app swipe can hit the floating tab bar instead of
+        // the SwiftUI List. Target the genuine native scrolling container.
+        let collection = app.collectionViews.firstMatch
+        let table = app.tables.firstMatch
+        let scrollingList = collection.exists ? collection : table
+        XCTAssertTrue(scrollingList.exists,
+                      "Actual Library must expose a native scrollable List container.")
+        for _ in 0..<12 {
+            if signIn.exists && signIn.isHittable &&
+               signIn.frame.maxY <= tabs.frame.minY - 4 {
+                break
+            }
+            scrollingList.swipeUp()
+        }
+        print("LIBRARY_A5_NATIVE_SCROLL frame=\(window.frame) list=\(scrollingList.frame) tabs=\(tabs.frame) sign_in_exists=\(signIn.exists)")
+        let afterPhysicalScroll = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        afterPhysicalScroll.name = "arcade-pulse-library-a5-native-scroll-before-signin-assertion"
+        afterPhysicalScroll.lifetime = .keepAlways
+        add(afterPhysicalScroll)
+        XCTAssertTrue(signIn.exists,
+                      "Real Library sign-in must materialize after actual native scrolling.")
+        XCTAssertTrue(signIn.isHittable,
+                      "Real Library sign-in must be reachable at Accessibility5 in landscape.")
+        XCTAssertGreaterThanOrEqual(signIn.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(signIn.frame.height, 44)
+        XCTAssertLessThanOrEqual(signIn.frame.maxY, tabs.frame.minY - 4,
+                                 "The full sign-in control must clear native floating tabs.")
+
+        let clear = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        clear.name = "arcade-pulse-library-a5-iphone-landscape-clear-of-tabs"
+        clear.lifetime = .keepAlways
+        add(clear)
+
+        // A genuine native hit must reach Profile; visibility alone does
+        // not prove the CTA is usable after rotation and scrolling.
+        signIn.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let apple = app.buttons["Sign in with Apple"].firstMatch
+        XCTAssertTrue(apple.waitForExistence(timeout: 10) && apple.isHittable,
+                      "After a physical tap, actual Apple sign-in must be usable.")
+        let arrived = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        arrived.name = "arcade-pulse-library-a5-iphone-landscape-profile-arrived"
+        arrived.lifetime = .keepAlways
+        add(arrived)
+        XCUIDevice.shared.orientation = .portrait
     }
 
     /// Open the actual saved/recent Library stage in iPad portrait and landscape.

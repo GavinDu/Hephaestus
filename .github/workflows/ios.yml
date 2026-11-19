@@ -214,13 +214,17 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutState \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStudioSignedOutAccessibilityTextSize \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateEntryConsentAndControls \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreateKeywordsAccessibility5ContrastAndInput \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedUnavailableRecoveryToLibrary \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseStalledTransportReachesHonestRecovery \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSlowLiveFeedCanOpenLibraryBeforeTimeout \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryCompactLandscapeSignInClearOfTabBar \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseLibraryIPadAdaptiveLayout \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadSidebarXXLDestinationsAndProfileRoute \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadAccessibilityFiveSidebarHasRoomForWholeWords \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorGuestSignInRoutesToProfileAfterDismiss \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorTopicSearchKeyboardAndApplyAreReachable \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCreatorDirectoryNormalDoneKeepsFeedDestination \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadGameDetailsAdaptiveLayout \
             -parallel-testing-enabled NO -resultBundlePath /tmp/ipad-feed-ui.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee /tmp/ipad-feed-ui.log || {

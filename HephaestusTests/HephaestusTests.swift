@@ -747,6 +747,61 @@ struct HephaestusTests {
     #expect(!PlayerLoadRetryPolicy.shouldRetryOnForeground(category: nil))
 }
 
+@Test func playerConnectivityRestoredRetryIsNetworkOnlyAndEpochSafe() {
+    // A genuine offline -> online transition after a transport failure is
+    // the only automatic reconnect reason. 4xx package/auth failures remain
+    // visible until an explicit safe route or account/package update.
+    let transientStatuses = [408, 425, 429, 500, 502, 503, 504]
+    for status in transientStatuses {
+        let category = PlayerLoadFailure.category(
+            for: PlayerLoadFailure.httpError(statusCode: status)
+        )
+        #expect(category == .network)
+        #expect(PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: true, isOffline: false, category: category,
+            hasError: true, sessionRevoked: false
+        ))
+    }
+
+    for status in [400, 401, 403, 404, 409, 410, 413, 422, 426] {
+        let category = PlayerLoadFailure.category(
+            for: PlayerLoadFailure.httpError(statusCode: status)
+        )
+        #expect(category != .network)
+        #expect(!PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: true, isOffline: false, category: category,
+            hasError: true, sessionRevoked: false
+        ))
+    }
+
+    let permanentCategories: [PlayerLoadFailure.Category?] = [
+        .accessDenied, .unavailable, .invalidPackage, .incompatible, .unknown, nil
+    ]
+    for category in permanentCategories {
+        #expect(!PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: true, isOffline: false, category: category,
+            hasError: true, sessionRevoked: false
+        ))
+    }
+
+    // Each callback is a pure current-state decision. A second callback,
+    // a background reconnect, or account revocation cannot create retries.
+    let transitions: [(Bool, Bool, Bool, Bool, Bool)] = [
+        (false, false, true, false, false),
+        (false, true, true, false, false),
+        (true, true, true, false, false),
+        (true, false, false, false, false),
+        (true, false, true, true, false),
+        (true, false, true, false, true),
+    ]
+    for (wasOffline, isOffline, hasError, revoked, expected) in transitions {
+        #expect(PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: wasOffline, isOffline: isOffline, category: .network,
+            hasError: hasError, sessionRevoked: revoked
+        ) == expected)
+    }
+}
+
 @Test func nativePlayerTelemetryNeverUploadsUnstructuredDevLogTail() {
     let privateLines = [
         "Bearer private-bearer-token",
@@ -2922,5 +2977,74 @@ struct HephaestusTests {
     // consider an absent view as a new speculative game.
     #expect(!PlayerPrewarmMemoryPressurePolicy.shouldDiscard(
         isAttached: false, hasPooledView: false
+    ))
+}
+
+@Test func webKitOriginPolicyAdmitsOnlyExactBackendOriginAcrossDefaultAndCustomPorts() {
+    let https = URL(string: "https://games.example.test")!
+    let http = URL(string: "http://games.example.test")!
+    let customHTTPS = URL(string: "https://games.example.test:8443")!
+    let customHTTP = URL(string: "http://games.example.test:8123")!
+
+    // An observed WebKit port 0 means the *standard scheme port* only;
+    // it never grants a wildcard authorization for a custom backend.
+    let cases: [(URL, String, String, Int, Bool)] = [
+        (https, "https", "games.example.test", 0, true),
+        (https, "https", "games.example.test", 443, true),
+        (http, "http", "games.example.test", 0, true),
+        (http, "http", "games.example.test", 80, true),
+        (customHTTPS, "https", "games.example.test", 8443, true),
+        (customHTTP, "http", "games.example.test", 8123, true),
+        (customHTTPS, "https", "games.example.test", 0, false),
+        (customHTTPS, "https", "games.example.test", 443, false),
+        (customHTTP, "http", "games.example.test", 0, false),
+        (customHTTP, "http", "games.example.test", 80, false),
+        (https, "http", "games.example.test", 443, false),
+        (https, "https", "evil.example.test", 443, false),
+        (https, "https", "evil.example.test", 0, false),
+        (https, "https", "games.example.test.evil.test", 0, false),
+        (https, "https", "games.example.test", -1, false),
+        (https, "https", "games.example.test", 65536, false),
+        (customHTTPS, "https", "games.example.test", 8123, false),
+        (URL(string: "file:///private/tmp/player")!, "file", "", 0, false),
+        (URL(string: "https://user@games.example.test")!, "https", "games.example.test", 0, false),
+        (URL(string: "https://games.example.test:0")!, "https", "games.example.test", 0, false),
+    ]
+    for (backend, scheme, host, port, expected) in cases {
+        #expect(PlayerWebKitOriginPolicy.matches(
+            backendURL: backend, originScheme: scheme,
+            originHost: host, originPort: port
+        ) == expected)
+    }
+    #expect(!PlayerWebKitOriginPolicy.matches(
+        backendURL: https, originScheme: "https",
+        originHost: "games.example.test", originPort: Int.max
+    ))
+}
+
+@Test func speculativeAndAttachedOriginChecksShareDefaultPortRules() {
+    let backend = URL(string: "https://games.example.test")!
+    let url = URL(string: "https://games.example.test/player?game=fixture")!
+    #expect(PlayerWebKitOriginPolicy.matches(
+        backendURL: backend, originScheme: "https",
+        originHost: "games.example.test", originPort: 0
+    ))
+    #expect(PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: url, actualURL: url, isMainFrame: true,
+        originScheme: "https", originHost: "games.example.test",
+        originPort: 0, backendURL: backend
+    ))
+    #expect(!PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: true,
+        expectedURL: url, actualURL: url, isMainFrame: true,
+        originScheme: "https", originHost: "games.example.test",
+        originPort: 0, backendURL: backend
+    ))
+    #expect(!PlayerPrewarmMessageOriginPolicy.allows(
+        isCurrentPooledView: true, isAttached: false,
+        expectedURL: url, actualURL: url, isMainFrame: false,
+        originScheme: "https", originHost: "games.example.test",
+        originPort: 0, backendURL: backend
     ))
 }
