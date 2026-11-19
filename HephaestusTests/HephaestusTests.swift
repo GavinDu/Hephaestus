@@ -818,6 +818,36 @@ struct HephaestusTests {
     }
 }
 
+@Test func nativeTelemetryTransportRedactsFutureCallerLogTailBeforeEncoding() throws {
+    // A future or indirect caller might accidentally populate the DTO even
+    // though PlayerTelemetry.report itself no longer reads DevLog.
+    let secrets = [
+        "Bearer private-token-abc",
+        "https://private.example.test/player?access_token=secret",
+        "NSError auth-user-info private creator identity"
+    ]
+    var report = BackendAPI.PlayerTelemetryReport(
+        gameId: "public-game",
+        runtimeVersion: "ios-player-1.1",
+        kind: "ios-load-failed",
+        name: "LoadFailed",
+        message: "http_status=403 category=accessDenied"
+    )
+    report.logTail = secrets
+    let redacted = report.sanitizedForTransport()
+    #expect(redacted.logTail.isEmpty)
+    #expect(report.logTail == secrets) // caller value remains unmodified
+    let serialized = String(
+        decoding: try JSONEncoder().encode(redacted),
+        as: UTF8.self
+    )
+    #expect(serialized.contains("\\"logTail\\":[]"))
+    #expect(serialized.contains("http_status=403"))
+    for secret in secrets {
+        #expect(!serialized.contains(secret))
+    }
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
