@@ -49,8 +49,22 @@ struct ArcadePulseCreatorDirectoryRowLayoutTests {
     }
 
     @Test func realPublicGameCountsHaveCorrectSingularPlural() {
-        #expect(CreatorDirectoryRowLayout.publicGameCount(0).contains("public games"))
+        #expect(CreatorDirectoryRowLayout.publicGameCount(0) == "0 public games")
         #expect(CreatorDirectoryRowLayout.publicGameCount(1) == "1 public game")
-        #expect(CreatorDirectoryRowLayout.publicGameCount(2).contains("public games"))
+        #expect(CreatorDirectoryRowLayout.publicGameCount(2) == "2 public games")
+        // Source formatter stays localized and never caps truthful values.
+        #expect(CreatorDirectoryRowLayout.publicGameCount(1_000) ==
+                "\(1_000.formatted()) public games")
+    }
+
+    @Test func malformedNegativeBackendCountDoesNotInventPublicGames() {
+        for count in [-1, -50, Int.min] {
+            let display = CreatorDirectoryRowLayout.publicGameCount(count)
+            #expect(display == "Public game count unavailable")
+            #expect(!display.contains("0 public games"))
+            #expect(!display.contains(String(count)))
+        }
+        // The one shared formatter is used for the row and its VoiceOver
+        // profile-action label, so no untrusted negative count is spoken.
     }
 }
