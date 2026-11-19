@@ -496,10 +496,6 @@ enum LibrarySavedCountCaption {
     }
 }
 
-/// The system TabView can float over a compact iPhone landscape List.
-/// A scroll-end inset is intentionally separate from the existing portrait
-/// footer spacing: it must be enough for an actual 48pt CTA plus breathing
-/// room above native tabs without taking space from the iPad sidebar.
 /// Keep the existing real Library CTA reachable on a short, huge-text
 /// iPhone guest screen without dropping, shrinking or duplicating content.
 /// Only visual order changes; identity and navigation are unchanged.
@@ -512,6 +508,10 @@ enum LibraryGuestSignInPriorityPolicy {
     }
 }
 
+/// The system TabView can float over a compact iPhone landscape List.
+/// A scroll-end inset is intentionally separate from the existing portrait
+/// footer spacing: it must be enough for an actual 48pt CTA plus breathing
+/// room above native tabs without taking space from the iPad sidebar.
 enum LibraryTabBarClearancePolicy {
     static let compactPhoneTrailingInset: CGFloat = 72
 
