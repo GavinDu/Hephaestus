@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 /// Private owner workspace. The backend, not the device, authorizes every
 /// project. No invented draft, graph, editor, remix or analytics affordance.
@@ -18,10 +19,15 @@ struct CreatorStudioView: View {
     @State private var projects: [CreatorProject] = []
     @State private var selectedStatus: ProjectFilter = .all
     @State private var nextCursor: String?
+    @State private var confirmedFilter: ProjectFilter?
+    @State private var confirmedOwner: String?
+    // Store only a digest, never any prior bearer token in view state.
+    @State private var confirmedCredentialDigest: String?
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var requestRevision = 0
     @State private var loadError: String?
+    @State private var lastFailureWasReset = false
     @State private var playerRequest: PixiPlayerRequest?
 
     private enum ProjectFilter: String, CaseIterable, Identifiable {
@@ -56,6 +62,17 @@ struct CreatorStudioView: View {
                         .modifier(CreatorStudioProjectFilterPresentation())
                         .accessibilityIdentifier("studio.project.filter")
                         .onChange(of: selectedStatus) { _, _ in
+                            // Clear other-filter projects synchronously before any GET.
+                            requestRevision += 1
+                            projects = []
+                            nextCursor = nil
+                            confirmedFilter = nil
+                            confirmedOwner = nil
+                            confirmedCredentialDigest = nil
+                            loadError = nil
+                            lastFailureWasReset = false
+                            isLoadingMore = false
+                            isLoading = true
                             Task { await load(reset: true) }
                         }
 
@@ -81,6 +98,12 @@ struct CreatorStudioView: View {
                                 description: Text("Games you create will appear here with their real generation and moderation status."))
                                 .frame(maxWidth: .infinity, minHeight: 240)
                         } else {
+                            if isLoading {
+                                Label("Refreshing previously confirmed projects…", systemImage: "arrow.clockwise")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityIdentifier("studio.projects.refreshingPrior")
+                            }
                             LazyVGrid(
                                 columns: [GridItem(.adaptive(minimum: 265, maximum: 420), spacing: 16)],
                                 alignment: .center, spacing: 16
@@ -89,7 +112,7 @@ struct CreatorStudioView: View {
                                     projectCard(project)
                                 }
                             }
-                            if nextCursor != nil {
+                            if nextCursor != nil && !isLoading {
                                 Button {
                                     Task { await load(reset: false) }
                                 } label: {
@@ -102,9 +125,22 @@ struct CreatorStudioView: View {
                                 .accessibilityIdentifier("studio.loadMore")
                             }
                             if let loadError {
-                                Label(loadError, systemImage: "exclamationmark.triangle")
-                                    .font(.caption)
-                                    .foregroundStyle(.orange)
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Label((lastFailureWasReset
+                                        ? "Previously confirmed projects. Refresh was not completed. "
+                                        : "Could not load additional projects. ") + loadError,
+                                          systemImage: "exclamationmark.triangle")
+                                        .font(.footnote)
+                                        .foregroundStyle(.orange)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .accessibilityIdentifier("studio.projects.staleWarning")
+                                    Button(lastFailureWasReset ? "Retry project refresh" : "Retry loading more") {
+                                        Task { await load(reset: lastFailureWasReset) }
+                                    }
+                                        .buttonStyle(.bordered)
+                                        .frame(minHeight: ArcadePulseTheme.minimumTarget)
+                                        .accessibilityIdentifier("studio.projects.retryPrior")
+                                }
                             }
                         }
                     }
@@ -142,7 +178,11 @@ struct CreatorStudioView: View {
                 requestRevision += 1
                 projects = []
                 nextCursor = nil
+                confirmedOwner = nil
+                confirmedCredentialDigest = nil
+                confirmedFilter = nil
                 loadError = nil
+                lastFailureWasReset = false
                 isLoading = false
                 isLoadingMore = false
                 playerRequest = nil
@@ -392,14 +432,35 @@ struct CreatorStudioView: View {
             requestRevision += 1
             projects = []
             nextCursor = nil
+            confirmedOwner = nil
+            confirmedCredentialDigest = nil
+            confirmedFilter = nil
+            isLoading = false
+            isLoadingMore = false
+            lastFailureWasReset = false
             loadError = nil
             return
         }
         if reset {
             requestRevision += 1
             isLoading = true
-            projects = []
+            let keepConfirmed = CreatorStudioRefreshRetentionPolicy.mayRetain(
+                hasConfirmedProjects: !projects.isEmpty,
+                storedOwner: confirmedOwner, currentOwner: ownerID,
+                storedCredentialDigest: confirmedCredentialDigest,
+                currentCredentialDigest: CreatorStudioRefreshRetentionPolicy.digest(sessionToken),
+                storedFilter: confirmedFilter?.rawValue,
+                currentFilter: selectedStatus.rawValue
+            )
+            if !keepConfirmed {
+                projects = []
+                confirmedFilter = nil
+                confirmedOwner = nil
+                confirmedCredentialDigest = nil
+            }
+            // A refresh is a new snapshot: do not paginate an old cursor.
             nextCursor = nil
+            lastFailureWasReset = false
             loadError = nil
         } else {
             guard nextCursor != nil, !isLoadingMore, !isLoading else { return }
@@ -426,11 +487,15 @@ struct CreatorStudioView: View {
                   ), selectedStatus == filter else { return }
             if reset {
                 projects = response.projects
+                confirmedFilter = filter
+                confirmedOwner = ownerID
+                confirmedCredentialDigest = CreatorStudioRefreshRetentionPolicy.digest(sessionToken)
             } else {
                 let known = Set(projects.map(\.gameID))
                 projects.append(contentsOf: response.projects.filter { !known.contains($0.gameID) })
             }
             nextCursor = response.nextCursor
+            lastFailureWasReset = false
             loadError = nil
         } catch {
             guard !Task.isCancelled,
@@ -442,19 +507,60 @@ struct CreatorStudioView: View {
             // Raw localizedDescription may contain internal API hostnames,
             // request URLs or unauthorized account metadata. Keep diagnostics
             // separate from fixed, user-actionable native error copy.
-            if CreatorStudioErrorPresentation.mustRevokeVisibleProjects(for: error) {
-                // A real 401/403 response revokes authorization to display
-                // even projects loaded in a previous successful page. Merely
-                // showing an error beneath those private cards would leak
-                // unauthorized owner-only titles until sign-out.
+            if CreatorStudioErrorPresentation.mustRevokeVisibleProjects(for: error) ||
+                (reset && !CreatorStudioRefreshRetentionPolicy.isTransient(error)) {
+                // Authorization denial ALWAYS revokes private rows, including
+                // a paginated request. An invalid/unsupported RESET request
+                // must not keep representing old rows as safe refreshed data.
                 projects.removeAll()
                 nextCursor = nil
+                confirmedFilter = nil
+                confirmedOwner = nil
+                confirmedCredentialDigest = nil
             }
+            lastFailureWasReset = reset
             loadError = CreatorStudioErrorPresentation.message(for: error)
         }
     }
 }
 
+/// A confirmed owner-only shelf can survive transient refresh ONLY for the
+/// exact same owner, credential and filter. 401/403 and session changes purge.
+enum CreatorStudioRefreshRetentionPolicy {
+    static func digest(_ token: String?) -> String? {
+        guard let token, !token.isEmpty else { return nil }
+        return SHA256.hash(data: Data(token.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+    }
+    static func isTransient(_ error: Error) -> Bool {
+        if let apiError = error as? APIError,
+           case let .badStatus(status) = apiError {
+            return status == 429 || (500...599).contains(status)
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                 .cannotConnectToHost, .cannotFindHost, .secureConnectionFailed:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
+    }
+
+    static func mayRetain(
+        hasConfirmedProjects: Bool,
+        storedOwner: String?, currentOwner: String,
+        storedCredentialDigest: String?, currentCredentialDigest: String?,
+        storedFilter: String?, currentFilter: String
+    ) -> Bool {
+        hasConfirmedProjects && !currentOwner.isEmpty &&
+            storedOwner == currentOwner && storedCredentialDigest != nil &&
+            storedCredentialDigest == currentCredentialDigest &&
+            storedFilter == currentFilter
+    }
+}
 /// Privacy-safe, actionable source for native Studio project-fetch errors.
 /// Project models, permissions and statuses always remain server-authoritative.
 enum CreatorStudioErrorPresentation {

@@ -1545,6 +1545,11 @@ final class PlayerSmokeTests: XCTestCase {
                       "Signed-out Studio must explain that private drafts require sign-in.")
         XCTAssertFalse(app.buttons["game.play"].firstMatch.exists,
                        "Without an authenticated owner there can be no playable project card.")
+        // Signed-out Studio must never show a previous account's retained
+        // refresh state, status count, or stale private project cards.
+        XCTAssertFalse(app.descendants(matching: .any)["studio.projects.staleWarning"].firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["studio.projects.refreshingPrior"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["studio.projects.retryPrior"].firstMatch.exists)
         let openProfile = app.buttons["studio.openProfile"].firstMatch
         XCTAssertTrue(openProfile.waitForExistence(timeout: 5) && openProfile.isHittable,
                       "The signed-out Studio must offer a reachable route to real Apple sign-in.")
