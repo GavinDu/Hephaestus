@@ -53,6 +53,18 @@ final class FeedRequestCoordinator {
     }
 }
 
+/// The system's floating compact-height iPhone tabs occupy the lower
+/// 64pt of the genuine 874x402 landscape window. A bottom-of-card Play CTA
+/// must be able to scroll fully ABOVE them instead of hiding under chrome.
+/// Do not reserve this extra space on portrait iPhones or any iPad layout.
+enum FeedGridTabClearancePolicy {
+    static let compactPhoneTrailingInset: CGFloat = 72
+
+    static func trailingInset(isPhone: Bool, isCompactHeight: Bool) -> CGFloat {
+        isPhone && isCompactHeight ? compactPhoneTrailingInset : 0
+    }
+}
+
 /// A submitted real game title must stay filtered after UIKit collapses the
 /// native searchable drawer during device rotation / ScrollView swipes.
 /// Drafting a new query takes precedence; explicit Clear search ends it.
@@ -574,7 +586,10 @@ struct DiscoverView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
-                .padding(.bottom, 28)
+                .padding(.bottom, 28 + FeedGridTabClearancePolicy.trailingInset(
+                    isPhone: UIDevice.current.userInterfaceIdiom == .phone,
+                    isCompactHeight: verticalSizeClass == .compact
+                ))
                         }
                         // Native Search results live in this actual
                         // non-immersive scroll surface. Give XCUITest an
