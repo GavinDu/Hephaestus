@@ -331,6 +331,95 @@ struct PlayerFirstSceneRenderSubmissionGate {
     }
 }
 
+/// At most one candidate scene-submit milestone per current speculative
+/// WK document. Its identity is immutable; neither URL equality alone nor a
+/// JS session ID alone is sufficient to transfer ownership after a retry.
+/// This *pure ledger* has no WebKit listener yet. #351 connects the collector
+/// and #352 consumes on the real attached Coordinator.
+struct PlayerPrewarmSceneMilestoneLedger {
+    struct Identity: Equatable {
+        let gameID: String
+        let playerURL: URL
+        let documentNonce: String
+        let credentialFingerprint: String
+        let runtimeSessionID: String
+
+        var isValid: Bool {
+            guard !gameID.isEmpty, gameID.utf8.count <= 128,
+                  playerURL.scheme?.lowercased() == "https",
+                  let host = playerURL.host, !host.isEmpty,
+                  playerURL.user == nil, playerURL.password == nil,
+                  playerURL.fragment == nil,
+                  let components = URLComponents(
+                      url: playerURL, resolvingAgainstBaseURL: false
+                  ),
+                  components.path == "/player",
+                  let gameItems = components.queryItems?.filter({ $0.name == "game" }),
+                  gameItems.count == 1, gameItems[0].value == gameID,
+                  PlayerNativeDocumentEpochGate.isWellFormed(documentNonce),
+                  !credentialFingerprint.isEmpty,
+                  credentialFingerprint.utf8.count <= 256,
+                  (1...128).contains(runtimeSessionID.utf8.count) else { return false }
+            // Mirror the protocol byte contract instead of String.count,
+            // which counts grapheme clusters, not the UTF-8 session bytes.
+            return runtimeSessionID.utf8.allSatisfy { (0x21...0x7e).contains($0) }
+        }
+    }
+
+    struct Submission: Equatable {
+        let identity: Identity
+        let sequence: Int
+        let milliseconds: Int
+    }
+
+    private(set) var candidate: Submission?
+    private(set) var hasTransferred = false
+
+    mutating func record(
+        identity: Identity,
+        expected: Identity,
+        sequence: Int,
+        milliseconds: Int,
+        isMainFrame: Bool,
+        isSpeculative: Bool,
+        navigationStarted: Bool
+    ) -> Bool {
+        guard candidate == nil, !hasTransferred,
+              identity.isValid, expected.isValid, identity == expected,
+              isMainFrame, isSpeculative, navigationStarted,
+              (0...100_000).contains(sequence),
+              (0...3_600_000).contains(milliseconds) else { return false }
+        candidate = Submission(
+            identity: identity, sequence: sequence, milliseconds: milliseconds
+        )
+        return true
+    }
+
+    /// A retired SwiftUI Coordinator must not steal a successor's pending
+    /// milestone. Mismatched identities do not consume a current candidate;
+    /// navigation/session invalidation separately clears all stale state.
+    mutating func consume(
+        expected: Identity,
+        offeredLease: UInt64,
+        currentLease: UInt64,
+        isCurrentPooledView: Bool,
+        isAttached: Bool
+    ) -> Submission? {
+        guard !hasTransferred, let candidate,
+              candidate.identity == expected, expected.isValid,
+              offeredLease != 0, offeredLease == currentLease,
+              isCurrentPooledView, isAttached else { return nil }
+        hasTransferred = true
+        self.candidate = nil
+        return candidate
+    }
+
+    mutating func invalidate() {
+        candidate = nil
+        hasTransferred = false
+    }
+}
+
 /// One live, cryptographically unpredictable challenge per attempted main-frame
 /// WK document. The pool (not a JS session ID or SwiftUI Coordinator) owns it.
 /// No historical-ID list is needed: late messages must match this exact nonce.
@@ -830,13 +919,21 @@ enum PlayerRuntimeMetricPolicy {
 /// same store the web runtime beacons its errors to, so one incidents
 /// view covers web and native player health. Kinds: `perf` samples are
 /// filed server-side but never counted as incidents; the `ios-*` kinds
-/// are real failure signals and aggregate like web errors. Payloads
-/// carry no account identifiers and no user content — game id, event
-/// kind, a message, and the tail of the on-device dev log.
+/// are real failure signals and aggregate like web errors.
+/// Upload only explicitly structured event fields, never arbitrary on-device
+/// DevLog text. Other caller-supplied event messages require separate audit.
+enum PlayerTelemetryLogUploadPolicy {
+    /// Reject arbitrary log text; generic regex scrubbing cannot prove safety.
+    static func remoteTail(from localEntries: [String]) -> [String] {
+        []
+    }
+}
+
 enum PlayerTelemetry {
     static func report(gameID: String?, kind: String, name: String, message: String) {
-        let tail = DevLog.shared.exportText()
-            .split(separator: "\n").suffix(20).map(String.init)
+        // The DevLog remains on-device for authorized diagnosis. Report
+        // only the typed event fields, never historical free-form log lines.
+        let tail = PlayerTelemetryLogUploadPolicy.remoteTail(from: [])
         let report = BackendAPI.PlayerTelemetryReport(
             gameId: gameID ?? "",
             runtimeVersion: "ios-player-1.1",
@@ -965,6 +1062,39 @@ enum PlayerWebKitSessionStoragePolicy {
     }
 }
 
+/// A scene-submission timestamp alone cannot identify the current game.
+/// Only native pool facts can create a poster attempt; page-owned JSON
+/// supplies no lease, credential fingerprint or document authorization.
+enum PlayerNativePosterAttemptAdmission {
+    static func make(
+        gameID: String,
+        playerURL: URL,
+        documentNonce: String?,
+        credentialFingerprint: String?,
+        offeredLease: UInt64,
+        currentLease: UInt64,
+        currentURL: URL?,
+        isCurrentPooledView: Bool,
+        isAttached: Bool,
+        navigationStarted: Bool
+    ) -> PlayerPosterHoldPolicy.Attempt? {
+        guard navigationStarted, currentURL == playerURL,
+              let documentNonce, let credentialFingerprint,
+              PlayerAttachmentLeasePolicy.mayRecycle(
+                  isCurrentPooledView: isCurrentPooledView,
+                  isAttached: isAttached, expectedLease: offeredLease,
+                  currentLease: currentLease
+              ) else { return nil }
+        let candidate = PlayerPosterHoldPolicy.Attempt(
+            gameID: gameID, playerURL: playerURL,
+            documentNonce: documentNonce,
+            credentialFingerprint: credentialFingerprint,
+            attachmentLease: offeredLease
+        )
+        return candidate.isValid ? candidate : nil
+    }
+}
+
 // MARK: - Single pooled player web view
 //
 // Prewarming starts only after an explicit Play press begins. The same
@@ -1029,6 +1159,7 @@ enum PlayerWebViewPool {
     private static let prewarmMetricName = "hephaestusRunResult"
     private static let prewarmMetricHandler = PoolMetricRouter()
     private static var prewarmSceneGate = PlayerPrewarmV2SceneMetricGate()
+    private static var sceneMilestoneLedger = PlayerPrewarmSceneMilestoneLedger()
 
     static func playerURL(gameID: String, quality: String? = nil) -> URL? {
         // Do not construct a player URL for an empty identifier, and never
@@ -1055,6 +1186,7 @@ enum PlayerWebViewPool {
     static func prepareDocumentNavigation(_ webView: WKWebView) {
         guard pooledView === webView else { return }
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         transferringLease = nil
         let nonce = documentEpochGate.prepareNavigation()
         // Only installed native code can issue a fresh current-document
@@ -1077,6 +1209,7 @@ enum PlayerWebViewPool {
     static func didStartDocumentNavigation(_ webView: WKWebView) {
         guard pooledView === webView else { return }
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         transferringLease = nil
         _ = documentEpochGate.didStartNavigation()
     }
@@ -1094,6 +1227,7 @@ enum PlayerWebViewPool {
         guard pooledView === webView else { return }
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         transferringLease = nil
     }
 
@@ -1206,6 +1340,26 @@ enum PlayerWebViewPool {
         transferringLease = nil
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
+    }
+
+    /// Trustworthy in-memory poster identity, never derived from JS session
+    /// or run-result dictionaries. A cold page does not get a ready document
+    /// snapshot until its explicitly prepared navigation actually starts.
+    static func currentPosterAttempt(
+        webView: WKWebView, url: URL, gameID: String, lease: UInt64
+    ) -> PlayerPosterHoldPolicy.Attempt? {
+        ensureCurrentCredentialScope()
+        return PlayerNativePosterAttemptAdmission.make(
+            gameID: gameID, playerURL: url,
+            documentNonce: documentEpochGate.currentNonce,
+            credentialFingerprint: sessionFingerprint,
+            offeredLease: lease, currentLease: attachmentLease,
+            currentURL: currentURL,
+            isCurrentPooledView: pooledView === webView,
+            isAttached: isAttached,
+            navigationStarted: documentEpochGate.navigationStarted
+        )
     }
 
     static func ownsActiveAttachment(_ webView: WKWebView, lease: UInt64) -> Bool {
@@ -1230,6 +1384,7 @@ enum PlayerWebViewPool {
         loadedURL = nil
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         webView.navigationDelegate = warmupDelegate
         webView.stopLoading()
         webView.loadHTMLString("", baseURL: nil)
@@ -1273,6 +1428,7 @@ enum PlayerWebViewPool {
         isAttached = false
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         sessionFingerprint = credentialFingerprint()
         // Never let a newly created player WebView share persistent data or
         // a WebContent process pool with the retired Keychain identity.
@@ -1299,6 +1455,7 @@ enum PlayerWebViewPool {
         loadedURL = nil
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        sceneMilestoneLedger.invalidate()
         stale?.stopLoading()
         stale?.navigationDelegate = nil
         stale?.loadHTMLString("", baseURL: nil)
@@ -1549,6 +1706,9 @@ struct PixiPlayerSheet: View {
     // Current attached runtime's renderer *submission*, not GPU-present.
     // Any retry/sheet epoch revokes the diagnostic immediately.
     @State private var firstSceneSubmittedForAttempt: (epoch: Int, milliseconds: Int)?
+    // Native-host-derived document URL/nonce/credential/lease only; not JS.
+    // This has no visual effect until the separate trusted poster #566 patch.
+    @State private var posterAttemptForEpoch: (epoch: Int, identity: PlayerPosterHoldPolicy.Attempt)?
     @State private var didTrackGameplayStart = false
     @State private var verifiedResult: VerifiedRunResult?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
@@ -1756,6 +1916,15 @@ struct PixiPlayerSheet: View {
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             prewarmHit = true
+                        },
+                        onPosterAttempt: { identity in
+                            guard PlayerLaunchCallbackGate.accepts(
+                                expectedEpoch: callbackEpoch, currentEpoch: attempt,
+                                sessionRevoked: sessionRevoked
+                            ) else { return }
+                            posterAttemptForEpoch = identity.map {
+                                (epoch: callbackEpoch, identity: $0)
+                            }
                         },
                         onFirstSceneRenderSubmit: { ms in
                             guard PlayerLaunchCallbackGate.accepts(
@@ -2010,6 +2179,7 @@ struct PixiPlayerSheet: View {
                 // leak into retry, connectivity recovery or crash reload.
                 prewarmHit = false
                 firstSceneSubmittedForAttempt = nil
+                posterAttemptForEpoch = nil
                 gameplayStartedAt = nil
                 didTrackGameplayStart = false
                 verifiedResult = nil
@@ -2077,6 +2247,7 @@ struct PixiPlayerSheet: View {
                 PlayerWebViewPool.invalidateForSessionChange()
                 verifiedResult = nil
                 firstSceneSubmittedForAttempt = nil
+                posterAttemptForEpoch = nil
                 gameplayStartedAt = nil
                 didTrackGameplayStart = false
                 isLoading = false
@@ -2258,6 +2429,7 @@ private struct PlayerWebView: UIViewRepresentable {
     /// Declared between onTerminate and onVerifiedRun to match the
     /// call-site argument order (Swift requires the same order).
     var onPrewarmHit: () -> Void = {}
+    let onPosterAttempt: (PlayerPosterHoldPolicy.Attempt?) -> Void
     let onFirstSceneRenderSubmit: (Int) -> Void
     let onFirstInput: () -> Void
     let onVerifiedRun: (VerifiedRunResult) -> Void
@@ -2270,6 +2442,7 @@ private struct PlayerWebView: UIViewRepresentable {
         Coordinator(gameID: gameID, expectedURL: url, onProgress: onProgress,
                     onLoadFinish: onLoadFinish, onLoadFail: onLoadFail,
                     onTerminate: onTerminate,
+                    onPosterAttempt: onPosterAttempt,
                     onFirstSceneRenderSubmit: onFirstSceneRenderSubmit,
                     onFirstInput: onFirstInput, onVerifiedRun: onVerifiedRun)
     }
@@ -2297,6 +2470,11 @@ private struct PlayerWebView: UIViewRepresentable {
         }
         webView.navigationDelegate = context.coordinator
         context.coordinator.observeProgress(of: webView)
+        // An already prewarmed document has a current nonce before mount.
+        // A cold page receives its identity from didStart instead.
+        onPosterAttempt(PlayerWebViewPool.currentPosterAttempt(
+            webView: webView, url: url, gameID: gameID, lease: handoff.lease
+        ))
         if handoff.shouldLoad {
             webView.load(URLRequest(url: url))
         } else if handoff.didFinish {
@@ -2353,6 +2531,7 @@ private struct PlayerWebView: UIViewRepresentable {
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
+        let onPosterAttempt: (PlayerPosterHoldPolicy.Attempt?) -> Void
         let onFirstSceneRenderSubmit: (Int) -> Void
         let onFirstInput: () -> Void
         let onVerifiedRun: (VerifiedRunResult) -> Void
@@ -2384,6 +2563,7 @@ private struct PlayerWebView: UIViewRepresentable {
              onLoadFinish: @escaping () -> Void,
              onLoadFail: @escaping (Error) -> Void,
              onTerminate: @escaping () -> Void,
+             onPosterAttempt: @escaping (PlayerPosterHoldPolicy.Attempt?) -> Void,
              onFirstSceneRenderSubmit: @escaping (Int) -> Void,
              onFirstInput: @escaping () -> Void,
              onVerifiedRun: @escaping (VerifiedRunResult) -> Void) {
@@ -2393,6 +2573,7 @@ private struct PlayerWebView: UIViewRepresentable {
             self.onLoadFinish = onLoadFinish
             self.onLoadFail = onLoadFail
             self.onTerminate = onTerminate
+            self.onPosterAttempt = onPosterAttempt
             self.onFirstSceneRenderSubmit = onFirstSceneRenderSubmit
             self.onFirstInput = onFirstInput
             self.onVerifiedRun = onVerifiedRun
@@ -2620,6 +2801,12 @@ private struct PlayerWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             guard acceptsCurrentHostCallbacks else { return }
             PlayerWebViewPool.didStartDocumentNavigation(webView)
+            // Native current-document identity is valid only after the
+            // prepared navigation starts; unexpected redirects revoke it.
+            onPosterAttempt(PlayerWebViewPool.currentPosterAttempt(
+                webView: webView, url: expectedURL,
+                gameID: expectedGameID, lease: attachmentLease
+            ))
             nativeBridgeVersionGate.reset()
             launchLifecycle.navigationStarted()
             // A real reload has a new web runtime session. Stale metrics,
