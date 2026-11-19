@@ -106,26 +106,61 @@ struct LibraryView: View {
             .accessibilityLabel(savedCountCaption.accessibilityLabel)
     }
 
+    /// When text is enormous and the available height is short, the guest
+    /// needs the actual account route before the noninteractive arcade intro.
+    /// Both sections remain present; iPad and normal text order never change.
+    private var prioritizeGuestSignIn: Bool {
+        LibraryGuestSignInPriorityPolicy.putsSignInFirst(
+            isPhone: UIDevice.current.userInterfaceIdiom == .phone,
+            isCompactHeight: verticalSizeClass == .compact,
+            isAccessibilitySize: dynamicTypeSize.isAccessibilitySize,
+            isGuest: BackendConfig.currentUserID.isEmpty
+        )
+    }
+
+    private var arcadeIntroSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("YOUR ARCADE", systemImage: "gamecontroller.fill")
+                    .font(.caption.weight(.bold))
+                    .tracking(0.8)
+                    .foregroundStyle(ArcadePulseTheme.neonMagenta)
+                Text("Jump back into play")
+                    .font(.system(.title2, design: .rounded).weight(.bold))
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("library.arcadePulse")
+                Text("Saved and recently played games in one place.")
+                    .font(.subheadline)
+                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 8)
+            .listRowBackground(ArcadePulseTheme.surface)
+        }
+    }
+
+    /// One actual Profile destination is owned by this control. In a short
+    /// Accessibility5 landscape window it is hosted above the scroll view;
+    /// in every other configuration it belongs to the Saved games row.
+    /// Do not duplicate native accessibility actions or fake a signed-in state.
+    private var guestSignInButton: some View {
+        Button(action: onOpenProfile) {
+            Label("Go to Profile to sign in", systemImage: "person.crop.circle")
+                .font(.headline)
+                .foregroundStyle(ArcadePulseTheme.onElectricViolet)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(ArcadePulseTheme.electricViolet)
+        .accessibilityIdentifier("library.signIn")
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("YOUR ARCADE", systemImage: "gamecontroller.fill")
-                            .font(.caption.weight(.bold))
-                            .tracking(0.8)
-                            .foregroundStyle(ArcadePulseTheme.neonMagenta)
-                        Text("Jump back into play")
-                            .font(.system(.title2, design: .rounded).weight(.bold))
-                            .accessibilityAddTraits(.isHeader)
-                            .accessibilityIdentifier("library.arcadePulse")
-                        Text("Saved and recently played games in one place.")
-                            .font(.subheadline)
-                            .foregroundStyle(ArcadePulseTheme.textSecondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 8)
-                    .listRowBackground(ArcadePulseTheme.surface)
+                if !prioritizeGuestSignIn {
+                    arcadeIntroSection
                 }
                 // The empty-state recovery already explains fetch errors;
                 // reserve this banner for failures while cards are visible.
@@ -145,17 +180,9 @@ struct LibraryView: View {
                             Text("Saved games belong to your account. Sign in from Profile to see and manage them here.")
                                 .font(.subheadline)
                                 .foregroundStyle(ArcadePulseTheme.textSecondary)
-                            Button(action: onOpenProfile) {
-                                Label("Go to Profile to sign in", systemImage: "person.crop.circle")
-                                    .font(.headline)
-                                    // Shared normal-text contrast-safe color
-                                    // for the same violet used by Studio.
-                                    .foregroundStyle(ArcadePulseTheme.onElectricViolet)
-                                    .frame(maxWidth: .infinity, minHeight: 48)
+                            if !prioritizeGuestSignIn {
+                                guestSignInButton
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(ArcadePulseTheme.electricViolet)
-                            .accessibilityIdentifier("library.signIn")
                         }
                         .padding(.vertical, 8)
                         .listRowBackground(ArcadePulseTheme.surface)
@@ -227,6 +254,9 @@ struct LibraryView: View {
                     savedGamesSectionHeader
                 }
 
+                if prioritizeGuestSignIn {
+                    arcadeIntroSection
+                }
                 Section {
                     if visibleRecent.isEmpty {
                         ContentUnavailableView(
@@ -294,6 +324,19 @@ struct LibraryView: View {
             // SCROLLABLE trailing content space, not an overlay or a fake CTA:
             // the user can scroll the actual Library panel completely clear.
             // Regular iPad detail navigation keeps its native layout.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if prioritizeGuestSignIn {
+                    // The old real CTA could disappear entirely from the
+                    // Lazy List AX tree after a portrait→landscape rotation
+                    // even after twelve physical swipes. Keep exactly the
+                    // same real action in a measured, non-scrolling safe
+                    // area instead of adding a second or test-only button.
+                    guestSignInButton
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(ArcadePulseTheme.canvas)
+                }
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Color.clear
                     .frame(height: LibraryTabBarClearancePolicy.trailingScrollInset(
@@ -472,6 +515,18 @@ enum LibrarySavedCountCaption {
         }
         return Presentation(visibleText: "Unavailable",
                             accessibilityLabel: "Saved games count unavailable")
+    }
+}
+
+/// Keep the existing real Library CTA reachable on a short, huge-text
+/// iPhone guest screen without dropping, shrinking or duplicating content.
+/// Only visual order changes; identity and navigation are unchanged.
+enum LibraryGuestSignInPriorityPolicy {
+    static func putsSignInFirst(
+        isPhone: Bool, isCompactHeight: Bool,
+        isAccessibilitySize: Bool, isGuest: Bool
+    ) -> Bool {
+        isPhone && isCompactHeight && isAccessibilitySize && isGuest
     }
 }
 
