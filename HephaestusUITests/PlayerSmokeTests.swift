@@ -1469,6 +1469,20 @@ final class PlayerSmokeTests: XCTestCase {
         composer.typeText("Nice game")
         XCTAssertTrue(send.waitForExistence(timeout: 5) && send.isEnabled,
                       "Typing non-empty text must expose a real enabled Send button without submitting.")
+        // An actual native Send key must be visible for the text editor.
+        // Do NOT tap it: this smoke uses the genuine public game service.
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 8),
+                      "The real comment draft must raise an actual native keyboard.")
+        let sendKey = keyboard.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "send")
+        ).firstMatch
+        XCTAssertTrue(sendKey.waitForExistence(timeout: 5),
+                      "The actual keyboard must offer Send for the composer.")
+        let keyboardEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        keyboardEvidence.name = "arcade-pulse-comments-native-keyboard-send"
+        keyboardEvidence.lifetime = .keepAlways
+        add(keyboardEvidence)
         // Do not submit this smoke-test draft to the real public comment API.
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "arcade-pulse-comments-sheet"
