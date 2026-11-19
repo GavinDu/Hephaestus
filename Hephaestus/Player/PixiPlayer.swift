@@ -310,6 +310,15 @@ enum PlayerPrewarmMessageOwnershipPolicy {
     }
 }
 
+/// A rejected old Coordinator must never stop or blank a WKWebView that
+/// a successor already retook under a newer native attachment lease.
+/// Only a truly retired, no-longer-pooled view can be neutralized.
+enum PlayerRejectedHandoffCleanupPolicy {
+    static func mayBlank(isCurrentPooledView: Bool) -> Bool {
+        !isCurrentPooledView
+    }
+}
+
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
@@ -971,6 +980,11 @@ enum PlayerWebViewPool {
     private static var loadedURL: URL?
     private static var isAttached = false
     private static var attachmentLease: UInt64 = 0
+    // The single pool-owned WebKit handler never changes identity.
+    // Transfer holds one exact native lease until the Coordinator mounts.
+    private static var transferringLease: UInt64?
+    private static var attachedReceiverLease: UInt64?
+    private static weak var attachedMessageReceiver: (any WKScriptMessageHandler)?
     private static var documentEpochGate = PlayerNativeDocumentEpochGate()
     private static var sessionFingerprint: String?
     private static let sessionObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
@@ -1013,7 +1027,7 @@ enum PlayerWebViewPool {
     // WKUserContentController retains the handler; this handler never
     // retains a WKWebView or any game content.
     private static let prewarmMetricName = "hephaestusRunResult"
-    private static let prewarmMetricHandler = PrewarmMetricListener()
+    private static let prewarmMetricHandler = PoolMetricRouter()
     private static var prewarmSceneGate = PlayerPrewarmV2SceneMetricGate()
 
     static func playerURL(gameID: String, quality: String? = nil) -> URL? {
@@ -1041,6 +1055,7 @@ enum PlayerWebViewPool {
     static func prepareDocumentNavigation(_ webView: WKWebView) {
         guard pooledView === webView else { return }
         prewarmSceneGate.reset()
+        transferringLease = nil
         let nonce = documentEpochGate.prepareNavigation()
         // Only installed native code can issue a fresh current-document
         // challenge. Page code cannot derive future navigation epochs.
@@ -1062,6 +1077,7 @@ enum PlayerWebViewPool {
     static func didStartDocumentNavigation(_ webView: WKWebView) {
         guard pooledView === webView else { return }
         prewarmSceneGate.reset()
+        transferringLease = nil
         _ = documentEpochGate.didStartNavigation()
     }
 
@@ -1078,6 +1094,7 @@ enum PlayerWebViewPool {
         guard pooledView === webView else { return }
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
+        transferringLease = nil
     }
 
     static func prewarm(gameID: String) {
@@ -1088,9 +1105,8 @@ enum PlayerWebViewPool {
         // An existing prewarm already has its listener; do not briefly
         // unregister it while a first-scene message may be in flight.
         if currentURL == url && (view.isLoading || loadedURL == url) { return }
-        // A recycled sheet removed its coordinator handler. Reinstall exactly
-        // one narrow pool handler before the *new* speculative navigation.
-        installPrewarmMetricHandler(view)
+        // The single pool handler is installed when the WKWebView is created.
+        // Never unregister it while a previous document might still post.
 
         view.stopLoading()
         currentURL = url
@@ -1133,6 +1149,11 @@ enum PlayerWebViewPool {
         // Every distinct interactive SwiftUI Coordinator owns a new lease,
         // even if it reuses the same prewarmed WKWebView after a retry.
         attachmentLease &+= 1
+        attachedMessageReceiver = nil
+        attachedReceiverLease = nil
+        // The pool owns callbacks from a still-loading or already-warm page
+        // until the new Coordinator acknowledges this exact lease.
+        transferringLease = shouldLoad ? nil : attachmentLease
         currentURL = url
         if shouldLoad {
             loadedURL = nil
@@ -1182,6 +1203,7 @@ enum PlayerWebViewPool {
               responseURL == currentURL else { return }
         loadedURL = nil
         self.currentURL = nil
+        transferringLease = nil
         documentEpochGate.invalidate()
         prewarmSceneGate.reset()
     }
@@ -1201,6 +1223,9 @@ enum PlayerWebViewPool {
         prewarmExpiryTask = nil
         prewarmEpoch &+= 1
         isAttached = false
+        transferringLease = nil
+        attachedMessageReceiver = nil
+        attachedReceiverLease = nil
         currentURL = nil
         loadedURL = nil
         documentEpochGate.invalidate()
@@ -1240,6 +1265,9 @@ enum PlayerWebViewPool {
         prewarmEpoch &+= 1
         let stale = pooledView
         pooledView = nil
+        transferringLease = nil
+        attachedMessageReceiver = nil
+        attachedReceiverLease = nil
         currentURL = nil
         loadedURL = nil
         isAttached = false
@@ -1264,6 +1292,9 @@ enum PlayerWebViewPool {
         prewarmEpoch &+= 1
         let stale = pooledView
         pooledView = nil
+        transferringLease = nil
+        attachedMessageReceiver = nil
+        attachedReceiverLease = nil
         currentURL = nil
         loadedURL = nil
         documentEpochGate.invalidate()
@@ -1273,10 +1304,57 @@ enum PlayerWebViewPool {
         stale?.loadHTMLString("", baseURL: nil)
     }
 
-    private static func installPrewarmMetricHandler(_ webView: WKWebView) {
-        let controller = webView.configuration.userContentController
-        controller.removeScriptMessageHandler(forName: prewarmMetricName)
-        controller.add(prewarmMetricHandler, name: prewarmMetricName)
+    static func mayNeutralizeRejectedHandoff(_ webView: WKWebView) -> Bool {
+        PlayerRejectedHandoffCleanupPolicy.mayBlank(
+            isCurrentPooledView: pooledView === webView
+        )
+    }
+
+    /// Once mounted, the new Coordinator owns the current attachment lease.
+    /// The pool's WKScriptMessageHandler itself remains installed throughout.
+    @discardableResult
+    static func attachMessageReceiver(
+        _ receiver: WKScriptMessageHandler, webView: WKWebView,
+        url: URL, lease: UInt64
+    ) -> Bool {
+        ensureCurrentCredentialScope()
+        guard lease != 0,
+              ownsAttachedNavigation(webView, url: url, lease: lease)
+        else { return false }
+        attachedMessageReceiver = receiver
+        attachedReceiverLease = lease
+        transferringLease = nil
+        return true
+    }
+
+    /// Reject all callbacks from retired views/credential epochs. Untrusted
+    /// attached messages still run through the original Coordinator's full
+    /// native main-frame/origin/nonce/session/game/typed-metric admission.
+    private static func routeWebKitMessage(
+        _ controller: WKUserContentController, message: WKScriptMessage
+    ) {
+        ensureCurrentCredentialScope()
+        guard let view = pooledView, message.webView === view else { return }
+        let scopeIsCurrent = sessionFingerprint == credentialFingerprint()
+        let hasCurrentReceiver = attachedMessageReceiver != nil &&
+            attachedReceiverLease == attachmentLease
+        switch PlayerPrewarmMessageOwnershipPolicy.recipient(
+            isAttached: isAttached, transferringLease: transferringLease,
+            currentLease: attachmentLease,
+            hasAttachedReceiver: hasCurrentReceiver,
+            credentialScopeCurrent: scopeIsCurrent
+        ) {
+        case .speculative:
+            collectPrewarmMetric(message)
+        case .attached:
+            guard let lease = attachedReceiverLease,
+                  ownsActiveAttachment(view, lease: lease) else { return }
+            attachedMessageReceiver?.userContentController(
+                controller, didReceive: message
+            )
+        case .drop:
+            return
+        }
     }
 
     // A pool-owned listener cannot receive a run result or other privileges.
@@ -1293,7 +1371,9 @@ enum PlayerWebViewPool {
         let source = message.frameInfo.securityOrigin
         let trustedProvenance = PlayerPrewarmMessageOriginPolicy.allows(
             isCurrentPooledView: message.webView === view,
-            isAttached: isAttached,
+            // During take()->attach the current pool owns the transfer
+            // lease; do not treat it as a completed attached receiver yet.
+            isAttached: isAttached && transferringLease == nil,
             expectedURL: currentURL, actualURL: view.url,
             isMainFrame: message.frameInfo.isMainFrame,
             originScheme: source.protocol, originHost: source.host,
@@ -1310,13 +1390,12 @@ enum PlayerWebViewPool {
         )
     }
 
-    // This separate handler owns no game state and cannot accidentally
-    // retain the pooled WebView. The sheet swaps its own handler by removing
-    // this same single name on attach. Future #352 owns snapshot transfer.
-    private final class PrewarmMetricListener: NSObject, WKScriptMessageHandler {
+    // This pool-owned handler is stable across take/recycle. It holds no
+    // WKWebView or Coordinator and cannot retain a retired game session.
+    private final class PoolMetricRouter: NSObject, WKScriptMessageHandler {
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
-            PlayerWebViewPool.collectPrewarmMetric(message)
+            PlayerWebViewPool.routeWebKitMessage(userContentController, message: message)
         }
     }
 
@@ -1467,6 +1546,9 @@ struct PixiPlayerSheet: View {
     @State private var reportedThermal = false
     @State private var reportedMemoryWarning = false
     @State private var gameplayStartedAt: Date?
+    // Current attached runtime's renderer *submission*, not GPU-present.
+    // Any retry/sheet epoch revokes the diagnostic immediately.
+    @State private var firstSceneSubmittedForAttempt: (epoch: Int, milliseconds: Int)?
     @State private var didTrackGameplayStart = false
     @State private var verifiedResult: VerifiedRunResult?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
@@ -1674,6 +1756,15 @@ struct PixiPlayerSheet: View {
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             prewarmHit = true
+                        },
+                        onFirstSceneRenderSubmit: { ms in
+                            guard PlayerLaunchCallbackGate.accepts(
+                                expectedEpoch: callbackEpoch, currentEpoch: attempt,
+                                sessionRevoked: sessionRevoked
+                            ) else { return }
+                            firstSceneSubmittedForAttempt = (
+                                epoch: callbackEpoch, milliseconds: ms
+                            )
                         },
                         onFirstInput: {
                             guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
@@ -1918,6 +2009,7 @@ struct PixiPlayerSheet: View {
                 // A prior quick-exit start and completed prewarm must not
                 // leak into retry, connectivity recovery or crash reload.
                 prewarmHit = false
+                firstSceneSubmittedForAttempt = nil
                 gameplayStartedAt = nil
                 didTrackGameplayStart = false
                 verifiedResult = nil
@@ -1984,6 +2076,7 @@ struct PixiPlayerSheet: View {
                 // or attached pages, pending callbacks and prior results.
                 PlayerWebViewPool.invalidateForSessionChange()
                 verifiedResult = nil
+                firstSceneSubmittedForAttempt = nil
                 gameplayStartedAt = nil
                 didTrackGameplayStart = false
                 isLoading = false
@@ -2165,16 +2258,20 @@ private struct PlayerWebView: UIViewRepresentable {
     /// Declared between onTerminate and onVerifiedRun to match the
     /// call-site argument order (Swift requires the same order).
     var onPrewarmHit: () -> Void = {}
+    let onFirstSceneRenderSubmit: (Int) -> Void
     let onFirstInput: () -> Void
     let onVerifiedRun: (VerifiedRunResult) -> Void
 
+    // Also used by Coordinator during strict message-name admission;
+    // the pool owns handler registration but not the trusted name policy.
     private static let messageName = "hephaestusRunResult"
 
     func makeCoordinator() -> Coordinator {
         Coordinator(gameID: gameID, expectedURL: url, onProgress: onProgress,
                     onLoadFinish: onLoadFinish, onLoadFail: onLoadFail,
-                    onTerminate: onTerminate, onFirstInput: onFirstInput,
-                    onVerifiedRun: onVerifiedRun)
+                    onTerminate: onTerminate,
+                    onFirstSceneRenderSubmit: onFirstSceneRenderSubmit,
+                    onFirstInput: onFirstInput, onVerifiedRun: onVerifiedRun)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -2182,11 +2279,22 @@ private struct PlayerWebView: UIViewRepresentable {
         let webView = handoff.webView
         context.coordinator.attachmentLease = handoff.lease
         context.coordinator.attachedWebView = webView
-        // A newer .id(attempt) may mount before the old coordinator's
-        // dismantle callback. Replace its script handler explicitly:
-        // registering a duplicate WebKit handler name otherwise throws.
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: Self.messageName)
-        webView.configuration.userContentController.add(context.coordinator.messageProxy, name: Self.messageName)
+        // No remove/add gap: the pool keeps exactly one WebKit handler.
+        // An old Coordinator can never displace this lease's receiver.
+        guard PlayerWebViewPool.attachMessageReceiver(
+            context.coordinator.messageProxy, webView: webView,
+            url: url, lease: handoff.lease
+        ) else {
+            // A credential rotation may have retired this exact WKWebView,
+            // but a newer sheet may also have RETAKEN the same pooled view
+            // under a successor lease. Only blank it when it is no longer
+            // the pool's live view; never stop the successor's navigation.
+            if PlayerWebViewPool.mayNeutralizeRejectedHandoff(webView) {
+                webView.stopLoading()
+                webView.loadHTMLString("", baseURL: nil)
+            }
+            return webView
+        }
         webView.navigationDelegate = context.coordinator
         context.coordinator.observeProgress(of: webView)
         if handoff.shouldLoad {
@@ -2220,7 +2328,7 @@ private struct PlayerWebView: UIViewRepresentable {
         guard PlayerWebViewPool.ownsActiveAttachment(
             webView, lease: coordinator.attachmentLease
         ) else { return }
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: messageName)
+        // Recycle invalidates the lease; the pool's sole WebKit handler stays.
         PlayerWebViewPool.recycle(webView, lease: coordinator.attachmentLease)
     }
 
@@ -2245,6 +2353,7 @@ private struct PlayerWebView: UIViewRepresentable {
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
+        let onFirstSceneRenderSubmit: (Int) -> Void
         let onFirstInput: () -> Void
         let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
@@ -2275,6 +2384,7 @@ private struct PlayerWebView: UIViewRepresentable {
              onLoadFinish: @escaping () -> Void,
              onLoadFail: @escaping (Error) -> Void,
              onTerminate: @escaping () -> Void,
+             onFirstSceneRenderSubmit: @escaping (Int) -> Void,
              onFirstInput: @escaping () -> Void,
              onVerifiedRun: @escaping (VerifiedRunResult) -> Void) {
             self.expectedGameID = gameID
@@ -2283,6 +2393,7 @@ private struct PlayerWebView: UIViewRepresentable {
             self.onLoadFinish = onLoadFinish
             self.onLoadFail = onLoadFail
             self.onTerminate = onTerminate
+            self.onFirstSceneRenderSubmit = onFirstSceneRenderSubmit
             self.onFirstInput = onFirstInput
             self.onVerifiedRun = onVerifiedRun
         }
@@ -2397,6 +2508,14 @@ private struct PlayerWebView: UIViewRepresentable {
                     name: "FirstSceneRenderSubmitted",
                     message: "renderer-submitted-ms=\(ms); not display-presented or interactive"
                 )
+                // All strict main-frame/origin/nonce/typed metric/session
+                // gates have accepted this one-shot renderer milestone.
+                // Recheck attachment lease and session after the actor hop.
+                Task { @MainActor [weak self] in
+                    guard let self, self.acceptsCurrentHostCallbacks,
+                          self.runtimeSessionID == runtimeSessionID else { return }
+                    self.onFirstSceneRenderSubmit(ms)
+                }
             case .firstInput(let ms):
                 guard launchLifecycle.firstInput(milliseconds: ms) else { return }
                 Task { @MainActor [weak self] in
