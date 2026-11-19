@@ -23,6 +23,8 @@ stateDiagram-v2
     documentLoaded --> sceneSubmitted: trusted render submission
     documentLoaded --> interactive: first accepted input
     sceneSubmitted --> interactive: first accepted input
+    sceneSubmitted --> navigationFailed: didFail before didFinish
+    interactive --> navigationFailed: didFail before didFinish
     interactive --> interactive: late didFinish or scene (no regression)
     navigating --> navigationFailed: didFail
     navigating --> webProcessTerminated: WebContent death
@@ -35,10 +37,10 @@ stateDiagram-v2
     interactive --> detached: dispose
 ```
 
-A live current Coordinator may start a new navigation, resetting its per-document milestones. Failed/terminated/detached Coordinators cannot be revived by stale WebKit callbacks; a fresh owner/lease must be established. A late scene after first accepted input never regresses phase. One scene submission is a **renderer-submitted** milestone, not GPU compositor present; #204/#276 require real hardware p50/p95. First input is a gameplay milestone, not score attestation: generator #382/#402 must independently replay and rank only verified runs.
+A fatal `didFail` may arrive after early scene/input callbacks when `didFinish` has not yet been observed. It still retires the current attachment; if `didFinish` was already observed, the reducer rejects that late failure. A live current Coordinator may start a new navigation, resetting its per-document milestones. Failed/terminated/detached Coordinators cannot be revived by stale WebKit callbacks; a fresh owner/lease must be established. A late scene after first accepted input never regresses phase. One scene submission is a **renderer-submitted** milestone, not GPU compositor present; #204/#276 require real hardware p50/p95. First input is a gameplay milestone, not score attestation: generator #382/#402 must independently replay and rank only verified runs.
 
 ## Atomic regression vs remaining work
 
-Two tests added to the *production reducer's real Swift Testing suite*: 160 schedules covering four distinct ordering permutations, duplicate events, live navigation reset, WebContent death, sheet detach and stale callbacks, plus 160 fatal navigation failure/resurrection negatives. They create no fake player, creator, published package or server score and don't change runtime source/UI behavior. Require seven exact-head native iPhone/iPad GitHub Actions before merging/closing #577.
+Three tests added to the *production reducer's real Swift Testing suite*: 160 schedules covering four distinct ordering permutations, duplicate events, live navigation reset, WebContent death, sheet detach and stale callbacks; 160 fatal-navigation failure/resurrection negatives; and 160 fatal failures following early scene/input callbacks before `didFinish`. The latter case explicitly verifies that a trusted early runtime milestone cannot resurrect a failed navigation. They create no fake player, creator, published package or server score and don't change runtime source/UI behavior. Require seven exact-head native iPhone/iPad GitHub Actions before merging/closing #577.
 
 Parent [#203](https://github.com/GavinDu/Hephaestus/issues/203) stays OPEN for an explicit GamePlayerCore adapter/retirement decision, native-publisher/versioned package integration, cancellation and actual iPhone/iPad evidence. GPU and memory/thermal #276/#279, poster #353, real published creator/package #288/#368 and independent Go replay #382 all remain OPEN. No new JS-to-native control bridge is authorized by this document.
