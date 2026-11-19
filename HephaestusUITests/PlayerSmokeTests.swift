@@ -918,9 +918,9 @@ final class PlayerSmokeTests: XCTestCase {
                       "Returning from Library must restore the Discover navigation stack.")
     }
 
-    /// Native Library-only toolbar acceptance on a true empty signed-out
-    /// shelf. Preserve the disabled destructive state: do NOT fake a recent
-    /// game or clear any server-owned saved game in this geometry test.
+    /// Native toolbar acceptance on actual Library/account state.
+    /// Assert disabled only when the genuine recent shelf is observed empty;
+    /// never fake a recent game or clear server-owned saved games to pass.
     @MainActor
     func testArcadePulseLibraryClearRecentToolbarHasReal44ptTarget() throws {
         XCUIDevice.shared.orientation = .portrait
