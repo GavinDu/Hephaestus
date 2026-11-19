@@ -3649,8 +3649,20 @@ struct HephaestusTests {
             expectedGameID: "sky", offeredLease: lease, currentLease: lease,
             isCurrentPooledView: false, isAttached: true
         )
+        let missingCredential = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: nil,
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let noLease = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: 0, currentLease: 0,
+            isCurrentPooledView: true, isAttached: true
+        )
         #expect(!oldLease && !otherGame && !otherNonce && !rotatedAuth)
-        #expect(!newURL && !unattached && !oldView)
+        #expect(!newURL && !unattached && !oldView && !missingCredential && !noLease)
         #expect(ledger.candidate == submission) // negatives never consume
         let consumed = ledger.consume(
             expected: identity, offeredLease: lease,
