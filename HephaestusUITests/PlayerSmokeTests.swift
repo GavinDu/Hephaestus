@@ -2200,22 +2200,23 @@ final class PlayerSmokeTests: XCTestCase {
                 }
             }
             print("UI EVALUATOR pager frame orientation=\(profile.1): \(pagerFrame)")
-            if expectedLandscape && UIDevice.current.userInterfaceIdiom == .phone {
-                // The scroll-disabled one-card pager uses a DragGesture on
-                // COMPACT IPHONE LANDSCAPE. A physical normalized drag is
-                // required here; do not transfer the workaround to iPad.
-                // The regular-width iPad offers a real accessible scroll
-                // action, and its genuine pager.swipeUp() must move the page.
-                // Only a changed LIVE game identity may pass the gate.
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                // A one-card SwiftUI ScrollView is deliberately
+                // scrollDisabled(true); its real swipe is owned by the native
+                // high-priority DragGesture. XCTest pager.swipeUp() on iPhone
+                // PORTRAIT failed with drag count=0 and unchanged game even
+                // though the real backend provided 3 pages (#591). Drive a
+                // physical finger trace through the SAME pager viewport in
+                // both iPhone orientations. Do NOT weaken the distinct real
+                // game, stable two-sample, hit-target or 55% media assertions.
+                // iPad uses its original scroll action and is unchanged.
                 let start = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.82))
                 let end = pager.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.18))
-                print("UI_EVALUATOR_PHYSICAL_DRAG orientation=landscape start=0.50,0.82 end=0.50,0.18")
+                print("UI_EVALUATOR_PHYSICAL_DRAG orientation=\(profile.1) device=iphone start=0.50,0.82 end=0.50,0.18")
                 start.press(forDuration: 0.1, thenDragTo: end)
             } else {
-                // Includes iPad portrait AND iPad landscape: use native
-                // accessibility paging, not a compact iPhone touch trace.
-                // Strict settled-game identity, two stable hit-test samples,
-                // pixel-change and media occupancy gates remain unchanged.
+                // iPad portrait AND landscape retain their real accessibility
+                // paging gesture, not a phone-only synthetic swipe trace.
                 print("UI_EVALUATOR_ACCESSIBLE_SWIPE device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1)")
                 pager.swipeUp()
             }
