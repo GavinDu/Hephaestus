@@ -3276,21 +3276,22 @@ struct HephaestusTests {
     for index in 0..<160 {
         var state = PlayerHostLaunchReducer()
         if index.isMultiple(of: 2) {
-            #expect(state.sceneSubmitted())
-            #expect(state.phase == .sceneSubmitted)
+            let scene = state.sceneSubmitted()
+            #expect(scene && state.phase == .sceneSubmitted)
         } else {
-            #expect(state.firstInput(milliseconds: index))
-            #expect(state.phase == .interactive)
+            let input = state.firstInput(milliseconds: index)
+            #expect(input && state.phase == .interactive)
         }
         #expect(!state.observedTerminalNavigation)
-        #expect(state.navigationFailed())
-        #expect(state.phase == .navigationFailed)
+        let failure = state.navigationFailed()
+        #expect(failure && state.phase == .navigationFailed)
         #expect(state.observedTerminalNavigation)
         #expect(!state.permitsRuntimeEvents)
-        #expect(!state.navigationFinished())
-        #expect(!state.sceneSubmitted())
-        #expect(!state.firstInput(milliseconds: index + 1))
-        #expect(!state.webProcessTerminated())
+        let nav = state.navigationFinished()
+        let scene = state.sceneSubmitted()
+        let input = state.firstInput(milliseconds: index + 1)
+        let crash = state.webProcessTerminated()
+        #expect(!nav && !scene && !input && !crash)
         state.navigationStarted()
         #expect(state.phase == .navigationFailed)
     }
