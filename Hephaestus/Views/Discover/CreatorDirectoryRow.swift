@@ -17,7 +17,11 @@ enum CreatorDirectoryRowLayout {
             (!isRegularWidth && textSize >= .xxLarge)
     }
 
+    /// A negative server count cannot truthfully describe public games.
+    /// Preserve the real Creator identity and route, but never substitute
+    /// zero or announce an impossible number in VoiceOver.
     static func publicGameCount(_ count: Int) -> String {
+        guard count >= 0 else { return "Public game count unavailable" }
         let formatted = count.formatted()
         return count == 1 ? "\(formatted) public game" : "\(formatted) public games"
     }
