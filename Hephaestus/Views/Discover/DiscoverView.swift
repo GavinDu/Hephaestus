@@ -26,11 +26,15 @@ private struct PlayerResultPresentation: Identifiable {
 @MainActor
 final class FeedRequestCoordinator {
     private(set) var generation = 0
+    // Unlike generation, this increases ONLY for a genuine new transport
+    // start; expiration and stale-callback invalidation never increment it.
+    private(set) var startedRequestCount = 0
     private var activeRequest: Task<FeedResponse, Error>?
 
     func begin(_ fetch: @escaping @MainActor () async throws -> FeedResponse)
         -> (generation: Int, request: Task<FeedResponse, Error>) {
         generation += 1
+        startedRequestCount += 1
         activeRequest?.cancel()
         let request = Task { try await fetch() }
         activeRequest = request
@@ -120,6 +124,7 @@ struct DiscoverView: View {
         }
         .buttonStyle(ArcadePulseRecoveryButtonStyle())
         .accessibilityIdentifier("feed.error.retry")
+        .accessibilityValue("Request attempts \(feedRequestStartCount)")
     }
 
     @ViewBuilder private var feedRecoveryLibrary: some View {
@@ -146,6 +151,7 @@ struct DiscoverView: View {
         }
         .buttonStyle(ArcadePulseRecoveryButtonStyle())
         .accessibilityIdentifier("feed.retryLoading")
+        .accessibilityValue("Request attempts \(feedRequestStartCount)")
     }
 
     @ViewBuilder private var feedSlowLibrary: some View {
@@ -186,6 +192,9 @@ struct DiscoverView: View {
     @State private var isFeedPreferencesPresented = false
     @State private var likedGameIDs = Set<String>()
     @State private var feedRequestCoordinator = FeedRequestCoordinator()
+    // A stable public accessibility value for authentic feed request starts.
+    // Do not reuse coordinator.generation, which also advances on timeout.
+    @State private var feedRequestStartCount = 0
     @State private var nextCursor: String?
     @State private var isLoadingMore = false
     @State private var loadMoreError: String?
@@ -1065,6 +1074,10 @@ struct DiscoverView: View {
             }
             return try await BackendAPI.shared.fetchFeed(scope: requestedScope)
         }
+        // Mirror the coordinator's counted start into SwiftUI state so the
+        // existing real Retry button exposes it even after the old watchdog
+        // revoked generation ownership. No test-only success is fabricated.
+        feedRequestStartCount = feedRequestCoordinator.startedRequestCount
         isLoading = true
         isSlowLoading = false
         errorMessage = nil
