@@ -3467,7 +3467,7 @@ struct HephaestusTests {
         var sameOrigin = true
         var beganNavigation = true
         var credentialCurrent = true
-        var speculative = true
+        let speculative = true
         switch mutation {
         case 0: body["schema"] = 1
         case 1: body["documentNonce"] = String(repeating: "b", count: 32)
