@@ -841,7 +841,7 @@ struct HephaestusTests {
         decoding: try JSONEncoder().encode(redacted),
         as: UTF8.self
     )
-    #expect(serialized.contains("\\"logTail\\":[]"))
+    #expect(serialized.contains(#""logTail":[]"#))
     #expect(serialized.contains("http_status=403"))
     for secret in secrets {
         #expect(!serialized.contains(secret))
