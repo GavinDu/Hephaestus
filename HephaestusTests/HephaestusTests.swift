@@ -1385,7 +1385,7 @@ struct HephaestusTests {
         }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         #expect(components?.path == "/player")
-        #expect(components?.queryItems?.filter { $0.name == "game" }.count == 1)
+        #expect(components?.queryItems?.filter({ $0.name == "game" }).count == 1)
         #expect(components?.queryItems?.first(where: { $0.name == "game" })?.value == id)
     }
     let hostileIDs = [
