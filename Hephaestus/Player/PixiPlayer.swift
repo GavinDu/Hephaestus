@@ -29,12 +29,17 @@ import WebKit
 /// or poison a pooled scene/credential lease. The query encoder is not a validator.
 enum PlayerPublishedGameIDPolicy {
     static func valid(_ gameID: String) -> Bool {
-        let bytes = Array(gameID.utf8)
-        guard (1...128).contains(bytes.count) else { return false }
-        return bytes.allSatisfy { byte in
-            (0x41...0x5a).contains(byte) || (0x61...0x7a).contains(byte) ||
-            (0x30...0x39).contains(byte) || byte == 0x2d || byte == 0x5f
+        // Iterate directly and stop after 128 bytes; untrusted feed metadata
+        // must not allocate an unbounded UTF-8 copy just for validation.
+        var count = 0
+        for byte in gameID.utf8 {
+            count += 1
+            guard count <= 128,
+                  (0x41...0x5a).contains(byte) || (0x61...0x7a).contains(byte) ||
+                  (0x30...0x39).contains(byte) || byte == 0x2d || byte == 0x5f
+            else { return false }
         }
+        return count > 0
     }
 }
 
