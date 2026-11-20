@@ -12,7 +12,8 @@ enum PlayableExpressionLayout {
 /// labels before choosing the three visible slots so they do not displace a
 /// later genuine tag; VoiceOver must announce the identical source subset.
 enum GameFeedCardTopicPolicy {
-    static func publicLabels(_ topics: [String]?) -> [String] {
+    static func publicLabels(_ topics: [String]?, limit: Int = 3) -> [String] {
+        guard limit > 0 else { return [] }
         let validated = (topics ?? []).lazy.compactMap { raw -> String? in
             let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !label.isEmpty,
@@ -21,7 +22,7 @@ enum GameFeedCardTopicPolicy {
                   }) else { return nil }
             return label
         }
-        return Array(validated.prefix(3))
+        return Array(validated.prefix(limit))
     }
 
     static func visualSummary(_ topics: [String]?) -> String? {
@@ -32,6 +33,25 @@ enum GameFeedCardTopicPolicy {
     static func accessibilitySummary(_ topics: [String]?) -> String? {
         let labels = publicLabels(topics)
         return labels.isEmpty ? nil : "Topics: " + labels.joined(separator: ", ")
+    }
+}
+
+/// iPad Spotlight and Game Details show four/five original publisher topics,
+/// not the three shown on grid cards. Use exactly one validated backend list
+/// for visible and spoken content; no malformed topic consumes a slot.
+enum GameMetadataTopicPolicy {
+    struct Presentation: Equatable {
+        let visual: String
+        let spoken: String
+    }
+
+    static func presentation(_ topics: [String]?, maxCount: Int) -> Presentation? {
+        let labels = GameFeedCardTopicPolicy.publicLabels(topics, limit: maxCount)
+        guard !labels.isEmpty else { return nil }
+        return Presentation(
+            visual: labels.map { "#\($0)" }.joined(separator: "  "),
+            spoken: "Topics: " + labels.joined(separator: ", ")
+        )
     }
 }
 
