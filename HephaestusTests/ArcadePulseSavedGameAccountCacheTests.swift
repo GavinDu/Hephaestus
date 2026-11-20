@@ -60,18 +60,26 @@ struct ArcadePulseSavedGameAccountCacheTests {
         #expect(first?.hasPrefix("hephaestus.savedGames.account.") == true)
     }
 
-    @Test func oldViewerOrSupersededTransportCannotApplyCachedStatus() {
+    @Test func changedViewerSessionOrSupersededTransportCannotApplyCachedStatus() {
         #expect(FeedSavedGameCache.canApply(
-            requestedViewerID: "account-a", currentViewerID: "account-a", ownsRequest: true
+            requestedViewerID: "account-a", currentViewerID: "account-a",
+            requestedSessionEpoch: 5, currentSessionEpoch: 5, ownsRequest: true
         ))
         #expect(!FeedSavedGameCache.canApply(
-            requestedViewerID: "account-a", currentViewerID: "account-b", ownsRequest: true
+            requestedViewerID: "account-a", currentViewerID: "account-b",
+            requestedSessionEpoch: 5, currentSessionEpoch: 5, ownsRequest: true
         ))
         #expect(!FeedSavedGameCache.canApply(
-            requestedViewerID: "account-a", currentViewerID: "account-a", ownsRequest: false
+            requestedViewerID: "account-a", currentViewerID: "account-a",
+            requestedSessionEpoch: 5, currentSessionEpoch: 5, ownsRequest: false
         ))
         #expect(!FeedSavedGameCache.canApply(
-            requestedViewerID: "", currentViewerID: "account-a", ownsRequest: true
+            requestedViewerID: "account-a", currentViewerID: "account-a",
+            requestedSessionEpoch: 5, currentSessionEpoch: 6, ownsRequest: true
+        ))
+        #expect(!FeedSavedGameCache.canApply(
+            requestedViewerID: "", currentViewerID: "account-a",
+            requestedSessionEpoch: 5, currentSessionEpoch: 5, ownsRequest: true
         ))
     }
 }
