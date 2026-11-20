@@ -2449,6 +2449,67 @@ final class PlayerSmokeTests: XCTestCase {
         commentsEvidence.name = "arcade-pulse-real-grid-comments-sheet"
         commentsEvidence.lifetime = .keepAlways
         add(commentsEvidence)
+
+        // #628: A real submitted Search query is not cleared merely because
+        // UIKit hides its transient drawer. Verify the explicit user exit
+        // AFTER actual landscape rotation and the real Comments sheet.
+        let dismissComments = app.buttons["Done"].firstMatch
+        dismissComments.tap()
+        let commentsDismissDeadline = Date().addingTimeInterval(10)
+        while commentsHeader.exists && Date() < commentsDismissDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertFalse(commentsHeader.exists,
+                       "Dismiss the real Comments sheet before clearing Search.")
+
+        let clearSearch = app.buttons["feed.grid.clearSearch"].firstMatch
+        XCTAssertTrue(gridScroll.waitForExistence(timeout: 8),
+                      "Committed real Search must retain the filtered scroll owner.")
+        for _ in 0..<8 {
+            if clearSearch.exists && clearSearch.isHittable { break }
+            // Portrait Search can be scrolled beneath the published card.
+            // Scroll the actual results owner; never navigate via bottom tabs.
+            gridScroll.swipeDown()
+        }
+        if !clearSearch.exists || !clearSearch.isHittable {
+            let unreachable = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            unreachable.name = "arcade-pulse-real-grid-clear-search-unreachable"
+            unreachable.lifetime = .keepAlways
+            add(unreachable)
+        }
+        XCTAssertTrue(clearSearch.exists && clearSearch.isHittable,
+                      "Real 44pt Clear search must be reachable after Comments and rotation.")
+        XCTAssertGreaterThanOrEqual(clearSearch.frame.width + 0.000001, 44)
+        XCTAssertGreaterThanOrEqual(clearSearch.frame.height + 0.000001, 44)
+        let filtered = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        filtered.name = "arcade-pulse-real-search-before-clear"
+        filtered.lifetime = .keepAlways
+        add(filtered)
+        clearSearch.tap()
+
+        // Require the genuine server-fed For You post, not an invented card or
+        // empty search placeholder, and ensure the old explicit exit is gone.
+        let restoredTitle = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title.")
+        ).firstMatch
+        if !restoredTitle.waitForExistence(timeout: 12) {
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "arcade-pulse-real-search-clear-did-not-restore-feed"
+            failure.lifetime = .keepAlways
+            add(failure)
+        }
+        XCTAssertTrue(restoredTitle.exists && !restoredTitle.label.isEmpty,
+                      "Clearing real Search must restore a genuine published For You game.")
+        XCTAssertFalse(clearSearch.exists,
+                       "No stale committed Search state may survive explicit Clear.")
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            XCTAssertTrue(app.tabBars.buttons["Discover"].firstMatch.isSelected,
+                          "Clear Search must not navigate to floating Create.")
+        }
+        let unfiltered = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        unfiltered.name = "arcade-pulse-real-for-you-after-clear"
+        unfiltered.lifetime = .keepAlways
+        add(unfiltered)
     }
 
     @MainActor
