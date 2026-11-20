@@ -738,7 +738,10 @@ struct DiscoverView: View {
                         },
                         onReport: { reportingGame = $0 },
                         onBlockCreator: { game in
-                            if let id = game.ownerID { Task { await blockCreator(id) } }
+                            if let id = game.ownerID,
+                               ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                                   ownerID: id, viewerID: BackendConfig.currentUserID
+                               ) { Task { await blockCreator(id) } }
                         },
                         onNotInterested: { game in Task { await markNotInterested(game) } },
                         onOpenDetails: { detailGame = $0 },
@@ -771,7 +774,12 @@ struct DiscoverView: View {
                                     onOpenComments: { commentsGame = game },
                                     onOpenCreator: { if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) } },
                                     onReport: { reportingGame = game },
-                                    onBlockCreator: { if let id = game.ownerID { Task { await blockCreator(id) } } },
+                                    onBlockCreator: {
+                                        if let id = game.ownerID,
+                                           ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                                               ownerID: id, viewerID: BackendConfig.currentUserID
+                                           ) { Task { await blockCreator(id) } }
+                                    },
                                     onNotInterested: { Task { await markNotInterested(game) } },
                                     onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } },
                                     shouldAutoplayPreview: false
@@ -1054,6 +1062,9 @@ struct DiscoverView: View {
     }
 
     private func blockCreator(_ creatorID: String) async {
+        guard ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+            ownerID: creatorID, viewerID: BackendConfig.currentUserID
+        ) else { return }
         let viewerID = BackendConfig.currentUserID
         let epoch = socialMutationEpoch
         do {
@@ -1563,7 +1574,9 @@ private struct ForYouGamePage: View {
             Button("Game details", systemImage: "info.circle", action: onOpenDetails)
             Button("Report game", role: .destructive, action: onReport)
             Button("Not interested", action: onNotInterested)
-            if game.ownerID != nil {
+            if ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                ownerID: game.ownerID, viewerID: BackendConfig.currentUserID
+            ) {
                 Button("Block creator", role: .destructive, action: onBlockCreator)
             }
         } label: {
@@ -2016,6 +2029,20 @@ private struct ForYouGamePage: View {
 /// action sheet or let it write to a game/account that is no longer selected.
 /// The pager, not an individual page with .id(game.id), owns presentation.
 enum ForYouActionOwnershipPolicy {
+    /// Fail closed in the stable pager even after the original game page
+    /// disappears: invalid publisher IDs and authenticated self-Block are
+    /// never actionable, including deferred callbacks after sheet dismissal.
+    static func canOfferCreatorBlock(ownerID: String?, viewerID: String) -> Bool {
+        guard let ownerID else { return false }
+        let owner = ownerID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !owner.isEmpty,
+              !owner.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }) else { return false }
+        let viewer = viewerID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return viewer.isEmpty || owner != viewer
+    }
+
     static func canPresent(
         requestedGameID: String,
         selectedGameID: String?,
@@ -2087,7 +2114,9 @@ private struct ForYouGameActionsSheet: View {
                 Section("Feed preferences") {
                     Button("Not interested", systemImage: "eye.slash",
                            action: onNotInterested)
-                    if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
+                    if ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                        ownerID: game.ownerID, viewerID: BackendConfig.currentUserID
+                    ) {
                         Button("Block creator", role: .destructive,
                                action: onBlockCreator)
                     }
@@ -2218,7 +2247,9 @@ private struct ForYouPagerView: View {
         case .report: onReport(game)
         case .notInterested: onNotInterested(game)
         case .blockCreator:
-            if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
+            if ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                ownerID: game.ownerID, viewerID: pending.request.viewerID
+            ) {
                 onBlockCreator(game)
             }
         }
