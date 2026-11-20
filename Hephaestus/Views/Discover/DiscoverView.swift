@@ -1285,9 +1285,9 @@ struct DiscoverView: View {
             guard requestedScope == selectedFeed,
                   FeedSavedGameCache.canApply(
                       requestedViewerID: requestedViewerID,
+                      currentViewerID: BackendConfig.currentUserID,
                       requestedSessionEpoch: requestedSessionEpoch,
                       currentSessionEpoch: socialMutationEpoch,
-                      currentViewerID: BackendConfig.currentUserID,
                       ownsRequest: feedRequestCoordinator.isCurrent(generation)
                   ) else { return }
             games = loadedGames.games
@@ -1313,9 +1313,9 @@ struct DiscoverView: View {
                 if let ids = try? await BackendAPI.shared.fetchFollowingCreatorIDs(),
                    FeedSavedGameCache.canApply(
                        requestedViewerID: requestedViewerID,
-                      requestedSessionEpoch: requestedSessionEpoch,
-                      currentSessionEpoch: socialMutationEpoch,
                        currentViewerID: BackendConfig.currentUserID,
+                       requestedSessionEpoch: requestedSessionEpoch,
+                       currentSessionEpoch: socialMutationEpoch,
                        ownsRequest: feedRequestCoordinator.isCurrent(generation)
                    ) {
                     followedCreatorIDs = ids
@@ -1323,9 +1323,9 @@ struct DiscoverView: View {
                 if let ids = try? await BackendAPI.shared.fetchSavedGameIDs(),
                    FeedSavedGameCache.canApply(
                        requestedViewerID: requestedViewerID,
-                      requestedSessionEpoch: requestedSessionEpoch,
-                      currentSessionEpoch: socialMutationEpoch,
                        currentViewerID: BackendConfig.currentUserID,
+                       requestedSessionEpoch: requestedSessionEpoch,
+                       currentSessionEpoch: socialMutationEpoch,
                        ownsRequest: feedRequestCoordinator.isCurrent(generation)
                    ) {
                     savedGameIDs = ids
@@ -1335,9 +1335,9 @@ struct DiscoverView: View {
             if let preferences = try? await BackendAPI.shared.fetchFeedPreferences(),
                FeedSavedGameCache.canApply(
                    requestedViewerID: requestedViewerID,
-                      requestedSessionEpoch: requestedSessionEpoch,
-                      currentSessionEpoch: socialMutationEpoch,
                    currentViewerID: BackendConfig.currentUserID,
+                   requestedSessionEpoch: requestedSessionEpoch,
+                   currentSessionEpoch: socialMutationEpoch,
                    ownsRequest: feedRequestCoordinator.isCurrent(generation)
                ) {
                 mutedTopics = Set(preferences.muted_topics.map { $0.lowercased() })
@@ -1345,9 +1345,9 @@ struct DiscoverView: View {
         } catch {
             if requestedScope == selectedFeed && FeedSavedGameCache.canApply(
                 requestedViewerID: requestedViewerID,
-                      requestedSessionEpoch: requestedSessionEpoch,
-                      currentSessionEpoch: socialMutationEpoch,
                 currentViewerID: BackendConfig.currentUserID,
+                requestedSessionEpoch: requestedSessionEpoch,
+                currentSessionEpoch: socialMutationEpoch,
                 ownsRequest: feedRequestCoordinator.isCurrent(generation)
             ) {
                 errorMessage = FeedErrorPresentation.message(for: error)
