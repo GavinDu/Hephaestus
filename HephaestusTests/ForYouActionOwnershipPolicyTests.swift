@@ -45,4 +45,42 @@ struct ForYouActionOwnershipPolicyTests {
                          oldRevision: 4, newRevision: 5))
         #expect(!allowed(oldRevision: 3, newRevision: 4))
     }
+    @Test func invalidOrControlBearingOwnerNeverOffersDestructiveBlock() {
+        let invalid: [String?] = [
+            nil, "", " \t\n ", "\u{0000}", "bad\nowner",
+            "bad\u{0000}owner"
+        ]
+        for owner in invalid {
+            #expect(!ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                ownerID: owner, viewerID: ""
+            ))
+            #expect(!ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                ownerID: owner, viewerID: "signed-in-viewer"
+            ))
+        }
+    }
+
+    @Test func authenticatedPublisherCannotBlockOwnAccountEvenAfterWhitespace() {
+        for owner in ["doodlequest", "艺术家", "creator🎮"] {
+            #expect(!ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                ownerID: owner, viewerID: owner
+            ))
+            #expect(!ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                ownerID: "  \(owner)  ", viewerID: " \(owner) "
+            ))
+        }
+    }
+
+    @Test func otherGenuinePublisherPreservesReadOnlyBlockAffordance() {
+        #expect(ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+            ownerID: "doodlequest", viewerID: "different-viewer"
+        ))
+        #expect(ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+            ownerID: "艺术家", viewerID: ""
+        ))
+        #expect(ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+            ownerID: "creator🎮", viewerID: "guest-other"
+        ))
+    }
+
 }
