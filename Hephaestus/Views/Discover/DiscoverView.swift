@@ -3355,6 +3355,11 @@ private struct CommentsSheet: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
                 .background(ArcadePulseTheme.surface)
+                // One stable AX identity for the actual game-bound native
+                // Comments sheet. SwiftUI may combine "COMMENTS ON", the
+                // published title and loaded count into one spoken node.
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("comments.sheet.gameHeader")
 
                 if isLoading {
                     ProgressView("Loading comments…")
