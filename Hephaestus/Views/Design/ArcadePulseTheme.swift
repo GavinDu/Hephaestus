@@ -7,7 +7,10 @@ import SwiftUI
 // fallback is never a recorded preview, real user engagement metric, or
 // replacement for source artwork.
 enum ArcadePulseTheme {
-    static let canvas = Color(red: 0.045, green: 0.034, blue: 0.087)
+    static let canvasRGB = (red: 0.045, green: 0.034, blue: 0.087)
+    static let canvas = Color(
+        red: canvasRGB.red, green: canvasRGB.green, blue: canvasRGB.blue
+    )
     static let surface = Color(red: 0.094, green: 0.072, blue: 0.153)
     static let raisedSurface = Color(red: 0.150, green: 0.112, blue: 0.227)
     // Keep RGB single-sourced: source components let the pure test verify
