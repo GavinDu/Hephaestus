@@ -31,4 +31,41 @@ struct ArcadePulseCreatorBlockOwnerPolicyTests {
         #expect(!ForYouPageLayout.hasNavigableCreator(ownerID: ""))
         #expect(ForYouPageLayout.hasNavigableCreator(ownerID: "doodlequest"))
     }
+    @Test func authenticatedPublisherCannotOfferBlockToSelf() {
+        for owner in ["doodlequest", "艺术家", "creator🎮"] {
+            #expect(!ForYouPageLayout.canOfferCreatorBlock(
+                ownerID: owner, viewerID: owner
+            ))
+            #expect(!ForYouPageLayout.canOfferCreatorBlock(
+                ownerID: "  \(owner)  ", viewerID: " \(owner) "
+            ))
+        }
+    }
+
+    @Test func unrelatedAuthenticatedOwnerAndExistingGuestRemainEligible() {
+        #expect(ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: "doodlequest", viewerID: "different-viewer"
+        ))
+        #expect(ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: "艺术家", viewerID: "doodlequest"
+        ))
+        #expect(ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: "doodlequest", viewerID: ""
+        ))
+        #expect(ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: "doodlequest", viewerID: "   "
+        ))
+    }
+
+    @Test func invalidPublisherNeverOffersBlockRegardlessOfViewer() {
+        for owner in [nil, "", " \n ", "bad\u{0000}creator", "bad\ncreator"] as [String?] {
+            #expect(!ForYouPageLayout.canOfferCreatorBlock(
+                ownerID: owner, viewerID: ""
+            ))
+            #expect(!ForYouPageLayout.canOfferCreatorBlock(
+                ownerID: owner, viewerID: "real-user"
+            ))
+        }
+    }
+
 }
