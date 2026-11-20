@@ -2260,6 +2260,17 @@ struct PixiPlayerSheet: View {
             .onAppear {
                 loadStartedAt = Date()
                 activeQuality = effectiveQuality
+                guard PlayerPublishedGameIDPolicy.valid(gameID) else {
+                    // No WKWebView exists for an invalid package identity.
+                    // Give the user a terminal action rather than leaving an
+                    // indefinite loading poster without a navigation callback.
+                    isLoading = false
+                    loadFailureCategory = .invalidPackage
+                    loadError = "This game has an invalid identifier. Return to the feed."
+                    holdOpacity = 0
+                    holdVisible = false
+                    return
+                }
                 DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView (quality \(activeQuality ?? effectiveQuality))")
             }
             .onDisappear {
