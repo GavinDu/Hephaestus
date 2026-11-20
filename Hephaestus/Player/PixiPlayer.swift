@@ -916,6 +916,17 @@ enum PlayerWebContentTerminationPolicy {
     static func shouldAutomaticallyReload(completedReloads: Int) -> Bool {
         completedReloads >= 0 && completedReloads < maximumAutomaticReloads
     }
+
+    /// A WebContent process must not consume its limited restart budget
+    /// while backgrounded/inactive or offline. Keep manual recovery available.
+    static func shouldAutoRestartNow(
+        completedReloads: Int,
+        isActiveAndForeground: Bool,
+        isOffline: Bool
+    ) -> Bool {
+        shouldAutomaticallyReload(completedReloads: completedReloads) &&
+            isActiveAndForeground && !isOffline
+    }
 }
 
 // The runtime's initial explicit Pixi render can be measured independently
@@ -1850,7 +1861,11 @@ struct PixiPlayerSheet: View {
                             // The web content process died (usually
                             // memory pressure): the page is a white
                             // void unless we reload it ourselves.
-                            if PlayerWebContentTerminationPolicy.shouldAutomaticallyReload(completedReloads: autoReloads) {
+                            if PlayerWebContentTerminationPolicy.shouldAutoRestartNow(
+                                completedReloads: autoReloads,
+                                isActiveAndForeground: scenePhase == .active && !wasBackgrounded,
+                                isOffline: pathMonitor.isOffline
+                            ) {
                                 autoReloads += 1
                                 DevLog.warn(.player, "web content process terminated for \(gameID); auto-reload \(autoReloads)/2")
                                 PlayerTelemetry.report(gameID: gameID, kind: "ios-webview-terminated",
@@ -1866,11 +1881,20 @@ struct PixiPlayerSheet: View {
                             } else {
                                 isLoading = false
                                 loadFailureCategory = .unknown
-                                loadError = PlayerWebContentTerminationPolicy.repeatedTerminationMessage
-                                DevLog.error(.player, "web content process terminated repeatedly for \(gameID)")
+                                let exhausted = !PlayerWebContentTerminationPolicy.shouldAutomaticallyReload(
+                                    completedReloads: autoReloads
+                                )
+                                loadError = exhausted
+                                    ? PlayerWebContentTerminationPolicy.repeatedTerminationMessage
+                                    : "The player stopped while inactive or offline. Return to the app and tap Retry."
+                                // Deferred termination must not claim a live scene or spend
+                                // another automatic reload attempt while suspended.
+                                DevLog.warn(.player, exhausted
+                                    ? "web content process terminated repeatedly"
+                                    : "web content terminated; foreground manual recovery required")
                                 PlayerTelemetry.report(gameID: gameID, kind: "ios-webview-terminated",
                                                        name: "WebContentProcessTerminated",
-                                                       message: "gave up after 2 auto-reloads")
+                                                       message: exhausted ? "auto-reload budget exhausted" : "deferred: background or offline")
                             }
                         },
                         onPrewarmHit: {
