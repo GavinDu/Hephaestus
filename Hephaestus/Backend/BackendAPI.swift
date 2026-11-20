@@ -440,7 +440,7 @@ enum APIError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .badStatus(let code): return "Backend returned HTTP \(code)."
-        case .decoding(let e): return "Couldn't read the backend reply: \(e.localizedDescription)"
+        case .decoding: return "Couldn't read the backend reply. Please try again."
         case .invalidInput(let message): return message
         }
     }
