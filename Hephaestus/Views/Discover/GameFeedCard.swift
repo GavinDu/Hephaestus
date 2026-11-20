@@ -35,6 +35,13 @@ enum GameFeedCardTopicPolicy {
     }
 }
 
+/// A tappable social icon must own the complete 44pt hit rectangle,
+/// rather than only the surrounding HStack's layout. Actual compact width
+/// and VoiceOver action ordering are independently tested on real cards.
+enum GameFeedCardSocialActionLayout {
+    static let minimumHitSize: CGFloat = ArcadePulseTheme.minimumTarget
+}
+
 /// A game-first social card. Until the API returns real preview assets and creator
 /// metadata, the cover is a branded visual rather than fabricated artwork.
 struct GameFeedCardSkeleton: View {
@@ -295,7 +302,11 @@ struct GameFeedCard: View {
             .frame(height: coverHeight)
             .clipped()
 
-            HStack(spacing: 10) {
+            // Grid cards can be half an iPhone viewport wide. Keep the
+            // authentic creator name on its own line, then wrap every
+            // full-sized social action instead of squeezing six controls
+            // into a single clipped horizontal row.
+            VStack(alignment: .leading, spacing: 8) {
                 if let creator = game.ownerID, !creator.isEmpty {
                     ArcadePulseCreatorIdentity(
                         name: game.creatorDisplayName?.isEmpty == false
@@ -305,59 +316,96 @@ struct GameFeedCard: View {
                         action: onOpenCreator
                     )
                 } else {
-                    Label("Mini game", systemImage: "sparkles").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    Label("Mini game", systemImage: "sparkles")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 4)
-                if canFollowCreator {
-                    Button(action: onToggleFollow) {
-                        Label(isFollowingCreator ? "Following" : "Follow", systemImage: isFollowingCreator ? "person.fill.checkmark" : "person.badge.plus")
-                            .font(.caption.weight(.semibold)).frame(minHeight: HephaestusDesign.minimumActionHeight)
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(
+                        minimum: GameFeedCardSocialActionLayout.minimumHitSize
+                    ), spacing: 8)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    if canFollowCreator {
+                        Button(action: onToggleFollow) {
+                            Image(systemName: isFollowingCreator
+                                  ? "person.fill.checkmark" : "person.badge.plus")
+                                .frame(width: GameFeedCardSocialActionLayout.minimumHitSize,
+                                       height: GameFeedCardSocialActionLayout.minimumHitSize)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
+                        .accessibilityIdentifier("grid.game.social.follow")
+                    }
+                    Button(action: onToggleLike) {
+                        Image(systemName: isLiked ? "heart.fill" : "heart")
+                            .foregroundStyle(isLiked ? Color.pink : Color.primary)
+                            .frame(width: GameFeedCardSocialActionLayout.minimumHitSize,
+                                   height: GameFeedCardSocialActionLayout.minimumHitSize)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(isFollowingCreator ? "Unfollow creator" : "Follow creator")
-                }
-                Button(action: onToggleLike) {
-                    Image(systemName: isLiked ? "heart.fill" : "heart")
-                        .foregroundStyle(isLiked ? Color.pink : Color.primary)
-                        .frame(width: 36, height: 44)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(isLiked ? "Unlike game" : "Like game")
-                Button(action: onOpenComments) {
-                    Image(systemName: "bubble.right").frame(width: 36, height: 44)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("View comments")
-                Menu {
-                    Button("Not interested", systemImage: "hand.thumbsdown", action: onNotInterested)
-                    if canFollowCreator {
-                        Button("Block creator", systemImage: "person.crop.circle.badge.xmark", role: .destructive, action: onBlockCreator)
+                    .accessibilityLabel(isLiked ? "Unlike game" : "Like game")
+                    .accessibilityIdentifier("grid.game.social.like")
+
+                    Button(action: onOpenComments) {
+                        Image(systemName: "bubble.right")
+                            .frame(width: GameFeedCardSocialActionLayout.minimumHitSize,
+                                   height: GameFeedCardSocialActionLayout.minimumHitSize)
+                            .contentShape(Rectangle())
                     }
-                    Button("Report game", systemImage: "flag", role: .destructive, action: onReport)
-                } label: {
-                    Image(systemName: "ellipsis").frame(width: 36, height: 44)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("View comments")
+                    .accessibilityIdentifier("grid.game.social.comments")
+
+                    Menu {
+                        Button("Not interested", systemImage: "hand.thumbsdown",
+                               action: onNotInterested)
+                        if canFollowCreator {
+                            Button("Block creator", systemImage: "person.crop.circle.badge.xmark",
+                                   role: .destructive, action: onBlockCreator)
+                        }
+                        Button("Report game", systemImage: "flag",
+                               role: .destructive, action: onReport)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: GameFeedCardSocialActionLayout.minimumHitSize,
+                                   height: GameFeedCardSocialActionLayout.minimumHitSize)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("More game options")
+                    .accessibilityIdentifier("grid.game.social.more")
+
+                    Button(action: onToggleSaved) {
+                        Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                            .foregroundStyle(isSaved ? Color.pink : Color.primary)
+                            .frame(width: GameFeedCardSocialActionLayout.minimumHitSize,
+                                   height: GameFeedCardSocialActionLayout.minimumHitSize)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isSaved ? "Remove saved game" : "Save game")
+                    .accessibilityIdentifier("grid.game.social.save")
+
+                    ShareLink(item: shareURL) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: GameFeedCardSocialActionLayout.minimumHitSize,
+                                   height: GameFeedCardSocialActionLayout.minimumHitSize)
+                            .background(HephaestusDesign.elevatedBackground, in: Circle())
+                            .contentShape(Rectangle())
+                    }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        Task { await BackendAPI.shared.trackSocialEvent(
+                            gameID: game.id, kind: "share"
+                        ) }
+                    })
+                    .accessibilityLabel("Share \(game.title)")
+                    .accessibilityIdentifier("grid.game.social.share")
                 }
-                .accessibilityLabel("More game options")
-                Button(action: onToggleSaved) {
-                    Label(isSaved ? "Saved" : "Save",
-                          systemImage: isSaved ? "bookmark.fill" : "bookmark")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isSaved ? Color.pink : Color.primary)
-                        .frame(minHeight: 44)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(isSaved ? "Remove saved game" : "Save game")
-                ShareLink(item: shareURL) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 44, height: 44)
-                        .background(HephaestusDesign.elevatedBackground, in: Circle())
-                }
-                .simultaneousGesture(TapGesture().onEnded {
-                    Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
-                })
-                .accessibilityLabel("Share \(game.title)")
             }
             .padding(.horizontal, 14)
             .padding(.top, 8)
