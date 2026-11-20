@@ -127,6 +127,36 @@ struct CreatorStudioProfileDismissGate {
     }
 }
 
+/// A failed image-analysis request may have reached the service. This
+/// policy only permits editing the existing local drawing; it never
+/// authorizes automatically sending another network write.
+enum CreateDrawingRecoveryPolicy {
+    enum FailureSource { case imageAnalysis, uncertainRemoteWork }
+
+    static func canEditOriginalDrawing(
+        after source: FailureSource,
+        hasImageData: Bool,
+        hasDecodedPreview: Bool
+    ) -> Bool {
+        if case .imageAnalysis = source {
+            return hasImageData && hasDecodedPreview
+        }
+        return false
+    }
+
+    static func manualRetryNotice(
+        priorAnalysisOutcomeUnconfirmed: Bool,
+        hasSourceImage: Bool
+    ) -> String? {
+        guard priorAnalysisOutcomeUnconfirmed && hasSourceImage else { return nil }
+        return "The previous analysis may have reached the service. Analyze again starts a new request; it does not resume the earlier one."
+    }
+
+    /// No raw server URL, token, upload path or localized error is disclosed.
+    static let safeAnalysisFailureMessage =
+        "Couldn't confirm whether your drawing was analyzed. Your drawing is still on this device."
+}
+
 /// Photograph a drawing → analyze → generate → confirm → play.
 struct CreateView: View {
     let onOpenProfile: () -> Void
@@ -165,6 +195,9 @@ struct CreateView: View {
     @State private var playerRequest: PixiPlayerRequest?
     @State private var showsProjects = false
     @State private var studioProfileDismissGate = CreatorStudioProfileDismissGate()
+    @State private var failedDrawingAnalysis = false
+    @State private var priorAnalysisOutcomeUnconfirmed = false
+    @State private var showsDiscardDrawingConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -184,18 +217,57 @@ struct CreateView: View {
                 case .done(let gameID):
                     doneView(gameID: gameID)
                 case .failed(let message):
-                    VStack(spacing: 16) {
-                        Text("Something went wrong").font(.headline)
-                        Text(message)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("create.error.message")
-                        Button("Start over") { reset() }
-                            .buttonStyle(.borderedProminent)
-                            .frame(minWidth: 120, minHeight: 48)
-                            .accessibilityIdentifier("create.error.startOver")
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            Text("Something went wrong").font(.headline)
+                            Text(message)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("create.error.message")
+                            if CreateDrawingRecoveryPolicy.canEditOriginalDrawing(
+                                after: failedDrawingAnalysis ? .imageAnalysis : .uncertainRemoteWork,
+                                hasImageData: imageData != nil,
+                                hasDecodedPreview: previewImage != nil
+                            ) {
+                                Text("Your drawing and its settings are still available on this device.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Button("Keep drawing and edit") {
+                                    // Return to the local editor, never replay an ingest POST.
+                                    failedDrawingAnalysis = false
+                                    phase = .pick
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .frame(minWidth: 180, minHeight: 48)
+                                .accessibilityIdentifier("create.failure.keepDrawing")
+                            }
+                            Button(imageData == nil ? "Start over" : "Discard drawing and start over",
+                                   role: .destructive) {
+                                if imageData == nil { reset() }
+                                else { showsDiscardDrawingConfirmation = true }
+                            }
+                            .buttonStyle(.bordered)
+                            .frame(minWidth: 180, minHeight: 48)
+                            .accessibilityIdentifier("create.failure.discard")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
                     }
-                    .padding()
+                    // Present a destructive confirmation ONLY from the failed
+                    // drawing view. An always-installed dialog on the same
+                    // root presenter as the real Studio sheet can swallow
+                    // the normal Projects tap on iPhone.
+                    .confirmationDialog(
+                        "Discard your selected drawing and settings?",
+                        isPresented: $showsDiscardDrawingConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Discard and start over", role: .destructive) { reset() }
+                        Button("Keep drawing", role: .cancel) {}
+                    } message: {
+                        Text("This removes your local image and inputs. A request already sent to the service may still exist.")
+                    }
                 }
             }
             .navigationTitle("Create")
@@ -324,6 +396,8 @@ struct CreateView: View {
                     photoSelectionEpoch &+= 1
                     let requestEpoch = photoSelectionEpoch
                     hasSourceConsent = false
+                    priorAnalysisOutcomeUnconfirmed = false
+                    failedDrawingAnalysis = false
                     imageData = nil
                     previewImage = nil
                     photoSelectionError = nil
@@ -399,6 +473,16 @@ struct CreateView: View {
                         .accessibilityLabel("Optional keywords, separated by commas")
                         .accessibilityHint("Describe your game using optional keywords")
                         .accessibilityIdentifier("create.pick.keywords")
+                    if let warning = CreateDrawingRecoveryPolicy.manualRetryNotice(
+                        priorAnalysisOutcomeUnconfirmed: priorAnalysisOutcomeUnconfirmed,
+                        hasSourceImage: imageData != nil
+                    ) {
+                        Label(warning, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("create.pick.analysisRetryNotice")
+                    }
                     Button {
                         Task { await analyze() }
                     } label: {
@@ -677,6 +761,9 @@ struct CreateView: View {
     }
 
     private func reset() {
+        failedDrawingAnalysis = false
+        priorAnalysisOutcomeUnconfirmed = false
+        showsDiscardDrawingConfirmation = false
         // Invalidate any local PhotoKit transfer even if it ignores
         // cancellation and returns bytes after the UI has reset.
         photoLoadTask?.cancel()
@@ -700,6 +787,9 @@ struct CreateView: View {
     private func analyze() async {
         guard PlayableExpression.canSubmitSource(hasImage: imageData != nil, hasConsent: hasSourceConsent),
               let imageData else { return }
+        let submittedPhotoEpoch = photoSelectionEpoch
+        failedDrawingAnalysis = false
+        priorAnalysisOutcomeUnconfirmed = false
         phase = .analyzing
         let keywords = keywordsText
             .split(separator: ",")
@@ -707,13 +797,21 @@ struct CreateView: View {
             .filter { !$0.isEmpty }
         do {
             let result = try await BackendAPI.shared.ingest(imageData: imageData, keywords: keywords)
+            // An older image's network completion must never replace a newer
+            // drawing, after PhotoKit re-selection or an explicit reset.
+            guard submittedPhotoEpoch == photoSelectionEpoch, !Task.isCancelled else { return }
             intentText = result.guessed_intent ?? ""
             if let image = UIImage(data: imageData) {
                 phase = .review(result: result, image: image)
             } else {
+                failedDrawingAnalysis = true
+                priorAnalysisOutcomeUnconfirmed = true
                 phase = .failed("Couldn't read the selected image.")
             }
         } catch {
+            guard submittedPhotoEpoch == photoSelectionEpoch, !Task.isCancelled else { return }
+            failedDrawingAnalysis = true
+            priorAnalysisOutcomeUnconfirmed = true
             phase = .failed(CreateErrorPresentation.message(for: error, stage: .analyze))
         }
     }
@@ -732,6 +830,7 @@ struct CreateView: View {
     }
 
     private func pollJob(_ jobID: String) async {
+        failedDrawingAnalysis = false
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(3))
             do {
@@ -757,6 +856,7 @@ struct CreateView: View {
     }
 
     private func confirm(job: JobStatus) async {
+        failedDrawingAnalysis = false
         do {
             try await BackendAPI.shared.confirmGame(id: job.game_id)
             phase = .generating(job)
