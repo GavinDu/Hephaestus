@@ -1531,13 +1531,41 @@ final class PlayerSmokeTests: XCTestCase {
         app.launch()
         let commentAction = app.buttons["View comments"].firstMatch
         let retry = app.buttons["Try again"].firstMatch
+        // Require a REAL published post. A terminal Retry restarts its
+        // existing 45-second transport budget; restarting in the last
+        // seconds of this 120-second smoke can strand the final screenshot
+        // on skeletons even if a previous genuine request could complete.
         let until = Date().addingTimeInterval(120)
+        var lastRetry = Date.distantPast
+        var retryAttempts = 0
         while !commentAction.exists && Date() < until {
-            if retry.waitForExistence(timeout: 4) { retry.tap() }
-            _ = commentAction.waitForExistence(timeout: 4)
+            let remaining = until.timeIntervalSinceNow
+            if remaining > 50,
+               Date().timeIntervalSince(lastRetry) >= 30,
+               retry.exists && retry.isHittable {
+                retry.tap()
+                retryAttempts += 1
+                lastRetry = Date()
+            }
+            // Do not spin quickly on a native loading skeleton or interrupt
+            // an in-flight request just to manufacture more Retry taps.
+            let wait = min(4.0, max(0.25, until.timeIntervalSinceNow))
+            _ = commentAction.waitForExistence(timeout: wait)
+        }
+        if !commentAction.exists {
+            // An unresponsive backend MUST remain a strict native failure.
+            // Preserve the untouched original pixels and privacy-safe state
+            // instead of mocking a post or skipping Comments acceptance.
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "arcade-pulse-comments-real-feed-unavailable"
+            failure.lifetime = .keepAlways
+            add(failure)
+            let stillLoading = app.buttons["feed.retryLoading"].firstMatch.exists
+            let terminalError = retry.exists
+            print("REAL_COMMENTS_FEED_UNAVAILABLE retry_attempts=\(retryAttempts) loading=\(stillLoading) terminal_error=\(terminalError)")
         }
         XCTAssertTrue(commentAction.exists,
-                      "Real For You posts must offer an accessible comment action.")
+                      "Real For You posts must offer an accessible comment action; inspect authentic feed/Retry evidence.")
         commentAction.tap()
         // An axis:.vertical SwiftUI TextField can surface as a UITextView
         // rather than the generic accessibility wrapper carrying the SwiftUI
