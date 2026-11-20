@@ -1385,8 +1385,9 @@ struct HephaestusTests {
         }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         #expect(components?.path == "/player")
-        #expect(components?.queryItems?.filter({ $0.name == "game" }).count == 1)
-        #expect(components?.queryItems?.first(where: { $0.name == "game" })?.value == id)
+        let gameItems = components?.queryItems?.filter({ $0.name == "game" }) ?? []
+        #expect(gameItems.count == 1)
+        #expect(gameItems.first?.value == id)
     }
     let hostileIDs = [
         "", " ", " game-1 ", ".", "..", "a/b", "a?b", "a%b", "a#b",
@@ -1418,6 +1419,7 @@ struct HephaestusTests {
     )
     #expect(legitimate.isValid)
     #expect(!forged.isValid)
+    #expect(!PlayerLoadRetryPolicy.shouldOfferManualRetry(category: .invalidPackage))
 }
 
 @Test func playerLoadFailuresUseSafeActionableMessages() {
