@@ -1245,6 +1245,12 @@ struct DiscoverView: View {
                 hasGames: !games.isEmpty,
                 ownsRequest: feedRequestCoordinator.isCurrent(generation),
                 matchesScope: requestedScope == selectedFeed
+            ), FeedSavedGameCache.canApply(
+                requestedViewerID: requestedViewerID,
+                currentViewerID: BackendConfig.currentUserID,
+                requestedSessionEpoch: requestedSessionEpoch,
+                currentSessionEpoch: socialMutationEpoch,
+                ownsRequest: feedRequestCoordinator.isCurrent(generation)
             ) else { return }
             isSlowLoading = true
         }
@@ -1261,6 +1267,13 @@ struct DiscoverView: View {
             } catch { return }
             guard isLoading, games.isEmpty,
                   requestedScope == selectedFeed,
+                  FeedSavedGameCache.canApply(
+                      requestedViewerID: requestedViewerID,
+                      currentViewerID: BackendConfig.currentUserID,
+                      requestedSessionEpoch: requestedSessionEpoch,
+                      currentSessionEpoch: socialMutationEpoch,
+                      ownsRequest: feedRequestCoordinator.isCurrent(generation)
+                  ),
                   feedRequestCoordinator.expireIfCurrent(generation) else { return }
             isLoading = false
             isSlowLoading = false
@@ -1270,7 +1283,13 @@ struct DiscoverView: View {
         defer {
             slowHint.cancel()
             watchdog.cancel()
-            if feedRequestCoordinator.isCurrent(generation) {
+            if FeedSavedGameCache.canApply(
+                requestedViewerID: requestedViewerID,
+                currentViewerID: BackendConfig.currentUserID,
+                requestedSessionEpoch: requestedSessionEpoch,
+                currentSessionEpoch: socialMutationEpoch,
+                ownsRequest: feedRequestCoordinator.isCurrent(generation)
+            ) {
                 isLoading = false
                 isSlowLoading = false
                 feedRequestCoordinator.finishIfCurrent(generation)
