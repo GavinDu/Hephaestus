@@ -1867,7 +1867,7 @@ struct PixiPlayerSheet: View {
                                 isOffline: pathMonitor.isOffline
                             ) {
                                 autoReloads += 1
-                                DevLog.warn(.player, "web content process terminated for \(gameID); auto-reload \(autoReloads)/2")
+                                DevLog.warn(.player, "web content process terminated; auto-reload \(autoReloads)/2")
                                 PlayerTelemetry.report(gameID: gameID, kind: "ios-webview-terminated",
                                                        name: "WebContentProcessTerminated",
                                                        message: "auto-reload \(autoReloads) of 2")
