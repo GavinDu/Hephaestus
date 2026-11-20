@@ -9,6 +9,7 @@ struct BackendAPICreatorPathSegmentTests {
         let good: [(String, String)] = [
             ("a", "a"),
             ("creator-123_ABC", "creator-123_ABC"),
+            ("apple:privateSubject", "apple%3AprivateSubject"),
             ("auth0|subject", "auth0%7Csubject"),
             ("google-oauth2|123", "google-oauth2%7C123"),
             ("github:123@id", "github%3A123%40id"),
