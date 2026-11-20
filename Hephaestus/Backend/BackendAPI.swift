@@ -446,6 +446,35 @@ enum APIError: Error, LocalizedError {
     }
 }
 
+/// Opaque creator IDs are a *single* URL path component, never URL syntax.
+/// Syntactic admission only: server authorization and revocation are separate.
+/// Namespaced account IDs (e.g. "auth0|subject") retain their exact bytes,
+/// but their reserved separators are percent-encoded on the wire.
+enum BackendAPICreatorPathSegmentPolicy {
+    static func encoded(_ creatorID: String) -> String? {
+        var count = 0
+        for byte in creatorID.utf8 {
+            // Bounded before allocation or interpolation of untrusted IDs.
+            guard count < 128 else { return nil }
+            count += 1
+            switch byte {
+            case 48...57, 65...90, 97...122, 45, 46, 95, 126,
+                 124, 58, 64: // 0-9 A-Z a-z - . _ ~ | : @
+                break
+            default:
+                return nil
+            }
+        }
+        guard count > 0, creatorID != ".", creatorID != ".." else {
+            return nil
+        }
+        return creatorID
+            .replacingOccurrences(of: "|", with: "%7C")
+            .replacingOccurrences(of: ":", with: "%3A")
+            .replacingOccurrences(of: "@", with: "%40")
+    }
+}
+
 /// Thin async client for the DoodleQuest backend. One shared instance.
 /// Identity is derived from a Keychain-backed bearer token. The legacy
 /// X-User-ID header is disabled unless a developer explicitly opts in.
@@ -629,8 +658,11 @@ final class BackendAPI: ObservableObject {
     }
 
     func setFollowing(_ creatorID: String, following: Bool) async throws {
+        guard let segment = BackendAPICreatorPathSegmentPolicy.encoded(creatorID) else {
+            throw APIError.invalidInput("Invalid creator identifier.")
+        }
         let method = following ? "POST" : "DELETE"
-        let req = try makeRequest("v1/users/\(creatorID)/follow", method: method)
+        let req = try makeRequest("v1/users/\(segment)/follow", method: method)
         let _: ActionResponse = try await send(ActionResponse.self, req)
     }
 
@@ -722,8 +754,11 @@ final class BackendAPI: ObservableObject {
     }
 
     func blockCreator(_ creatorID: String, blocked: Bool) async throws {
+        guard let segment = BackendAPICreatorPathSegmentPolicy.encoded(creatorID) else {
+            throw APIError.invalidInput("Invalid creator identifier.")
+        }
         let method = blocked ? "POST" : "DELETE"
-        let req = try makeRequest("v1/users/\(creatorID)/block", method: method)
+        let req = try makeRequest("v1/users/\(segment)/block", method: method)
         let _: ActionResponse = try await send(ActionResponse.self, req)
     }
 
@@ -755,7 +790,10 @@ final class BackendAPI: ObservableObject {
     }
 
     func fetchCreatorProfile(id: String) async throws -> CreatorProfile {
-        let req = try makeRequest("v1/users/\(id)")
+        guard let segment = BackendAPICreatorPathSegmentPolicy.encoded(id) else {
+            throw APIError.invalidInput("Invalid creator identifier.")
+        }
+        let req = try makeRequest("v1/users/\(segment)")
         return try await send(CreatorProfile.self, req)
     }
 
