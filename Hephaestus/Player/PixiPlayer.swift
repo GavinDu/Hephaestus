@@ -749,6 +749,35 @@ enum PlayerPrewarmHandoffPolicy {
     }
 }
 
+/// Local free-form diagnostics are intentionally identity-free. The logger
+/// does not need an authored/private game identifier; structured telemetry
+/// carries game identity through a separately governed API.
+enum PlayerLocalLifecycleLog {
+    static let prewarm = "prewarming player page"
+    static let terminatedRepeatedly = "web content process terminated repeatedly"
+    static let backgrounded = "app backgrounded while player sheet is open"
+    static let foregrounded = "app foregrounded with player sheet open"
+    static let memoryWarning = "memory warning while player open"
+    static let opened = "player opened; loading /player in WebView"
+
+    static func navigationFinished(milliseconds: Int) -> String {
+        "player navigation finished in \(max(0, milliseconds))ms"
+    }
+
+    static func autoReload(completedReloads: Int) -> String {
+        let attempt = min(2, max(0, completedReloads))
+        return "web content process terminated; auto-reload \(attempt)/2"
+    }
+
+    static func thermal(_ state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .serious: return "thermal state serious while player open"
+        case .critical: return "thermal state critical while player open"
+        default: return "thermal state changed while player open"
+        }
+    }
+}
+
 /// A game may not navigate the main frame to another document.
 enum PlayerMainFrameNavigationPolicy {
     static func shouldAllow(
@@ -1255,7 +1284,7 @@ enum PlayerWebViewPool {
             discardUnattachedPrewarm()
             DevLog.info(.player, "abandoned speculative player prewarm expired")
         }
-        DevLog.info(.player, "prewarming player page for \(gameID)")
+        DevLog.info(.player, PlayerLocalLifecycleLog.prewarm)
     }
 
     static func take(url: URL) -> (webView: WKWebView, shouldLoad: Bool, didFinish: Bool, lease: UInt64) {
@@ -1757,7 +1786,7 @@ struct PixiPlayerSheet: View {
         loadFailureCategory = nil
         showSlowHint = false
         let ms = Int(Date().timeIntervalSince(loadStartedAt) * 1000)
-        DevLog.info(.player, "player loaded \(gameID) in \(ms)ms (quality \(effectiveQuality))")
+        DevLog.info(.player, PlayerLocalLifecycleLog.navigationFinished(milliseconds: ms))
         PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerLoad",
                                message: "loaded in \(ms)ms quality=\(effectiveQuality)")
         // Navigation completion is NOT proof that the game has rendered or
@@ -1859,7 +1888,7 @@ struct PixiPlayerSheet: View {
                             // void unless we reload it ourselves.
                             if PlayerWebContentTerminationPolicy.shouldAutomaticallyReload(completedReloads: autoReloads) {
                                 autoReloads += 1
-                                DevLog.warn(.player, "web content process terminated for \(gameID); auto-reload \(autoReloads)/2")
+                                DevLog.warn(.player, PlayerLocalLifecycleLog.autoReload(completedReloads: autoReloads))
                                 PlayerTelemetry.report(gameID: gameID, kind: "ios-webview-terminated",
                                                        name: "WebContentProcessTerminated",
                                                        message: "auto-reload \(autoReloads) of 2")
@@ -1874,7 +1903,7 @@ struct PixiPlayerSheet: View {
                                 isLoading = false
                                 loadFailureCategory = .unknown
                                 loadError = PlayerWebContentTerminationPolicy.repeatedTerminationMessage
-                                DevLog.error(.player, "web content process terminated repeatedly for \(gameID)")
+                                DevLog.error(.player, PlayerLocalLifecycleLog.terminatedRepeatedly)
                                 PlayerTelemetry.report(gameID: gameID, kind: "ios-webview-terminated",
                                                        name: "WebContentProcessTerminated",
                                                        message: "gave up after 2 auto-reloads")
@@ -2169,13 +2198,13 @@ struct PixiPlayerSheet: View {
                 case .background:
                     guard !wasBackgrounded else { return }
                     wasBackgrounded = true
-                    DevLog.info(.player, "app backgrounded while player sheet is open for \(gameID)")
+                    DevLog.info(.player, PlayerLocalLifecycleLog.backgrounded)
                     PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerBackground",
                                            message: "app entered background; player lifecycle suspended")
                 case .active:
                     guard wasBackgrounded else { return }
                     wasBackgrounded = false
-                    DevLog.info(.player, "app foregrounded with player sheet open for \(gameID)")
+                    DevLog.info(.player, PlayerLocalLifecycleLog.foregrounded)
                     PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "PlayerForeground",
                                            message: "app returned to foreground; player lifecycle resumed")
                     // Retry only a failed load, and only when connectivity is back.
@@ -2218,7 +2247,7 @@ struct PixiPlayerSheet: View {
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
                 if !reportedMemoryWarning {
                     reportedMemoryWarning = true
-                    DevLog.warn(.player, "memory warning while player open for \(gameID)")
+                    DevLog.warn(.player, PlayerLocalLifecycleLog.memoryWarning)
                     PlayerTelemetry.report(gameID: gameID, kind: "ios-memory-warning",
                                            name: "MemoryWarning", message: "UIApplication memory warning during play")
                 }
@@ -2227,7 +2256,7 @@ struct PixiPlayerSheet: View {
                 let state = ProcessInfo.processInfo.thermalState
                 if (state == .serious || state == .critical), !reportedThermal {
                     reportedThermal = true
-                    DevLog.warn(.player, "thermal state \(state.rawValue) while player open for \(gameID)")
+                    DevLog.warn(.player, PlayerLocalLifecycleLog.thermal(state))
                     PlayerTelemetry.report(gameID: gameID, kind: "ios-thermal",
                                            name: "ThermalState", message: "thermal state serious/critical during play")
                 }
@@ -2249,7 +2278,7 @@ struct PixiPlayerSheet: View {
             .onAppear {
                 loadStartedAt = Date()
                 activeQuality = effectiveQuality
-                DevLog.info(.player, "player opened for \(gameID) — loading /player in WebView (quality \(activeQuality ?? effectiveQuality))")
+                DevLog.info(.player, PlayerLocalLifecycleLog.opened)
             }
             .onDisappear {
                 guard let startedAt = gameplayStartedAt, didTrackGameplayStart else { return }
