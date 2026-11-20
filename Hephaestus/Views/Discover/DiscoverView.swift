@@ -734,7 +734,7 @@ struct DiscoverView: View {
                         },
                         onOpenComments: { commentsGame = $0 },
                         onOpenCreator: { game in
-                            if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) }
+                            if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { profileRequest = CreatorProfileRequest(id: id) }
                         },
                         onReport: { reportingGame = $0 },
                         onBlockCreator: { game in
@@ -772,7 +772,7 @@ struct DiscoverView: View {
                                     onToggleLike: { toggleLike(game) },
                                     onToggleFollow: { if let id = game.ownerID { Task { await toggleFollow(id) } } },
                                     onOpenComments: { commentsGame = game },
-                                    onOpenCreator: { if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) } },
+                                    onOpenCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { profileRequest = CreatorProfileRequest(id: id) } },
                                     onReport: { reportingGame = game },
                                     onBlockCreator: {
                                         if let id = game.ownerID,
