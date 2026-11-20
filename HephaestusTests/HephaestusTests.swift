@@ -1391,7 +1391,8 @@ struct HephaestusTests {
     let hostileIDs = [
         "", " ", " game-1 ", ".", "..", "a/b", "a?b", "a%b", "a#b",
         "a+b", "a\\b", "tab\\t", "line\\n", "emoji🤖", "é",
-        String(repeating: "x", count: 129)
+        String(repeating: "x", count: 129),
+        String(repeating: "x", count: 4_096)
     ]
     for id in hostileIDs {
         #expect(!PlayerPublishedGameIDPolicy.valid(id))
