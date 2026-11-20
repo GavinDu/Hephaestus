@@ -8,7 +8,14 @@ enum CreatorDirectoryRowLayout {
     /// guessed row count may substitute for a malformed backend identity.
     static func rowAccessibilityIdentifier(for creatorID: String) -> String? {
         let trimmed = creatorID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed == creatorID else { return nil }
+        // The row is an actual navigation action, not a decorative label.
+        // A nonempty ID with embedded NUL/newline/control characters can
+        // pass trimming yet cannot be a reliable public profile destination
+        // or a stable native accessibility identifier. Use the same public
+        // creator-admission rule as the feed before exposing a tappable row.
+        guard trimmed == creatorID,
+              ForYouPageLayout.hasNavigableCreator(ownerID: creatorID)
+        else { return nil }
         return "creator.discovery.row.\(creatorID)"
     }
 
