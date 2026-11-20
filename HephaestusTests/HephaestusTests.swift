@@ -3776,3 +3776,107 @@ struct HephaestusTests {
     }
 }
 
+@Test func strictPrewarmAttachedIdentityMatchesOnlyCurrentNativeLeaseAcross160Transfers() {
+    typealias Policy = PlayerPrewarmAttachedSceneIdentityPolicy
+    let url = URL(string: "https://games.example.test/player?game=sky&quality=low")!
+    var ledger = PlayerPrewarmSceneMilestoneLedger()
+    for iteration in 1...160 {
+        ledger.invalidate()
+        let nonce = String(format: "%032x", iteration)
+        let identity = PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: "sky", playerURL: url, documentNonce: nonce,
+            credentialFingerprint: "credential-epoch-1",
+            runtimeSessionID: "current-session"
+        )
+        let recorded = ledger.record(
+            identity: identity, expected: identity,
+            sequence: iteration, milliseconds: 20,
+            isMainFrame: true, isSpeculative: true, navigationStarted: true
+        )
+        #expect(recorded)
+        guard let submission = ledger.candidate else {
+            Issue.record("Expected one speculative scene candidate")
+            continue
+        }
+        let lease = UInt64(iteration)
+        let valid = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        #expect(valid)
+        let oldLease = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease + 1,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let otherGame = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "other", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let otherNonce = Policy.matches(
+            submission, currentURL: url,
+            currentDocumentNonce: String(repeating: "f", count: 32),
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let rotatedAuth = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-2",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let newURL = Policy.matches(
+            submission,
+            currentURL: URL(string: "https://games.example.test/player?game=sky&quality=high"),
+            currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let unattached = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: false
+        )
+        let oldView = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: false, isAttached: true
+        )
+        let missingCredential = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: nil,
+            expectedGameID: "sky", offeredLease: lease, currentLease: lease,
+            isCurrentPooledView: true, isAttached: true
+        )
+        let noLease = Policy.matches(
+            submission, currentURL: url, currentDocumentNonce: nonce,
+            currentCredentialFingerprint: "credential-epoch-1",
+            expectedGameID: "sky", offeredLease: 0, currentLease: 0,
+            isCurrentPooledView: true, isAttached: true
+        )
+        #expect(!oldLease && !otherGame && !otherNonce && !rotatedAuth)
+        #expect(!newURL && !unattached && !oldView && !missingCredential && !noLease)
+        #expect(ledger.candidate == submission) // negatives never consume
+        let consumed = ledger.consume(
+            expected: identity, offeredLease: lease,
+            currentLease: lease, isCurrentPooledView: true, isAttached: true
+        )
+        #expect(consumed == submission)
+        let duplicate = ledger.consume(
+            expected: identity, offeredLease: lease,
+            currentLease: lease, isCurrentPooledView: true, isAttached: true
+        )
+        #expect(duplicate == nil)
+        #expect(ledger.hasTransferred && ledger.candidate == nil)
+    }
+}
+
