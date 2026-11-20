@@ -343,6 +343,106 @@ struct CreatorDiscoveryResponse: Decodable {
     var next_cursor: String?
 }
 
+/// One canonical, validated game-id REST path segment; the backend's
+/// published-game IDs are ASCII letters, numbers, '-' and '_', max 128 bytes.
+/// Do not interpolate a network/client supplied path into URL() unchecked.
+enum VerifiedLeaderboardGameIDPolicy {
+    static func valid(_ value: String) -> Bool {
+        let bytes = Array(value.utf8)
+        guard (1...128).contains(bytes.count) else { return false }
+        return bytes.allSatisfy { byte in
+            (0x41...0x5a).contains(byte) ||
+            (0x61...0x7a).contains(byte) ||
+            (0x30...0x39).contains(byte) ||
+            byte == 0x2d || byte == 0x5f
+        }
+    }
+}
+
+enum VerifiedLeaderboardWindow: String {
+    case week
+    case all
+}
+
+/// Current shipping backend #441 contract is a deliberately EMPTY verified
+/// board until an independently authorized server replay worker exists.
+/// This model fails closed if the backend/client ever attempts to show an
+/// unverified or allegedly attested rank through the empty-board read seam.
+/// Future nonempty verified leaderboards require a separately reviewed v2 API.
+struct VerifiedOnlyLeaderboardUnavailable: Decodable {
+    let gameID: String
+    let irSHA256: String
+    let window: String
+    let metric: String
+    let order: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case gameID = "gameId"
+        case irHash, irSHA256 = "irSha256", window, metric, order
+        case rankingScope, attestationAvailable, entries
+    }
+
+    private struct AnyKey: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
+    init(from decoder: Decoder) throws {
+        let allKeys = try decoder.container(keyedBy: AnyKey.self)
+        let exactKeys = Set(CodingKeys.allCases.map(\.stringValue))
+        guard Set(allKeys.allKeys.map(\.stringValue)) == exactKeys else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Unknown or missing verified leaderboard fields"
+            ))
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let gameID = try c.decode(String.self, forKey: .gameID)
+        let irSHA256 = try c.decode(String.self, forKey: .irSHA256)
+        let shortHash = try c.decode(String.self, forKey: .irHash)
+        let window = try c.decode(String.self, forKey: .window)
+        let metric = try c.decode(String.self, forKey: .metric)
+        let order = try c.decode(String.self, forKey: .order)
+        let scope = try c.decode(String.self, forKey: .rankingScope)
+        let available = try c.decode(Bool.self, forKey: .attestationAvailable)
+        let entries = try c.nestedUnkeyedContainer(forKey: .entries)
+        let hashBytes = Array(irSHA256.utf8)
+        let validHash = hashBytes.count == 64 && hashBytes.allSatisfy { byte in
+            (0x30...0x39).contains(byte) || (0x61...0x66).contains(byte)
+        }
+        let metricBytes = Array(metric.utf8)
+        let validMetric = (1...32).contains(metricBytes.count) &&
+            metricBytes.allSatisfy { byte in
+                (0x61...0x7a).contains(byte) ||
+                (0x30...0x39).contains(byte) || byte == 0x5f
+            }
+        guard VerifiedLeaderboardGameIDPolicy.valid(gameID),
+              validHash, shortHash == String(irSHA256.prefix(12)),
+              window == VerifiedLeaderboardWindow.week.rawValue ||
+                  window == VerifiedLeaderboardWindow.all.rawValue,
+              validMetric, order == "asc" || order == "desc",
+              scope == "verified_only", !available, entries.isAtEnd
+        else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Untrusted or unavailable verified-only leaderboard contract"
+            ))
+        }
+        self.gameID = gameID
+        self.irSHA256 = irSHA256
+        self.window = window
+        self.metric = metric
+        self.order = order
+    }
+
+    func matchesRequest(gameID requestedID: String, window requestedWindow: VerifiedLeaderboardWindow) -> Bool {
+        VerifiedLeaderboardGameIDPolicy.valid(requestedID) &&
+            gameID == requestedID && window == requestedWindow.rawValue
+    }
+}
+
 struct VerifiedRunResult: Decodable, Identifiable {
     let runID: String
     let gameID: String
@@ -606,6 +706,32 @@ final class BackendAPI: ObservableObject {
             try await Task.sleep(for: .seconds(1))
             return try await send(FeedResponse.self, req, using: feedSession)
         }
+    }
+
+    /// Read only the backend's truthful EMPTY verified-only board. Never
+    /// silently substitute the legacy provisional (browser-claimed) board.
+    /// This method intentionally exposes no numeric rank or attested score.
+    func fetchUnavailableVerifiedLeaderboard(
+        gameID: String, expectedIRSHA256: String,
+        window: VerifiedLeaderboardWindow = .week
+    ) async throws -> VerifiedOnlyLeaderboardUnavailable {
+        guard VerifiedLeaderboardGameIDPolicy.valid(gameID),
+              expectedIRSHA256.utf8.count == 64,
+              expectedIRSHA256.utf8.allSatisfy({ byte in
+                  (0x30...0x39).contains(byte) || (0x61...0x66).contains(byte)
+              })
+        else {
+            throw APIError.invalidInput("Invalid game or published IR identity.")
+        }
+        let req = try makeRequest(
+            "v1/games/\(gameID)/leaderboard/verified?window=\(window.rawValue)"
+        )
+        let response = try await send(VerifiedOnlyLeaderboardUnavailable.self, req)
+        guard response.matchesRequest(gameID: gameID, window: window),
+              response.irSHA256 == expectedIRSHA256 else {
+            throw APIError.invalidInput("Verified leaderboard package identity mismatch.")
+        }
+        return response
     }
 
     func fetchVerifiedRunResult(runID: String) async throws -> VerifiedRunResult {
