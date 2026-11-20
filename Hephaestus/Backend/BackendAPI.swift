@@ -446,6 +446,86 @@ enum APIError: Error, LocalizedError {
     }
 }
 
+/// Fixed, privacy-safe classification for shared API request logs.
+///
+/// A published game ID, creator ID, replay ID, bearer token, query string,
+/// URL host, NSError domain or localized error must never enter DevLog text.
+/// This controls diagnostics only; it never changes URLSession behavior.
+enum BackendAPIDiagnosticPolicy {
+    enum TransportFailure: String {
+        case timeout
+        case offline
+        case cancelled
+        case interrupted
+        case other
+    }
+
+    enum Outcome {
+        case success(status: Int, bytes: Int)
+        case rejected(status: Int)
+        case decoding
+        case transport(TransportFailure)
+    }
+
+    static func transportFailure(for error: Error) -> TransportFailure {
+        guard let network = error as? URLError else { return .other }
+        switch network.code {
+        case .timedOut:
+            return .timeout
+        case .notConnectedToInternet:
+            return .offline
+        case .cancelled:
+            return .cancelled
+        case .networkConnectionLost, .cannotConnectToHost, .cannotFindHost:
+            return .interrupted
+        default:
+            return .other
+        }
+    }
+
+    static func routeBucket(for endpoint: URL?) -> String {
+        guard let path = endpoint?.path else { return "other" }
+        if path == "/healthz" || path == "/health" { return "health" }
+        if path == "/v1/feed" || path.hasPrefix("/v1/feed/") { return "feed" }
+        if path.hasPrefix("/v1/runs/") { return "run" }
+        if path.hasPrefix("/v1/games/") || path == "/v1/games" { return "game" }
+        if path.hasPrefix("/v1/users/") { return "account" }
+        if path.hasPrefix("/v1/creators/") { return "creator" }
+        if path.hasPrefix("/v1/jobs/") { return "job" }
+        if path == "/v1/ingest" { return "ingest" }
+        if path.hasPrefix("/v1/") { return "api" }
+        return "other"
+    }
+
+    static func message(
+        httpMethod: String?, endpoint: URL?,
+        elapsedMilliseconds: Int, outcome: Outcome
+    ) -> String {
+        // Do not uppercase/interpolate arbitrary caller-owned method text.
+        let method: String
+        switch httpMethod {
+        case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD":
+            method = httpMethod!
+        default:
+            method = "OTHER"
+        }
+        let duration = min(max(0, elapsedMilliseconds), 600_000)
+        let base = "\(method) \(routeBucket(for: endpoint))"
+        switch outcome {
+        case .success(let status, let bytes):
+            let safeStatus = min(max(-1, status), 999)
+            let safeBytes = min(max(0, bytes), 100_000_000)
+            return "\(base) -> \(safeStatus) (\(duration)ms, \(safeBytes) B)"
+        case .rejected(let status):
+            return "\(base) -> \(min(max(-1, status), 999)) (\(duration)ms)"
+        case .decoding:
+            return "\(base) decode_failed (\(duration)ms)"
+        case .transport(let category):
+            return "\(base) transport_\(category.rawValue) (\(duration)ms)"
+        }
+    }
+}
+
 /// Thin async client for the DoodleQuest backend. One shared instance.
 /// Identity is derived from a Keychain-backed bearer token. The legacy
 /// X-User-ID header is disabled unless a developer explicitly opts in.
@@ -483,29 +563,40 @@ final class BackendAPI: ObservableObject {
     }
 
     private func send<T: Decodable>(_ type: T.Type, _ req: URLRequest, using transport: URLSession? = nil) async throws -> T {
-        let method = req.httpMethod ?? "GET"
-        let path = req.url?.path ?? "?"
         let started = Date()
         do {
             let (data, resp) = try await (transport ?? session).data(for: req)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
             guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                DevLog.error(.api, "\(method) \(path) -> \(status) (\(ms)ms)")
+                DevLog.error(.api, BackendAPIDiagnosticPolicy.message(
+                    httpMethod: req.httpMethod, endpoint: req.url,
+                    elapsedMilliseconds: ms, outcome: .rejected(status: status)
+                ))
                 throw APIError.badStatus(status)
             }
-            DevLog.info(.api, "\(method) \(path) -> \(status) (\(ms)ms, \(data.count) B)")
+            DevLog.info(.api, BackendAPIDiagnosticPolicy.message(
+                httpMethod: req.httpMethod, endpoint: req.url,
+                elapsedMilliseconds: ms, outcome: .success(status: status, bytes: data.count)
+            ))
             do {
                 return try JSONDecoder().decode(T.self, from: data)
             } catch {
-                DevLog.error(.api, "\(method) \(path) decode failed: \(error.localizedDescription)")
+                DevLog.error(.api, BackendAPIDiagnosticPolicy.message(
+                    httpMethod: req.httpMethod, endpoint: req.url,
+                    elapsedMilliseconds: ms, outcome: .decoding
+                ))
                 throw APIError.decoding(error)
             }
         } catch let err as APIError {
             throw err
         } catch {
             let ms = Int(Date().timeIntervalSince(started) * 1000)
-            DevLog.error(.api, "\(method) \(path) network error (\(ms)ms): \(error.localizedDescription)")
+            DevLog.error(.api, BackendAPIDiagnosticPolicy.message(
+                httpMethod: req.httpMethod, endpoint: req.url,
+                elapsedMilliseconds: ms,
+                outcome: .transport(BackendAPIDiagnosticPolicy.transportFailure(for: error))
+            ))
             throw error
         }
     }
@@ -520,7 +611,7 @@ final class BackendAPI: ObservableObject {
             DevLog.info(.api, "healthz -> \(isHealthy ? "ok" : "unexpected body")")
         } catch {
             isHealthy = false
-            DevLog.warn(.api, "healthz failed: \(error.localizedDescription)")
+            DevLog.warn(.api, "healthz transport_\(BackendAPIDiagnosticPolicy.transportFailure(for: error).rawValue)")
         }
     }
 
