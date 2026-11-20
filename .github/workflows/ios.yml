@@ -208,6 +208,7 @@ jobs:
           xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus \
             -destination "platform=iOS Simulator,id=${{ steps.ipad.outputs.udid }}" \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedUIEvaluationAndSwipe \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseIPadOneRealSearchResultCentered \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedSupportsAccessibilityDynamicType \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSocialWriteFailureDoesNotHideLiveGame \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseGameGridSocialActionsHaveTrue44ptTargets \
