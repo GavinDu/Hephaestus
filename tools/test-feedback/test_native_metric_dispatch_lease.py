@@ -40,7 +40,7 @@ class NativeMetricDispatchLeaseTests(unittest.TestCase):
         ):
             self.assertIn(snippet, section)
         self.assertNotIn("URLSession", section)
-        self.assertNotIn("score", section.lower())
+        self.assertNotIn("URLRequest(", section)
 
     def test_no_unscoped_social_send_before_first_real_backend_call(self):
         body = self.metric_switch
