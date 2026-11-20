@@ -80,9 +80,8 @@ final class PlayerSmokeTests: XCTestCase {
 
         // The Discover feed comes from the live backend; the workflow
         // warms the deployment first, but the wait still leaves room
-        // for a slow first response. On failure the message carries
-        // the UI hierarchy — the CI log is the only diagnostic this
-        // job produces.
+        // for a slow first response. Only fixed state/reason codes are
+        // logged on failure; genuine XCResult screenshots stay available.
         // Use a stable identifier instead of matching visible copy ("Play now"),
         // which can change as the social-feed card design evolves.
         let play = app.buttons["game.play"].firstMatch
@@ -121,7 +120,7 @@ final class PlayerSmokeTests: XCTestCase {
                           frame.width.isFinite, frame.height.isFinite,
                           frame.midX.isFinite, frame.midY.isFinite,
                           app.frame.intersects(frame) else { continue }
-                    print("SMOKE: retrying real live feed via \(retry.label)")
+                    print("SMOKE: retrying real live feed via fixed retry affordance")
                     retry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
                     lastRetry = Date()
                     break
