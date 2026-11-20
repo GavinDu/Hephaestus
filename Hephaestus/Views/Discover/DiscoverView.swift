@@ -36,6 +36,24 @@ enum FeedPreferenceTopicPolicy {
     }
 }
 
+enum ForYouSpotlightTopicPolicy {
+    static func summary(_ topics: [String]?) -> (visual: String, spoken: String)? {
+        let genuine = Array((topics ?? []).lazy.compactMap { raw -> String? in
+            let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty,
+                  !label.unicodeScalars.contains(where: {
+                      CharacterSet.controlCharacters.contains($0)
+                  }) else { return nil }
+            return label
+        }.prefix(3))
+        guard !genuine.isEmpty else { return nil }
+        return (
+            visual: genuine.map { "#\($0)" }.joined(separator: "  "),
+            spoken: "Topics: " + genuine.joined(separator: ", ")
+        )
+    }
+}
+
 // MARK: - Discover
 
 private struct PlayerResultPresentation: Identifiable {
@@ -1677,12 +1695,18 @@ private struct ForYouGamePage: View {
                     .foregroundStyle(.white.opacity(0.94))
                     .lineLimit(2)
             }
-            if !isCompact, let topics = game.topics, !topics.isEmpty {
-                Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
+            if !isCompact, let topics = ForYouSpotlightTopicPolicy.summary(game.topics) {
+                Text(topics.visual)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(1)
-                    .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
+                    // Permit meaningful natural wrapping of the genuine
+                    // topic subset before consuming more of the game stage.
+                    // The read-only Actions sheet holds the full strings at
+                    // Accessibility5 when this overlay is compacted away.
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(topics.spoken)
+                    .accessibilityIdentifier("feed.spotlight.topics")
             }
             if !isCompact, let expression = game.playableExpression, expression.source_visibility == "public" {
                 Button { showsExpressionDetails = true } label: {
@@ -2083,6 +2107,19 @@ private struct ForYouGameActionsSheet: View {
                     Button("Game details", systemImage: "info.circle",
                            action: onOpenDetails)
                     Button("Report game", role: .destructive, action: onReport)
+                }
+                // Accessibility5's compact stage leaves genuine source
+                // topics available in the stable pager-owned Actions sheet.
+                // This exact published game is checked by the pager's typed
+                // selected-game/viewer revision before presentation.
+                if let topics = ForYouSpotlightTopicPolicy.summary(game.topics) {
+                    Section("Game topics") {
+                        Text(topics.visual)
+                            .font(.body)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel(topics.spoken)
+                            .accessibilityIdentifier("feed.actions.topics")
+                    }
                 }
                 Section("Feed preferences") {
                     Button("Not interested", systemImage: "eye.slash",
