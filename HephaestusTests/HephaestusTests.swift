@@ -937,6 +937,28 @@ struct HephaestusTests {
     }
 }
 
+@Test func playerWebContentAutomaticRestartRequiresActiveOnlineBoundedBudget() {
+    for completed in [-1, 0, 1, 2, 3, Int.max] {
+        let mayRestart = completed == 0 || completed == 1
+        #expect(PlayerWebContentTerminationPolicy.shouldAutoRestartNow(
+            completedReloads: completed, isActiveAndForeground: true,
+            isOffline: false
+        ) == mayRestart)
+        #expect(!PlayerWebContentTerminationPolicy.shouldAutoRestartNow(
+            completedReloads: completed, isActiveAndForeground: false,
+            isOffline: false
+        ))
+        #expect(!PlayerWebContentTerminationPolicy.shouldAutoRestartNow(
+            completedReloads: completed, isActiveAndForeground: false,
+            isOffline: true
+        ))
+        #expect(!PlayerWebContentTerminationPolicy.shouldAutoRestartNow(
+            completedReloads: completed, isActiveAndForeground: true,
+            isOffline: true
+        ))
+    }
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
