@@ -37,7 +37,14 @@ struct ArcadePulseCreatorDirectoryRowLayoutTests {
             for: "creator-123") == "creator.discovery.row.creator-123")
         #expect(CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
             for: "创作者") == "creator.discovery.row.创作者")
-        for invalid in ["", " ", "\t", " creator ", "\ncreator", "creator\n"] {
+        // Malformed server IDs must never create a tappable Creator row
+        // or an identifier containing a control character. This is distinct
+        // from the existing leading/trailing-whitespace rejection.
+        for invalid in [
+            "", " ", "\t", " creator ", "\ncreator", "creator\n",
+            "cre\nator", "cre\rator", "cre\tator", "cre\u{0000}ator",
+            "cre\u{001F}ator", "cre\u{007F}ator"
+        ] {
             #expect(CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
                 for: invalid) == nil)
         }
