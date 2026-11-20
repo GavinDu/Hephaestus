@@ -84,6 +84,20 @@ enum RecentGames {
     }
 }
 
+/// Only accept a complete, transport-secure public clip endpoint before
+/// handing the URL to AVFoundation. This is NOT creator/moderation approval,
+/// a decoded video frame, or a guarantee about later HTTP redirects.
+enum FeedPreviewTransportPolicy {
+    static func allowedClipURL(from raw: String?) -> URL? {
+        guard let raw, let url = URL(string: raw),
+              url.scheme?.lowercased() == "https",
+              let host = url.host, !host.isEmpty,
+              url.user == nil, url.password == nil
+        else { return nil }
+        return url
+    }
+}
+
 // A single shared queue/player keeps feed scrolling from starting multiple decoders.
 enum FeedPreviewPolicy {
     static func shouldAutoplay(hasClip: Bool, reduceMotion: Bool, lowPowerMode: Bool, constrainedNetwork: Bool, isOnline: Bool = true) -> Bool {
@@ -201,8 +215,7 @@ final class FeedPreviewPlayback: ObservableObject {
         // preview (for example, Reduce Motion or Low Power Mode changes).
         // Always cancel old work when the new request cannot autoplay, or
         // a stale game's clip can start after the user has moved on.
-        guard let urlString, let url = URL(string: urlString),
-              url.scheme == "https" || url.scheme == "http",
+        guard let url = FeedPreviewTransportPolicy.allowedClipURL(from: urlString),
               FeedPreviewPolicy.shouldAutoplay(
                 hasClip: true,
                 reduceMotion: reduceMotion,
