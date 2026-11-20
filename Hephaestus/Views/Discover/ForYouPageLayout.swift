@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// Independently tested creator-game row layout. Keep actual published
@@ -85,7 +86,11 @@ enum ForYouPageLayout {
     /// Use this same policy for both visible identity and Follow actions.
     static func hasNavigableCreator(ownerID: String?) -> Bool {
         guard let ownerID else { return false }
-        return !ownerID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let candidate = ownerID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !candidate.isEmpty &&
+            !candidate.unicodeScalars.contains(where: {
+                CharacterSet.controlCharacters.contains($0)
+            })
     }
 
     /// A stable per-game palette slot for truthful fallback artwork when no
