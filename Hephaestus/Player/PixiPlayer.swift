@@ -334,8 +334,8 @@ struct PlayerFirstSceneRenderSubmissionGate {
 /// At most one candidate scene-submit milestone per current speculative
 /// WK document. Its identity is immutable; neither URL equality alone nor a
 /// JS session ID alone is sufficient to transfer ownership after a retry.
-/// This *pure ledger* has no WebKit listener yet. #351 connects the collector
-/// and #352 consumes on the real attached Coordinator.
+/// The permanent pool-owned schema-v2 WebKit listener records a candidate
+/// under current native document identity (#561); attached consume is #562/#352.
 struct PlayerPrewarmSceneMilestoneLedger {
     struct Identity: Equatable {
         let gameID: String
@@ -417,6 +417,53 @@ struct PlayerPrewarmSceneMilestoneLedger {
     mutating func invalidate() {
         candidate = nil
         hasTransferred = false
+    }
+}
+
+/// The speculative WK callback is not an attached player callback.
+/// Commit both pure gates together: a forged or malformed document metric
+/// cannot poison one state while leaving the other unconsumed.
+enum PlayerPrewarmSceneLedgerCapturePolicy {
+    static func capture(
+        _ body: [String: Any],
+        identity: PlayerPrewarmSceneMilestoneLedger.Identity,
+        currentDocumentNonce: String?,
+        isTrustedMainFrame: Bool,
+        isSameOrigin: Bool,
+        navigationStarted: Bool,
+        credentialScopeCurrent: Bool,
+        isSpeculative: Bool,
+        gate: inout PlayerPrewarmV2SceneMetricGate,
+        ledger: inout PlayerPrewarmSceneMilestoneLedger
+    ) -> Bool {
+        guard identity.isValid,
+              identity.documentNonce == currentDocumentNonce,
+              // Pin the stored candidate to the *exact* admitted session,
+              // not a different valid-but-attacker-selected message session.
+              body["sessionId"] as? String == identity.runtimeSessionID,
+              let sequence = PlayerNativeMetricPayload.strictInt(body["sequence"]),
+              let payload = PlayerNativeMetricPayload.parse(body),
+              case let .firstSceneRenderSubmit(milliseconds) = payload
+        else { return false }
+
+        var nextGate = gate
+        var nextLedger = ledger
+        guard nextGate.record(
+            body, expectedGameID: identity.gameID,
+            currentDocumentNonce: currentDocumentNonce,
+            isTrustedMainFrame: isTrustedMainFrame,
+            isSameOrigin: isSameOrigin,
+            navigationStarted: navigationStarted,
+            credentialScopeCurrent: credentialScopeCurrent
+        ), nextLedger.record(
+            identity: identity, expected: identity,
+            sequence: sequence, milliseconds: milliseconds,
+            isMainFrame: isTrustedMainFrame, isSpeculative: isSpeculative,
+            navigationStarted: navigationStarted
+        ) else { return false }
+        gate = nextGate
+        ledger = nextLedger
+        return true
     }
 }
 
@@ -1501,14 +1548,26 @@ enum PlayerWebViewPool {
             originScheme: source.protocol, originHost: source.host,
             originPort: source.port, backendURL: BackendConfig.baseURL
         )
-        guard trustedProvenance else { return }
-        _ = prewarmSceneGate.record(
-            body, expectedGameID: expectedGameID,
-            currentDocumentNonce: documentEpochGate.currentNonce,
+        guard trustedProvenance,
+              let nonce = documentEpochGate.currentNonce,
+              let fingerprint = sessionFingerprint,
+              let runtimeSessionID = body["sessionId"] as? String else { return }
+        let identity = PlayerPrewarmSceneMilestoneLedger.Identity(
+            gameID: expectedGameID, playerURL: url, documentNonce: nonce,
+            credentialFingerprint: fingerprint, runtimeSessionID: runtimeSessionID
+        )
+        // WebKit frame/origin/URL and native document nonce were checked
+        // before staging. Neither a JS run result nor a navigation finish
+        // may become a scene milestone. A failed validation commits nothing.
+        _ = PlayerPrewarmSceneLedgerCapturePolicy.capture(
+            body, identity: identity, currentDocumentNonce: nonce,
             isTrustedMainFrame: message.frameInfo.isMainFrame,
             isSameOrigin: trustedProvenance,
             navigationStarted: documentEpochGate.navigationStarted,
-            credentialScopeCurrent: sessionFingerprint == credentialFingerprint()
+            credentialScopeCurrent: fingerprint == credentialFingerprint(),
+            isSpeculative: !isAttached ||
+                (transferringLease != nil && transferringLease == attachmentLease),
+            gate: &prewarmSceneGate, ledger: &sceneMilestoneLedger
         )
     }
 
