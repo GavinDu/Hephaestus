@@ -252,6 +252,7 @@ struct DiscoverView: View {
     @State private var feedRequestCoordinator = FeedRequestCoordinator()
     @State private var nextCursor: String?
     @State private var isLoadingMore = false
+    @State private var paginationEpoch = 0
     @State private var loadMoreError: String?
     @State private var commentsGame: FeedGame?
     @State private var detailGame: FeedGame?
@@ -660,6 +661,9 @@ struct DiscoverView: View {
             // the segmented picker. Clear old private feed cards before
             // requesting the newly selected social scope.
             .onChange(of: selectedFeed) { _, _ in
+                // Revoke an in-flight private-scope page before scheduling load().
+                paginationEpoch &+= 1
+                isLoadingMore = false
                 FeedPreviewPlayback.shared.stop()
                 settledForYouGameID = nil
                 games = []
@@ -820,6 +824,8 @@ struct DiscoverView: View {
                 // Viewer-specific social status and pending writes are not
                 // reusable on sign-out or account replacement.
                 socialMutationEpoch &+= 1
+                paginationEpoch &+= 1
+                isLoadingMore = false
                 socialMutationGate.revokeAll()
                 savedGameIDs.removeAll()
                 likedGameIDs.removeAll()
@@ -982,25 +988,48 @@ struct DiscoverView: View {
         guard let cursor = nextCursor, !isLoadingMore else { return }
         let requestedScope = selectedFeed
         let requestedGeneration = feedRequestCoordinator.generation
+        let requestedViewerID = BackendConfig.currentUserID
+        let requestedSessionEpoch = socialMutationEpoch
+        let requestedPaginationEpoch = paginationEpoch
         isLoadingMore = true
         loadMoreError = nil
-        defer { isLoadingMore = false }
+        // An old account/scope page must not cancel the replacement
+        // account's current cursor spinner after its own task retires.
+        defer {
+            if requestedPaginationEpoch == paginationEpoch {
+                isLoadingMore = false
+            }
+        }
         do {
             let page = try await BackendAPI.shared.fetchFeed(scope: requestedScope, cursor: cursor)
-            guard ForYouPageLayout.shouldApplyPaginationResult(
+            guard ForYouPageLayout.shouldApplyViewerPaginationResult(
                 requestedScope: requestedScope, currentScope: selectedFeed,
                 requestedGeneration: requestedGeneration,
-                currentGeneration: feedRequestCoordinator.generation) else { return }
+                currentGeneration: feedRequestCoordinator.generation,
+                requestedViewerID: requestedViewerID,
+                currentViewerID: BackendConfig.currentUserID,
+                requestedSessionEpoch: requestedSessionEpoch,
+                currentSessionEpoch: socialMutationEpoch,
+                requestedPaginationEpoch: requestedPaginationEpoch,
+                currentPaginationEpoch: paginationEpoch
+            ) else { return }
             var seen = Set(games.map(\.id))
             games.append(contentsOf: page.games.filter { seen.insert($0.id).inserted })
             nextCursor = page.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
         } catch {
-            // An old Following/Friends page may fail after switching tabs.
-            // Never show its private-scope error in a different feed.
-            if ForYouPageLayout.shouldApplyPaginationResult(
+            // Never expose the old viewer's private pagination error,
+            // including before their replacement root load() begins.
+            if ForYouPageLayout.shouldApplyViewerPaginationResult(
                 requestedScope: requestedScope, currentScope: selectedFeed,
                 requestedGeneration: requestedGeneration,
-                currentGeneration: feedRequestCoordinator.generation) {
+                currentGeneration: feedRequestCoordinator.generation,
+                requestedViewerID: requestedViewerID,
+                currentViewerID: BackendConfig.currentUserID,
+                requestedSessionEpoch: requestedSessionEpoch,
+                currentSessionEpoch: socialMutationEpoch,
+                requestedPaginationEpoch: requestedPaginationEpoch,
+                currentPaginationEpoch: paginationEpoch
+            ) {
                 loadMoreError = FeedErrorPresentation.paginationMessage(for: error)
             }
         }
@@ -1161,6 +1190,11 @@ struct DiscoverView: View {
     }
 
     private func load() async {
+        // A manual refresh/retry is a new root feed lease; retire any
+        // older pagination before the new HTTP request begins.
+        paginationEpoch &+= 1
+        isLoadingMore = false
+        loadMoreError = nil
         let requestedScope = selectedFeed
         // Native tests can stall only the HTTP transport, never inject a
         // success response, game card, creator, screenshot or media asset.
