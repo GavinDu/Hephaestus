@@ -15,12 +15,25 @@ struct ArcadePulseProfileAppleSignInLayoutTests {
         #expect(ProfileAppleSignInLayout.buttonHeight(for: .xxxLarge) == 56)
     }
 
+    @Test func realIPhoneTabClearanceDoesNotPolluteCompactIPadStageManager() {
+        #expect(ProfileBottomInsetPolicy.shouldReserve(
+            isPhone: true, isCompactWidth: true))
+        #expect(!ProfileBottomInsetPolicy.shouldReserve(
+            isPhone: true, isCompactWidth: false))
+        #expect(!ProfileBottomInsetPolicy.shouldReserve(
+            isPhone: false, isCompactWidth: true))
+        #expect(!ProfileBottomInsetPolicy.shouldReserve(
+            isPhone: false, isCompactWidth: false))
+        #expect(ProfileBottomInsetPolicy.compactPhoneBottomInset >= 72)
+    }
+
     @Test func accessibilitySizesAllKeepRealAppleControlTallEnough() {
         for size in [
             DynamicTypeSize.accessibility1,
             .accessibility2, .accessibility3, .accessibility4, .accessibility5
         ] {
-            #expect(ProfileAppleSignInLayout.buttonHeight(for: size) == 64)
+            #expect(ProfileAppleSignInLayout.buttonHeight(for: size) == 65)
+            #expect(ProfileAppleSignInLayout.buttonHeight(for: size) >= 64)
         }
     }
 }
