@@ -937,6 +937,35 @@ struct HephaestusTests {
     }
 }
 
+@Test func playerLoadLocalLogNeverContainsGameIdentityOrUntrustedNSError() {
+    let privateID = "private-owner-game-id-sensitive"
+    let privateURL = "https://private.example.test/player?game=\(privateID)&token=secret"
+    let hostileMetadata: [String: Any] = [
+        NSLocalizedDescriptionKey: "Backend: \(privateID) / \(privateURL)",
+        NSLocalizedFailureReasonErrorKey: "Authorization bearer token secret",
+        NSURLErrorFailingURLStringErrorKey: privateURL
+    ]
+    let unknown = NSError(domain: "private-domain-\(privateID)", code: 91, userInfo: hostileMetadata)
+    let timeout = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut, userInfo: hostileMetadata)
+    let denied = NSError(domain: PlayerLoadFailure.httpErrorDomain, code: 403, userInfo: hostileMetadata)
+    let messages = [
+        PlayerLoadFailure.safeLocalLogMessage(for: unknown),
+        PlayerLoadFailure.safeLocalLogMessage(for: timeout),
+        PlayerLoadFailure.safeLocalLogMessage(for: denied)
+    ]
+    #expect(messages[0] == "player load failed: other_error category=unknown")
+    #expect(messages[1] == "player load failed: url_error_code=\(NSURLErrorTimedOut) category=network")
+    #expect(messages[2] == "player load failed: http_status=403 category=accessDenied")
+    for message in messages {
+        #expect(!message.contains(privateID))
+        #expect(!message.contains(privateURL))
+        #expect(!message.contains("private-domain"))
+        #expect(!message.contains("secret"))
+        #expect(!message.contains("Backend"))
+        #expect(message.count < 100)
+    }
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
