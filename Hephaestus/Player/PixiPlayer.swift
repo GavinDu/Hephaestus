@@ -35,6 +35,39 @@ struct PixiPlayerRequest: Identifiable {
     var posterURL: String? = nil
 }
 
+/// Host-side admission for feed-provided hold-poster URLs, before AsyncImage.
+/// This is transport/scheme safety, not proof that an image's content,
+/// moderation verdict, origin redirect or decoded-pixel budget is trusted.
+enum PlayerHoldPosterURLPolicy {
+    static func admittedURL(_ raw: String?, backendOrigin: URL) -> URL? {
+        guard let raw, (1...2048).contains(raw.utf8.prefix(2049).count) else {
+            return nil
+        }
+        for scalar in raw.unicodeScalars {
+            if CharacterSet.controlCharacters.contains(scalar) ||
+               CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                return nil
+            }
+        }
+        guard let components = URLComponents(string: raw),
+              components.fragment == nil,
+              components.user == nil, components.password == nil,
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host, !host.isEmpty,
+              let url = components.url else { return nil }
+        if scheme == "https" { return url }
+        // Local/development HTTP is permitted only for the configured
+        // backend origin. Never load unrelated cleartext remote posters.
+        guard scheme == "http",
+              backendOrigin.scheme?.lowercased() == "http",
+              host.lowercased() == backendOrigin.host?.lowercased(),
+              (components.port ?? 80) == (backendOrigin.port ?? 80) else {
+            return nil
+        }
+        return url
+    }
+}
+
 // MARK: - Quality (performance control)
 
 /// The family's quality preference for the player. `auto` resolves at
@@ -1754,12 +1787,18 @@ struct PixiPlayerSheet: View {
         return components?.url ?? BackendConfig.baseURL
     }
 
+    private var admittedHoldPosterURL: URL? {
+        PlayerHoldPosterURLPolicy.admittedURL(
+            holdPosterURL, backendOrigin: BackendConfig.baseURL
+        )
+    }
+
     /// #58 hold backdrop, extracted so the body expression stays
     /// small enough to type-check. A failed poster load falls back
     /// to black, never to a white flash.
     private var holdBackdrop: some View {
         Group {
-            if let holdPosterURL, let holdURL = URL(string: holdPosterURL) {
+            if let holdURL = admittedHoldPosterURL {
                 AsyncImage(url: holdURL) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFill()
@@ -1830,7 +1869,7 @@ struct PixiPlayerSheet: View {
                 PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "TapToNavReady",
                                        message: "tap-to-nav-ready in \(ms)ms prewarmHit=\(prewarmHit) quality=\(effectiveQuality)")
             }
-            if holdPosterURL != nil, holdVisible {
+            if admittedHoldPosterURL != nil, holdVisible {
                 if reduceMotion {
                     holdOpacity = 0
                     holdVisible = false
@@ -1970,12 +2009,12 @@ struct PixiPlayerSheet: View {
                 // #58 hold frame: the poster covers the web view until
                 // the first navigation finish fades it out. A missing
                 // poster URL means no hold at all.
-                if holdPosterURL != nil, holdVisible {
+                if admittedHoldPosterURL != nil, holdVisible {
                     holdBackdrop
                 }
 
                 if isLoading && loadError == nil, !prewarmHit {
-                    if holdPosterURL != nil, holdVisible {
+                    if admittedHoldPosterURL != nil, holdVisible {
                         holdLoadingOverlay
                     } else {
                     PlayerStateCard {
