@@ -3642,3 +3642,31 @@ struct HephaestusTests {
     }
 }
 
+@MainActor @Test func discoverFeedStartCountOnlyAdvancesOnActualBeginAcross160Timeouts() async throws {
+    let coordinator = FeedRequestCoordinator()
+    #expect(coordinator.startedRequestCount == 0)
+    // A stalled request's watchdog revokes generation, sometimes more than
+    // once, but must NEVER create the evidence of a second actual transport.
+    // Exercise repeated cancellation and retry without relying on loading UI.
+    for iteration in 1...160 {
+        let request = coordinator.begin {
+            try await Task.sleep(for: .seconds(120))
+            return try JSONDecoder().decode(
+                FeedResponse.self, from: Data(#"{"games":[]}"#.utf8))
+        }
+        #expect(coordinator.startedRequestCount == iteration)
+        #expect(coordinator.isCurrent(request.generation))
+        #expect(coordinator.expireIfCurrent(request.generation))
+        #expect(!coordinator.isCurrent(request.generation))
+        #expect(coordinator.startedRequestCount == iteration)
+        #expect(!coordinator.expireIfCurrent(request.generation))
+        coordinator.finishIfCurrent(request.generation)
+        #expect(coordinator.startedRequestCount == iteration)
+        do {
+            _ = try await request.request.value
+            Issue.record("Expired request unexpectedly produced a playable feed.")
+        } catch {
+            #expect(error is CancellationError)
+        }
+    }
+}
