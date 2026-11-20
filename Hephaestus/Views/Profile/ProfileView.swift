@@ -7,9 +7,17 @@ import UIKit
 /// Do not substitute a fake Apple sign-in control or change its identity scope.
 enum ProfileAppleSignInLayout {
     static func buttonHeight(for size: DynamicTypeSize) -> CGFloat {
-        if size.isAccessibilitySize { return 64 }
+        if size.isAccessibilitySize { return 65 }
         if size >= .xxLarge { return 56 }
         return 44
+    }
+}
+
+enum ProfileBottomInsetPolicy {
+    static let compactPhoneBottomInset: CGFloat = 72
+
+    static func shouldReserve(isPhone: Bool, isCompactWidth: Bool) -> Bool {
+        isPhone && isCompactWidth
     }
 }
 
@@ -68,6 +76,7 @@ enum ProfileErrorPresentation {
 
 struct ProfileView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var backendOK = false
     @State private var checked = false
     @State private var logEntries = DevLog.shared.count
@@ -76,6 +85,15 @@ struct ProfileView: View {
     @State private var tokenDraft = BackendConfig.loadSessionToken() ?? ""
     @State private var sessionMessage: String?
     @State private var isDeleteAccountPresented = false
+
+    private var connectionStatus: some View {
+        Label(BackendConfig.currentUserID.isEmpty ? "Not connected" : "Connected",
+              systemImage: BackendConfig.currentUserID.isEmpty
+                  ? "person.crop.circle.badge.xmark" : "checkmark.shield.fill")
+            .font(.subheadline)
+            .foregroundStyle(BackendConfig.currentUserID.isEmpty ? Color.secondary : Color.green)
+            .fixedSize(horizontal: false, vertical: true)
+    }
 
     private func signInWithAppleToken(_ identityToken: String) async {
         do {
@@ -110,14 +128,27 @@ struct ProfileView: View {
         NavigationStack {
             List {
                 Section("Account") {
-                    HStack {
-                        Text("Session")
-                        Spacer()
-                        Label(BackendConfig.currentUserID.isEmpty ? "Not connected" : "Connected",
-                              systemImage: BackendConfig.currentUserID.isEmpty ? "person.crop.circle.badge.xmark" : "checkmark.shield.fill")
-                            .font(.subheadline)
-                            .foregroundStyle(BackendConfig.currentUserID.isEmpty ? Color.secondary : Color.green)
+                    Group {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            // Never split Session mid-word beside its status.
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Session")
+                                    .font(.headline)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                connectionStatus
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            HStack(spacing: 8) {
+                                Text("Session")
+                                    .fixedSize(horizontal: true, vertical: false)
+                                Spacer(minLength: 8)
+                                connectionStatus
+                            }
+                        }
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("profile.account.session-row")
                     if BackendConfig.currentUserID.isEmpty {
                         SignInWithAppleButton(.signIn) { request in
                             // Identity only: no name or email scope is requested.
@@ -280,6 +311,14 @@ struct ProfileView: View {
                     Text("Server-wide incident aggregates are restricted to operators and are not fetched by the app. If you encounter a player issue, copy or share the session log above only after removing private information.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if ProfileBottomInsetPolicy.shouldReserve(
+                    isPhone: UIDevice.current.userInterfaceIdiom == .phone,
+                    isCompactWidth: horizontalSizeClass == .compact
+                ) {
+                    Color.clear.frame(height: ProfileBottomInsetPolicy.compactPhoneBottomInset)
                 }
             }
             .sheet(isPresented: $isModerationAppealPresented) {

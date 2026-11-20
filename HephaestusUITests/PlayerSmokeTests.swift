@@ -1961,6 +1961,96 @@ final class PlayerSmokeTests: XCTestCase {
         add(portrait)
     }
 
+    /// Real maximum Dynamic Type Profile layout regression: no mid-word
+    /// Session break and no Account explanation hidden by the floating tab bar.
+    /// No Apple authentication or fabricated session is performed.
+    @MainActor
+    func testArcadePulseIPhoneProfileSessionReadabilityAtAccessibility5() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("Compact iPhone Profile layout only.")
+        }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+        let profile = app.tabBars.buttons["Profile"].firstMatch
+        XCTAssertTrue(profile.waitForExistence(timeout: 15) && profile.isHittable)
+        profile.tap()
+
+        let session = app.descendants(matching: .any)["profile.account.session-row"].firstMatch
+        XCTAssertTrue(session.waitForExistence(timeout: 15),
+                      "Actual Account status must be accessible at Accessibility5.")
+        XCTAssertTrue(session.label.contains("Session"),
+                      "Do not split the full Session word across constrained HStack columns.")
+        XCTAssertTrue(session.label.contains("Not connected") ||
+                      session.label.contains("Connected"),
+                      "Keep the truthful native backend identity state readable.")
+        XCTAssertFalse(session.label.contains("Ses-"),
+                       "Actual Accessibility5 status label may not break mid-word.")
+
+        let apple = app.buttons["Sign in with Apple"].firstMatch
+        XCTAssertTrue(apple.exists && apple.isHittable,
+                      "Preserve the genuine Apple authentication action.")
+        XCTAssertGreaterThanOrEqual(apple.frame.height, 64)
+        let original = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        original.name = "arcade-pulse-iphone-profile-a5-full-session-portrait"
+        original.lifetime = .keepAlways
+        add(original)
+
+        let explanation = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@",
+                        "Sign in with Apple to publish")).firstMatch
+        XCTAssertTrue(explanation.exists, "Privacy explanation cannot be dropped.")
+        let scroller = app.collectionViews.firstMatch.exists
+            ? app.collectionViews.firstMatch : app.tables.firstMatch
+        let tabs = app.tabBars.firstMatch
+        for _ in 0..<8 where explanation.exists &&
+                (!explanation.isHittable || explanation.frame.midY >= tabs.frame.minY) {
+            XCTAssertTrue(scroller.exists, "Scroll the real Profile list, not the app root.")
+            scroller.swipeUp()
+        }
+        XCTAssertTrue(explanation.isHittable,
+                      "Account explanation must be physically reachable after scrolling.")
+        XCTAssertLessThan(explanation.frame.midY, tabs.frame.minY,
+                          "Reachable privacy copy must not sit behind the floating tab bar.")
+        let scrolled = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        scrolled.name = "arcade-pulse-iphone-profile-a5-explanation-above-tabs"
+        scrolled.lifetime = .keepAlways
+        add(scrolled)
+
+        // The compact landscape viewport is much shorter than portrait.
+        // Move the real Profile List, never the app root or floating tabs.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let deadline = Date().addingTimeInterval(12)
+        while window.frame.width <= window.frame.height && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "Original landscape Profile screenshots need a truly wide app window.")
+        XCTAssertTrue(scroller.exists)
+        for _ in 0..<10 where !session.exists || !session.isHittable {
+            scroller.swipeDown()
+        }
+        XCTAssertTrue(session.exists && session.label.contains("Session"))
+        XCTAssertFalse(session.label.contains("Ses-"))
+        for _ in 0..<10 where apple.exists && !apple.isHittable {
+            scroller.swipeUp()
+        }
+        XCTAssertTrue(apple.exists && apple.isHittable,
+                      "Genuine Apple sign-in must stay reachable in compact landscape.")
+        XCTAssertGreaterThanOrEqual(apple.frame.height, 64)
+        let wide = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        wide.name = "arcade-pulse-iphone-profile-a5-full-session-landscape"
+        wide.lifetime = .keepAlways
+        add(wide)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// Native Accessibility5 Apple sign-in geometry on compact iPhone.
     /// No actual authentication is performed or simulated.
     @MainActor
