@@ -763,7 +763,7 @@ struct DiscoverView: View {
                                     isSaved: savedGameIDs.contains(game.id),
                                     isLiked: likedGameIDs.contains(game.id),
                                     isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
-                                    canFollowCreator: ForYouPageLayout.canOfferCreatorBlock(ownerID: game.ownerID, viewerID: BackendConfig.currentUserID),
+                                    canFollowCreator: ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) && game.ownerID != BackendConfig.currentUserID,
                                     onPlay: { play(game) },
                                     onToggleSaved: { toggleSaved(game) },
                                     onToggleLike: { toggleLike(game) },
@@ -1387,6 +1387,13 @@ private struct ForYouGamePage: View {
     let onOpenDetails: () -> Void
     let onImpression: () -> Void
 
+    private var canBlockCreator: Bool {
+        ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: game.ownerID,
+            viewerID: BackendConfig.currentUserID
+        )
+    }
+
     private var shareURL: URL {
         var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "game", value: game.id)]
@@ -1570,7 +1577,7 @@ private struct ForYouGamePage: View {
             Button("Game details", systemImage: "info.circle", action: onOpenDetails)
             Button("Report game", role: .destructive, action: onReport)
             Button("Not interested", action: onNotInterested)
-            if ForYouPageLayout.canOfferCreatorBlock(ownerID: game.ownerID, viewerID: BackendConfig.currentUserID) {
+            if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) && game.ownerID != BackendConfig.currentUserID {
                 Button("Block creator", role: .destructive, action: onBlockCreator)
             }
         } label: {
@@ -1638,7 +1645,7 @@ private struct ForYouGamePage: View {
                         showsAccessibleActionsSheet = false
                         onNotInterested()
                     }
-                    if ForYouPageLayout.canOfferCreatorBlock(ownerID: game.ownerID, viewerID: BackendConfig.currentUserID) {
+                    if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) && game.ownerID != BackendConfig.currentUserID {
                         Button("Block creator", role: .destructive) {
                             showsAccessibleActionsSheet = false
                             onBlockCreator()
@@ -2136,7 +2143,7 @@ private struct ForYouPagerView: View {
             isSaved: savedGameIDs.contains(game.id),
             isLiked: likedGameIDs.contains(game.id),
             isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,
-            canFollowCreator: ForYouPageLayout.canOfferCreatorBlock(ownerID: game.ownerID, viewerID: BackendConfig.currentUserID),
+            canFollowCreator: ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) && game.ownerID != BackendConfig.currentUserID,
             isSavePending: pendingSocialMutations.contains(.init(kind: .save, id: game.id)),
             isLikePending: pendingSocialMutations.contains(.init(kind: .like, id: game.id)),
             isFollowPending: game.ownerID.map {
