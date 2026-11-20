@@ -93,6 +93,17 @@ enum ForYouPageLayout {
             })
     }
 
+    /// A creator must never be offered a destructive Block action against
+    /// their own authenticated identity. Backend authorization is still
+    /// authoritative, but UI, host dispatch and async write all fail closed.
+    /// Preserve the existing guest presentation policy (server gates writes).
+    static func canOfferCreatorBlock(ownerID: String?, viewerID: String) -> Bool {
+        guard hasNavigableCreator(ownerID: ownerID), let ownerID else { return false }
+        let viewer = viewerID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return viewer.isEmpty ||
+            ownerID.trimmingCharacters(in: .whitespacesAndNewlines) != viewer
+    }
+
     /// A stable per-game palette slot for truthful fallback artwork when no
     /// approved poster/clip exists. Hash through a larger prime first: reducing
     /// modulo a five-color palette inside the loop makes 31 ≡ 1 (mod 5)
