@@ -2106,6 +2106,10 @@ struct PixiPlayerSheet: View {
                     .accessibilityIdentifier("player.done")
                     .accessibilityHint("Close this game and return to the feed")
                     Spacer(minLength: 0)
+                    // Do not offer a per-game URL for a rejected identity.
+                    // A malformed ID must not leak through the native share
+                    // sheet after the player refused to launch it.
+                    if PlayerPublishedGameIDPolicy.valid(gameID) {
                     // One interactive host for both native player actions.
                     // Avoid the UINavigationBar's measured 36pt ShareLink
                     // hitbox without inventing a custom share controller.
@@ -2126,6 +2130,7 @@ struct PixiPlayerSheet: View {
                     .simultaneousGesture(TapGesture().onEnded {
                         Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "share") }
                     })
+                    }
                 }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 56)
