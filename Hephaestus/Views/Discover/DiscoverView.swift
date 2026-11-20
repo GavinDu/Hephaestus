@@ -1863,11 +1863,13 @@ private struct ForYouGamePage: View {
                     .lineLimit(5)
             }
 
-            if let topics = game.topics, !topics.isEmpty {
-                Text(topics.prefix(4).map { "#\($0)" }.joined(separator: "  "))
+            if let topics = GameMetadataTopicPolicy.presentation(game.topics, maxCount: 4) {
+                Text(topics.visual)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(ArcadePulseTheme.neonMagenta)
                     .lineLimit(3)
+                    .accessibilityLabel(topics.spoken)
+                    .accessibilityIdentifier("feed.spotlight.topics")
             }
 
             Divider().overlay(ArcadePulseTheme.subtleBorder)
@@ -2374,11 +2376,13 @@ private struct ArcadePulseGameDetailsSheet: View {
                     .foregroundStyle(ArcadePulseTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let topics = game.topics, !topics.isEmpty {
-                Text(topics.prefix(5).map { "#\($0)" }.joined(separator: "  "))
+            if let topics = GameMetadataTopicPolicy.presentation(game.topics, maxCount: 5) {
+                Text(topics.visual)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(ArcadePulseTheme.neonMagenta)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(topics.spoken)
+                    .accessibilityIdentifier("game.details.topics")
             }
             VStack(alignment: .leading, spacing: 10) {
                 if let orientation = game.orientationLabel {
