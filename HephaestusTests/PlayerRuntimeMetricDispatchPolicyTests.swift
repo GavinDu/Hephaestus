@@ -26,7 +26,7 @@ struct PlayerRuntimeMetricDispatchPolicyTests {
         #expect(!mayStart(expected: "old_session"))
         #expect(!mayStart(current: "successor_session"))
         #expect(!mayStart(expected: "", current: ""))
-        #expect(!mayStart(expected: ".", current: "."))
+        #expect(!mayStart(expected: "bad session", current: "bad session"))
         #expect(!mayStart(expected: "too long \(String(repeating: "x", count: 129))",
                           current: "too long \(String(repeating: "x", count: 129))"))
         #expect(!mayStart(expected: "owner \n token", current: "owner \n token"))
