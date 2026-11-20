@@ -254,6 +254,26 @@ enum ForYouPageLayout {
         requestedScope == currentScope && requestedGeneration == currentGeneration
     }
 
+    /// A real private Following/Friends page belongs to a particular
+    /// authenticated viewer/session and pagination lease, not just a scope.
+    /// Session changes revoke the lease synchronously before the new feed
+    /// request has a chance to advance the normal request generation.
+    static func shouldApplyViewerPaginationResult(
+        requestedScope: SocialFeedScope, currentScope: SocialFeedScope,
+        requestedGeneration: Int, currentGeneration: Int,
+        requestedViewerID: String, currentViewerID: String,
+        requestedSessionEpoch: Int, currentSessionEpoch: Int,
+        requestedPaginationEpoch: Int, currentPaginationEpoch: Int
+    ) -> Bool {
+        shouldApplyPaginationResult(
+            requestedScope: requestedScope, currentScope: currentScope,
+            requestedGeneration: requestedGeneration, currentGeneration: currentGeneration
+        ) &&
+            requestedViewerID == currentViewerID &&
+            requestedSessionEpoch == currentSessionEpoch &&
+            requestedPaginationEpoch == currentPaginationEpoch
+    }
+
     // Play Next stays within its originating feed; an existing game should
     // not be replaced by an unrelated For You fetch after finishing a round.
     // Clear any search filter so the target card can become the settled page.
