@@ -2536,8 +2536,11 @@ final class PlayerSmokeTests: XCTestCase {
         beforeCommentsTap.name = "arcade-pulse-real-grid-before-comments-tap"
         beforeCommentsTap.lifetime = .keepAlways
         add(beforeCommentsTap)
+        let discoverTabForDiagnostics = app.tabBars.buttons["Discover"].firstMatch
+        let discoverTabState = discoverTabForDiagnostics.exists
+            ? String(discoverTabForDiagnostics.isSelected) : "not-present"
         print("UI_GRID_COMMENTS_BEFORE_TAP hittable=\(comments.isHittable) rect=\(comments.frame) " +
-              "selectedDiscover=\(app.tabBars.buttons["Discover"].firstMatch.isSelected)")
+              "selectedDiscover=\(discoverTabState)")
         comments.tap()
         // The raw CI screenshot showed the REAL game-bound Comments sheet,
         // but SwiftUI combined its "COMMENTS ON" header and game title into
@@ -2556,7 +2559,7 @@ final class PlayerSmokeTests: XCTestCase {
                   "grid_action_exists=\(comments.exists) " +
                   "grid_action_hittable=\(comments.exists && comments.isHittable) " +
                   "done_present=\(app.buttons["Done"].firstMatch.exists) " +
-                  "discover_selected=\(app.tabBars.buttons["Discover"].firstMatch.isSelected)")
+                  "discover_selected=\(discoverTabForDiagnostics.exists ? String(discoverTabForDiagnostics.isSelected) : "not-present")")
         }
         XCTAssertTrue(mounted,
                       "The genuine Comments header must mount after a real grid Comments tap; compare raw before/after frames and privacy-safe tap/selection/mount logs.")
