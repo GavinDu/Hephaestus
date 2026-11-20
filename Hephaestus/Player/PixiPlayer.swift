@@ -467,6 +467,38 @@ enum PlayerPrewarmSceneLedgerCapturePolicy {
     }
 }
 
+/// Native-only prewarm-to-attached identity gate. An old Coordinator
+/// cannot consume a successor's candidate by guessing the URL or run ID;
+/// every field is compared with current pool, nonce and credential facts.
+enum PlayerPrewarmAttachedSceneIdentityPolicy {
+    static func matches(
+        _ submission: PlayerPrewarmSceneMilestoneLedger.Submission,
+        currentURL: URL?,
+        currentDocumentNonce: String?,
+        currentCredentialFingerprint: String?,
+        expectedGameID: String,
+        offeredLease: UInt64,
+        currentLease: UInt64,
+        isCurrentPooledView: Bool,
+        isAttached: Bool
+    ) -> Bool {
+        let identity = submission.identity
+        return identity.isValid &&
+            currentURL == identity.playerURL &&
+            currentDocumentNonce == identity.documentNonce &&
+            currentCredentialFingerprint == identity.credentialFingerprint &&
+            expectedGameID == identity.gameID &&
+            PlayerNativeRuntimeIdentifierPolicy.validSessionID(identity.runtimeSessionID) &&
+            (0...100_000).contains(submission.sequence) &&
+            (0...3_600_000).contains(submission.milliseconds) &&
+            PlayerAttachmentLeasePolicy.mayRecycle(
+                isCurrentPooledView: isCurrentPooledView,
+                isAttached: isAttached,
+                expectedLease: offeredLease, currentLease: currentLease
+            )
+    }
+}
+
 /// One live, cryptographically unpredictable challenge per attempted main-frame
 /// WK document. The pool (not a JS session ID or SwiftUI Coordinator) owns it.
 /// No historical-ID list is needed: late messages must match this exact nonce.
@@ -1496,6 +1528,46 @@ enum PlayerWebViewPool {
         return true
     }
 
+    /// First OFFER the native-authenticated candidate without burning it.
+    /// The Coordinator must accept its strict local reducer gates before it
+    /// requests one committed transfer under the very same current lease.
+    /// Missing/stale candidates never synthesize a first frame.
+    static func offerAttachedPrewarmScene(
+        webView: WKWebView, url: URL, gameID: String, lease: UInt64
+    ) -> PlayerPrewarmSceneMilestoneLedger.Submission? {
+        ensureCurrentCredentialScope()
+        guard attachedReceiverLease == lease,
+              ownsAttachedNavigation(webView, url: url, lease: lease),
+              let candidate = sceneMilestoneLedger.candidate,
+              PlayerPrewarmAttachedSceneIdentityPolicy.matches(
+                  candidate, currentURL: currentURL,
+                  currentDocumentNonce: documentEpochGate.currentNonce,
+                  currentCredentialFingerprint: sessionFingerprint,
+                  expectedGameID: gameID, offeredLease: lease,
+                  currentLease: attachmentLease,
+                  isCurrentPooledView: pooledView === webView,
+                  isAttached: isAttached
+              ) else { return nil }
+        return candidate
+    }
+
+    /// Called synchronously after the Coordinator has staged all reducer
+    /// checks. Revalidate the live pool and exact offered candidate before
+    /// burning the one-slot ledger; never consume a newer document's scene.
+    static func commitAttachedPrewarmScene(
+        _ offered: PlayerPrewarmSceneMilestoneLedger.Submission,
+        webView: WKWebView, url: URL, gameID: String, lease: UInt64
+    ) -> Bool {
+        guard let current = offerAttachedPrewarmScene(
+            webView: webView, url: url, gameID: gameID, lease: lease
+        ), current == offered else { return false }
+        return sceneMilestoneLedger.consume(
+            expected: offered.identity,
+            offeredLease: lease, currentLease: attachmentLease,
+            isCurrentPooledView: pooledView === webView, isAttached: isAttached
+        ) == offered
+    }
+
     /// Reject all callbacks from retired views/credential epochs. Untrusted
     /// attached messages still run through the original Coordinator's full
     /// native main-frame/origin/nonce/session/game/typed-metric admission.
@@ -2479,6 +2551,14 @@ private struct PlayerWebView: UIViewRepresentable {
         }
         webView.navigationDelegate = context.coordinator
         context.coordinator.observeProgress(of: webView)
+        // Prewarm can submit a genuine v2 scene before SwiftUI attaches.
+        // Only this acknowledged current lease may transfer its one slot.
+        // Do not use didFinish as a substitute when no candidate exists.
+        if let scene = PlayerWebViewPool.offerAttachedPrewarmScene(
+            webView: webView, url: url, gameID: gameID, lease: handoff.lease
+        ) {
+            context.coordinator.acceptTransferredPrewarmScene(scene)
+        }
         if handoff.shouldLoad {
             webView.load(URLRequest(url: url))
         } else if handoff.didFinish {
@@ -2670,6 +2750,70 @@ private struct PlayerWebView: UIViewRepresentable {
             }
         }
 
+        /// This is not a JS callback. The pooled native listener already
+        /// verified the original WebKit frame, current nonce/schema, URL
+        /// and credential epoch, but has NOT consumed its one-slot record.
+        /// Recheck Coordinator ownership and stage ALL reducers first; only
+        /// then commit the exact offered candidate under its current lease.
+        func acceptTransferredPrewarmScene(
+            _ scene: PlayerPrewarmSceneMilestoneLedger.Submission
+        ) {
+            let identity = scene.identity
+            guard acceptsCurrentHostCallbacks,
+                  identity.gameID == expectedGameID,
+                  identity.playerURL == expectedURL,
+                  let view = attachedWebView,
+                  PlayerWebViewPool.acceptsCurrentDocumentNonce(
+                      view, nonce: identity.documentNonce
+                  ),
+                  nativeBridgeVersionGate.allows(2),
+                  PlayerNativeRuntimeIdentifierPolicy.validSessionID(
+                      identity.runtimeSessionID
+                  ) else { return }
+
+            var nextMetric = metricSequenceGate
+            var nextScene = firstSceneRenderSubmissionGate
+            var nextLaunch = launchLifecycle
+            var nextSession = runtimeSessionGate
+            guard nextMetric.accept(
+                    metric: "first_scene_render_submit", sequence: scene.sequence
+                  ),
+                  nextScene.accept(milliseconds: scene.milliseconds),
+                  nextLaunch.sceneSubmitted(),
+                  nextSession.bind(identity.runtimeSessionID),
+                  // An old Coordinator or altered native session cannot burn
+                  // the valid one-slot scene belonging to a newer owner.
+                  PlayerWebViewPool.commitAttachedPrewarmScene(
+                      scene, webView: view, url: expectedURL,
+                      gameID: expectedGameID, lease: attachmentLease
+                  )
+            else { return }
+            metricSequenceGate = nextMetric
+            firstSceneRenderSubmissionGate = nextScene
+            launchLifecycle = nextLaunch
+            runtimeSessionGate = nextSession
+            nativeBridgeVersionGate.didAccept(2)
+            reportAcceptedFirstSceneSubmission(
+                milliseconds: scene.milliseconds,
+                runtimeSessionID: identity.runtimeSessionID
+            )
+        }
+
+        private func reportAcceptedFirstSceneSubmission(
+            milliseconds: Int, runtimeSessionID: String
+        ) {
+            PlayerTelemetry.report(
+                gameID: expectedGameID, kind: "perf",
+                name: "FirstSceneRenderSubmitted",
+                message: "renderer-submitted-ms=\(milliseconds); not display-presented or interactive"
+            )
+            Task { @MainActor [weak self] in
+                guard let self, self.acceptsCurrentHostCallbacks,
+                      self.runtimeSessionID == runtimeSessionID else { return }
+                self.onFirstSceneRenderSubmit(milliseconds)
+            }
+        }
+
         private func handleMetric(_ body: [String: Any], runtimeSessionID: String) {
             // Reject malformed/extra fields *before* advancing the per-kind
             // high-water mark. Otherwise a bad sequence=100000 can suppress
@@ -2682,22 +2826,11 @@ private struct PlayerWebView: UIViewRepresentable {
             case .firstSceneRenderSubmit(let ms):
                 guard firstSceneRenderSubmissionGate.accept(milliseconds: ms),
                       launchLifecycle.sceneSubmitted() else { return }
-                // This metric may be lost when a pooled WebView was already
-                // warmed before the Coordinator attached. The backend also
-                // captures the milestone independently for that case.
-                PlayerTelemetry.report(
-                    gameID: expectedGameID, kind: "perf",
-                    name: "FirstSceneRenderSubmitted",
-                    message: "renderer-submitted-ms=\(ms); not display-presented or interactive"
+                // Both attached and prewarm-transfer paths report the same
+                // bounded renderer-submission milestone, never GPU-present.
+                reportAcceptedFirstSceneSubmission(
+                    milliseconds: ms, runtimeSessionID: runtimeSessionID
                 )
-                // All strict main-frame/origin/nonce/typed metric/session
-                // gates have accepted this one-shot renderer milestone.
-                // Recheck attachment lease and session after the actor hop.
-                Task { @MainActor [weak self] in
-                    guard let self, self.acceptsCurrentHostCallbacks,
-                          self.runtimeSessionID == runtimeSessionID else { return }
-                    self.onFirstSceneRenderSubmit(ms)
-                }
             case .firstInput(let ms):
                 guard launchLifecycle.firstInput(milliseconds: ms) else { return }
                 Task { @MainActor [weak self] in
