@@ -36,6 +36,27 @@ enum FeedPreferenceTopicPolicy {
     }
 }
 
+/// The immersive For You overlay and VoiceOver announcement must use the
+/// same three validated, backend-owned topic labels as the public grid.
+/// No fabricated labels and no malformed value may consume a visible slot.
+enum ForYouSpotlightTopicPolicy {
+    struct Presentation: Equatable {
+        let visual: String
+        let spoken: String
+    }
+
+    static func presentation(_ rawTopics: [String]?) -> Presentation? {
+        // Reuse the existing tested public-card sanitizer rather than subtly
+        // diverging on Unicode, control characters or first-three ordering.
+        let labels = GameFeedCardTopicPolicy.publicLabels(rawTopics)
+        guard !labels.isEmpty else { return nil }
+        return Presentation(
+            visual: labels.map { "#\($0)" }.joined(separator: "  "),
+            spoken: "Topics: " + labels.joined(separator: ", ")
+        )
+    }
+}
+
 // MARK: - Discover
 
 private struct PlayerResultPresentation: Identifiable {
@@ -1746,12 +1767,12 @@ private struct ForYouGamePage: View {
                     .foregroundStyle(.white.opacity(0.94))
                     .lineLimit(2)
             }
-            if !isCompact, let topics = game.topics, !topics.isEmpty {
-                Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
+            if !isCompact, let topics = ForYouSpotlightTopicPolicy.presentation(game.topics) {
+                Text(topics.visual)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
-                    .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
+                    .accessibilityLabel(topics.spoken)
             }
             if !isCompact, let expression = game.playableExpression, expression.source_visibility == "public" {
                 Button { showsExpressionDetails = true } label: {
