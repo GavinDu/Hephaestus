@@ -1967,6 +1967,7 @@ struct PixiPlayerSheet: View {
                             Text("Couldn't load the player")
                                 .font(.headline)
                             Text(loadError)
+                                .accessibilityIdentifier("player.error.message")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)

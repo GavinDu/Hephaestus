@@ -13,6 +13,23 @@
 import XCTest
 import UIKit
 
+/// Fixed, privacy-safe reason codes for *actual* native player smoke.
+/// Never serialize raw server text, full XCUI tree, URLs, tokens or creator data.
+private func safePlayerSmokeFailureCode(_ message: String) -> String {
+    switch message {
+    case "Check your connection and try again.": return "network"
+    case "This game is no longer available. Return to the feed to try another game.": return "unavailable"
+    case "This game package is invalid or exceeds its resource limits. Return to the feed to try another game.": return "invalid_package"
+    case "This game needs a newer version of the app. Update the app and try again.": return "incompatible"
+    case "You don't have access to this game. Return to the feed or sign in again.": return "access_denied"
+    case "The player couldn't load this game.": return "unknown"
+    case "Your account session changed. Return to the feed and reopen this game.": return "session_revoked"
+    case "The player kept stopping — its web process ended repeatedly. Close and reopen the game.": return "process_terminated"
+    case "The game has not drawn its first scene. Tap Retry or return to the feed.": return "no_scene_timeout"
+    default: return "unclassified"
+    }
+}
+
 final class PlayerSmokeTests: XCTestCase {
 
     private var app: XCUIApplication?
@@ -39,6 +56,21 @@ final class PlayerSmokeTests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    func testPlayerSmokeFailureClassificationNeverSerializesPrivateText() {
+        XCTAssertEqual(safePlayerSmokeFailureCode("Check your connection and try again."), "network")
+        XCTAssertEqual(safePlayerSmokeFailureCode("The player couldn't load this game."), "unknown")
+        XCTAssertEqual(safePlayerSmokeFailureCode(
+            "The player kept stopping — its web process ended repeatedly. Close and reopen the game."
+        ), "process_terminated")
+        XCTAssertEqual(safePlayerSmokeFailureCode(
+            "The game has not drawn its first scene. Tap Retry or return to the feed."
+        ), "no_scene_timeout")
+        XCTAssertEqual(safePlayerSmokeFailureCode(
+            "https://private.example.test/?token=bearer&creator=secret"
+        ), "unclassified")
+        XCTAssertEqual(safePlayerSmokeFailureCode(""), "unclassified")
+    }
+
     @MainActor
     func testDiscoverLaunchesPlayer() throws {
         let app = XCUIApplication()
@@ -48,9 +80,8 @@ final class PlayerSmokeTests: XCTestCase {
 
         // The Discover feed comes from the live backend; the workflow
         // warms the deployment first, but the wait still leaves room
-        // for a slow first response. On failure the message carries
-        // the UI hierarchy — the CI log is the only diagnostic this
-        // job produces.
+        // for a slow first response. Only fixed state/reason codes are
+        // logged on failure; genuine XCResult screenshots stay available.
         // Use a stable identifier instead of matching visible copy ("Play now"),
         // which can change as the social-feed card design evolves.
         let play = app.buttons["game.play"].firstMatch
@@ -89,7 +120,7 @@ final class PlayerSmokeTests: XCTestCase {
                           frame.width.isFinite, frame.height.isFinite,
                           frame.midX.isFinite, frame.midY.isFinite,
                           app.frame.intersects(frame) else { continue }
-                    print("SMOKE: retrying real live feed via \(retry.label)")
+                    print("SMOKE: retrying real live feed via fixed retry affordance")
                     retry.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
                     lastRetry = Date()
                     break
@@ -119,7 +150,7 @@ final class PlayerSmokeTests: XCTestCase {
             }
         }
         XCTAssertTrue(play.exists,
-                      "Discover feed should offer at least one playable game card after bounded retries. UI: \(app.debugDescription)")
+                      "Discover feed did not return an actual playable game after bounded retries; play_exists=\(play.exists)")
         print("SMOKE: Play button visible")
         play.tap()
 
@@ -128,14 +159,14 @@ final class PlayerSmokeTests: XCTestCase {
         // presents (a loading overlay sits on top while it boots).
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 30),
-                      "Player sheet should host a WKWebView. UI: \(app.debugDescription)")
+                      "Player sheet has no WKWebView; web_exists=\(web.exists)")
         print("SMOKE: player web view visible")
 
         // A loaded game must always have a stable, accessible way back to
         // the feed; this catches toolbar regressions independently of copy.
         let done = app.buttons["player.done"]
         XCTAssertTrue(done.waitForExistence(timeout: 10),
-                      "Player sheet should expose its Done control. UI: \(app.debugDescription)")
+                      "Player sheet has no Done control; done_exists=\(done.exists)")
 
         // A web view appearing is not evidence that its navigation has finished.
         // The previous fixed six-second sleep captured a still-loading sheet
@@ -148,10 +179,14 @@ final class PlayerSmokeTests: XCTestCase {
         while loading.exists && !failed.exists && Date() < navigationDeadline {
             Thread.sleep(forTimeInterval: 1)
         }
+        let errorText = app.staticTexts["player.error.message"].firstMatch
+        let safeReason = errorText.exists
+            ? safePlayerSmokeFailureCode(errorText.label) : "no_error_text"
+        let evidence = "reason=\(safeReason) loading=\(loading.exists) retry=\(failed.exists) web=\(web.exists) done=\(done.exists)"
         XCTAssertFalse(failed.exists,
-                       "Player entered a recoverable failure instead of loading its game. UI: \\(app.debugDescription)")
+                       "Player entered a recoverable failure instead of loading its game. \(evidence)")
         XCTAssertFalse(loading.exists,
-                       "Player remained on the loading overlay for 90 seconds. UI: \\(app.debugDescription)")
+                       "Player remained on the loading overlay after bounded navigation. \(evidence)")
         // This certifies native navigation/overlay readiness, not a verified
         // in-game win or first-render frame. Browser playtest owns that gate.
         // The old source-only .frame on the toolbar Button passed existence,
