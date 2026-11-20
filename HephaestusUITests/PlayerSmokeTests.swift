@@ -2361,6 +2361,120 @@ final class PlayerSmokeTests: XCTestCase {
         add(commentsEvidence)
     }
 
+    /// Strict real iPad single-Search visual layout; no fixture/fake game.
+    /// Record untouched full-device screenshots of both orientations.
+    @MainActor
+    func testArcadePulseIPadOneRealSearchResultCentered() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Centering one filtered game applies to regular-width iPad.")
+        }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+
+        let published = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title.")
+        ).firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let deadline = Date().addingTimeInterval(90)
+        var lastRetry = Date.distantPast
+        while !published.exists && Date() < deadline {
+            if retry.exists && retry.isHittable &&
+                Date().timeIntervalSince(lastRetry) >= 20 {
+                retry.tap()
+                lastRetry = Date()
+            }
+            _ = published.waitForExistence(timeout: 3)
+        }
+        if !published.exists {
+            let failed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failed.name = "ipad-one-result-no-real-published-game"
+            failed.lifetime = .keepAlways
+            add(failed)
+        }
+        XCTAssertTrue(published.exists,
+                      "One genuine published game is required; never insert a fake Search fixture.")
+        let originalTitle = published.label
+        // Search the actual COMPLETE published title. The first word (or
+        // first eight characters) can belong to multiple real games, making
+        // this one-result geometry assertion a false negative. Never invent
+        // a distinct game, fabricate a title, or relax the one-result gate.
+        let query = originalTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertFalse(query.isEmpty, "Search must use a real published title.")
+
+        let search = app.searchFields.firstMatch
+        if !search.exists { app.swipeDown() }
+        XCTAssertTrue(search.waitForExistence(timeout: 10) && search.isHittable)
+        search.tap()
+        search.typeText(query)
+        let keyboardSearch = app.keyboards.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "search")
+        ).firstMatch
+        XCTAssertTrue(keyboardSearch.waitForExistence(timeout: 8))
+        keyboardSearch.tap()
+        let keyboardDeadline = Date().addingTimeInterval(8)
+        while app.keyboards.firstMatch.exists && Date() < keyboardDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+
+        // The grid's named scroll owner and 44pt social identifiers are
+        // introduced by separate PR #539. This independent centering
+        // test must also work on current main without those changes.
+        let namedGrid = app.scrollViews["feed.grid.scroll"].firstMatch
+        let grid = namedGrid.exists ? namedGrid : app.scrollViews.firstMatch
+        let namedLike = app.buttons["grid.game.social.like"].firstMatch
+        let legacyLike = app.buttons.matching(NSPredicate(
+            format: "label == %@ OR label == %@", "Like game", "Unlike game"
+        )).firstMatch
+        let like = namedLike.exists ? namedLike : legacyLike
+        let play = app.buttons["game.play"].firstMatch
+        XCTAssertTrue(grid.waitForExistence(timeout: 10))
+        for _ in 0..<6 where !play.exists || !play.isHittable {
+            grid.swipeUp()
+        }
+        XCTAssertTrue(like.waitForExistence(timeout: 10))
+        XCTAssertTrue(play.waitForExistence(timeout: 10) && play.isHittable)
+        XCTAssertEqual(app.buttons.matching(identifier: "game.play").count, 1,
+            "The real query must show exactly one actual Play card before measuring centering.")
+
+        func verifyOneResult(_ orientation: String) {
+            XCTAssertTrue(grid.exists && play.exists && like.exists)
+            XCTAssertTrue(play.isHittable && like.isHittable)
+            let centerDelta = abs(play.frame.midX - grid.frame.midX)
+            print("IPAD_REAL_SINGLE_GRID_CENTER orientation=\(orientation) grid=\(grid.frame) play=\(play.frame) delta=\(centerDelta)")
+            XCTAssertLessThanOrEqual(centerDelta, 28,
+                "The actual one-result game card must center inside the real iPad Search viewport.")
+            XCTAssertLessThanOrEqual(play.frame.width, 520,
+                "Center only a capped card, never stretch the real game media.")
+            // This source slice must preserve reachable real controls;
+            // PR #539 separately asserts >=44pt for each social button.
+            XCTAssertTrue(grid.frame.intersects(play.frame),
+                "Use the physical Search scroll viewport, not an unrelated sheet.")
+            XCTAssertGreaterThanOrEqual(play.frame.height + 0.000001, 44)
+            let actual = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            actual.name = "ipad-genuine-single-search-centered-\(orientation)"
+            actual.lifetime = .keepAlways
+            add(actual)
+        }
+        verifyOneResult("portrait")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let rotateDeadline = Date().addingTimeInterval(12)
+        while window.frame.width <= window.frame.height &&
+              Date() < rotateDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+            "Measure the true landscape viewport, not a manually rotated screenshot.")
+        for _ in 0..<6 where !play.exists || !play.isHittable {
+            grid.swipeUp()
+        }
+        verifyOneResult("landscape")
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     @MainActor
     func testDiscoverFeedUIEvaluationAndSwipe() throws {
         let app = XCUIApplication()

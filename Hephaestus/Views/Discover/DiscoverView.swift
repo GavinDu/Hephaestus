@@ -141,6 +141,20 @@ struct CreatorNestedGuestSignInGate {
     }
 }
 
+enum GameGridSingleResultLayout {
+    static let maximumCardWidth: CGFloat = 520
+
+    static func centers(
+        resultCount: Int,
+        searchText: String,
+        isPad: Bool,
+        isRegularWidth: Bool
+    ) -> Bool {
+        isPad && isRegularWidth && resultCount == 1 &&
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 /// Backend-backed social feeds use the verified bearer session when present.
 /// UI subject decoding is only for self-action affordances; the backend authorizes every request.
 struct DiscoverView: View {
@@ -574,12 +588,27 @@ struct DiscoverView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 44)
                     } else {
-                        LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: 18) {
-                            ForEach(visibleGames) { game in
-                                gridCard(for: game)
+                        if GameGridSingleResultLayout.centers(
+                            resultCount: visibleGames.count,
+                            searchText: activeSearchQuery,
+                            isPad: UIDevice.current.userInterfaceIdiom == .pad,
+                            isRegularWidth: horizontalSizeClass == .regular
+                        ), let onlyGame = visibleGames.first {
+                            // The SAME real card and existing Play/social
+                            // handlers stay in the tree, with a width cap.
+                            // Center it in wide iPad Search results; do not
+                            // stretch artwork or create a second fake tile.
+                            gridCard(for: onlyGame)
+                                .frame(maxWidth: GameGridSingleResultLayout.maximumCardWidth)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                        } else {
+                            LazyVGrid(columns: feedGridColumns, alignment: .center, spacing: 18) {
+                                ForEach(visibleGames) { game in
+                                    gridCard(for: game)
+                                }
                             }
+                            .frame(maxWidth: 1120)
                         }
-                        .frame(maxWidth: 1120)
                         if nextCursor != nil && activeSearchQuery.isEmpty {
                             if let loadMoreError {
                                 VStack(spacing: 8) {
