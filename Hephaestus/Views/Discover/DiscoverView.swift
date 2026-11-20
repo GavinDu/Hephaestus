@@ -1577,7 +1577,7 @@ private struct ForYouGamePage: View {
             Button("Game details", systemImage: "info.circle", action: onOpenDetails)
             Button("Report game", role: .destructive, action: onReport)
             Button("Not interested", action: onNotInterested)
-            if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) && game.ownerID != BackendConfig.currentUserID {
+            if canBlockCreator {
                 Button("Block creator", role: .destructive, action: onBlockCreator)
             }
         } label: {
@@ -1645,7 +1645,7 @@ private struct ForYouGamePage: View {
                         showsAccessibleActionsSheet = false
                         onNotInterested()
                     }
-                    if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) && game.ownerID != BackendConfig.currentUserID {
+                    if canBlockCreator {
                         Button("Block creator", role: .destructive) {
                             showsAccessibleActionsSheet = false
                             onBlockCreator()
