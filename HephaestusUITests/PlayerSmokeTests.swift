@@ -2136,8 +2136,19 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertTrue(comments.waitForExistence(timeout: 5) && comments.isHittable,
                       "The genuine Comments button must remain reachable after returning to portrait.")
         comments.tap()
-        XCTAssertTrue(app.staticTexts["COMMENTS ON"].firstMatch.waitForExistence(timeout: 10),
-                      "The genuine Comments sheet must remain reachable from the grid.")
+        // The raw CI screenshot showed the REAL game-bound Comments sheet,
+        // but SwiftUI combined its "COMMENTS ON" header and game title into
+        // one accessible element. Require that actual mounted foreground
+        // header AND the same published title, not a fragile exact text node.
+        let commentsHeader = app.descendants(matching: .any)[
+            "comments.sheet.gameHeader"
+        ].firstMatch
+        XCTAssertTrue(commentsHeader.waitForExistence(timeout: 10),
+                      "The genuine Comments header must mount after a real grid Comments tap.")
+        XCTAssertTrue(commentsHeader.label.contains(title),
+                      "The mounted Comments sheet must describe the same real published game.")
+        XCTAssertTrue(app.buttons["Done"].firstMatch.isHittable,
+                      "The actual native Comments sheet must provide a visible close action.")
         let commentsEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         commentsEvidence.name = "arcade-pulse-real-grid-comments-sheet"
         commentsEvidence.lifetime = .keepAlways
