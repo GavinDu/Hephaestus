@@ -451,27 +451,45 @@ enum APIError: Error, LocalizedError {
 /// Namespaced account IDs (e.g. "auth0|subject") retain their exact bytes,
 /// but their reserved separators are percent-encoded on the wire.
 enum BackendAPICreatorPathSegmentPolicy {
+    private static let upperHex = Array("0123456789ABCDEF".utf8)
+
     static func encoded(_ creatorID: String) -> String? {
-        var count = 0
-        for byte in creatorID.utf8 {
-            // Bounded before allocation or interpolation of untrusted IDs.
-            guard count < 128 else { return nil }
-            count += 1
-            switch byte {
-            case 48...57, 65...90, 97...122, 45, 46, 95, 126,
-                 124, 58, 64: // 0-9 A-Z a-z - . _ ~ | : @
-                break
-            default:
-                return nil
-            }
+        // The real Apple-signed backend accepts opaque Unicode subjects and
+        // prefixes them with "apple:". Never silently collapse them to ASCII
+        // or normalize owner identity. Bound bytes BEFORE any transformation.
+        var byteCount = 0
+        for _ in creatorID.utf8 {
+            guard byteCount < 128 else { return nil }
+            byteCount += 1
         }
-        guard count > 0, creatorID != ".", creatorID != ".." else {
+        guard byteCount > 0, creatorID != ".", creatorID != ".." else {
             return nil
         }
-        return creatorID
-            .replacingOccurrences(of: "|", with: "%7C")
-            .replacingOccurrences(of: ":", with: "%3A")
-            .replacingOccurrences(of: "@", with: "%40")
+        // Raw delimiters can be double-unescaped by proxies or alter a
+        // resource path. Whitespace/control IDs also disagree with Go's
+        // creator handler (which trims PathValue); decline them explicitly.
+        for scalar in creatorID.unicodeScalars {
+            guard !CharacterSet.controlCharacters.contains(scalar),
+                  !CharacterSet.whitespacesAndNewlines.contains(scalar),
+                  scalar != "/", scalar != "\\", scalar != "%",
+                  scalar != "?", scalar != "#" else { return nil }
+        }
+        // Encode UTF-8 bytes directly as RFC3986 path-segment data. The only
+        // unescaped bytes are [A-Za-z0-9._~-]; output is <=384 ASCII bytes.
+        // This is syntactic admission, never creator authorization.
+        var pathBytes: [UInt8] = []
+        pathBytes.reserveCapacity(byteCount * 3)
+        for byte in creatorID.utf8 {
+            switch byte {
+            case 48...57, 65...90, 97...122, 45, 46, 95, 126:
+                pathBytes.append(byte)
+            default:
+                pathBytes.append(37) // %
+                pathBytes.append(upperHex[Int(byte >> 4)])
+                pathBytes.append(upperHex[Int(byte & 0x0F)])
+            }
+        }
+        return String(bytes: pathBytes, encoding: .utf8)
     }
 }
 
