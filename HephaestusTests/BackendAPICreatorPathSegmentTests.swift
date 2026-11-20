@@ -10,6 +10,12 @@ struct BackendAPICreatorPathSegmentTests {
             ("a", "a"),
             ("creator-123_ABC", "creator-123_ABC"),
             ("apple:privateSubject", "apple%3AprivateSubject"),
+            ("apple:é", "apple%3A%C3%A9"),
+            ("apple:小明", "apple%3A%E5%B0%8F%E6%98%8E"),
+            ("user+other", "user%2Bother"),
+            ("user&admin", "user%26admin"),
+            ("中", "%E4%B8%AD"),
+            (String(repeating: "é", count: 64), String(repeating: "%C3%A9", count: 64)),
             ("auth0|subject", "auth0%7Csubject"),
             ("google-oauth2|123", "google-oauth2%7C123"),
             ("github:123@id", "github%3A123%40id"),
@@ -33,8 +39,9 @@ struct BackendAPICreatorPathSegmentTests {
             "", ".", "..", "../me", "me/profile", "me\\profile",
             "owner?admin=1", "owner#fragment", "owner%2Fother",
             "auth0%7Csubject", "my creator", " creator", "creator\n",
-            "owner\tname", "user+other", "user&admin", "é", "中",
-            "private:123/", String(repeating: "a", count: 129)
+            "owner\tname", "apple:é/owner", "apple:中?role=admin",
+            "private:123/", String(repeating: "a", count: 129),
+            String(repeating: "é", count: 65), "\u{2003}owner"
         ]
         for creatorID in bad {
             #expect(BackendAPICreatorPathSegmentPolicy.encoded(creatorID) == nil)
