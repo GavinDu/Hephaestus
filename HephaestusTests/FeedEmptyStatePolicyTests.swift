@@ -31,6 +31,20 @@ struct FeedEmptyStatePolicyTests {
         #expect(guidance == "Refresh to check for games in this feed.")
     }
 
+    @Test func retainedCommittedSearchAfterRotationIsStillARealFilteredQuery() {
+        // The Discover UI uses activeSearchQuery, not only UIKit's draft.
+        // A committed genuine title must not become a fabricated empty feed
+        // when the native search drawer drops its transient text.
+        let appliedQuery = FeedCommittedSearchPolicy.effectiveQuery(
+            draft: "", committed: "飘带补天"
+        )
+        #expect(FeedEmptyStatePolicy.isFiltered(searchQuery: appliedQuery))
+        #expect(FeedEmptyStatePolicy.title(searchQuery: appliedQuery) == "No games found")
+        #expect(FeedEmptyStatePolicy.guidance(
+            searchQuery: appliedQuery, canOpenLibrary: true
+        ) == "Try a different title.")
+    }
+
     @Test func aFilteredResultNeverPromisesUnfilteredRecoveryActions() {
         let guidance = FeedEmptyStatePolicy.guidance(
             searchQuery: "  real game ", canOpenLibrary: false)
