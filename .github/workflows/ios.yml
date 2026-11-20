@@ -211,6 +211,7 @@ jobs:
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedSupportsAccessibilityDynamicType \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseSocialWriteFailureDoesNotHideLiveGame \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseGameGridSocialActionsHaveTrue44ptTargets \
+            -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseRealGridMoreMenuReadOnly \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseFeedPreferencesFailureStaysEditable \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseCommentsSheetAndSafeAreaComposer \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testArcadePulseDiscoverToolbarButtonsOwnFull44ptTargets \

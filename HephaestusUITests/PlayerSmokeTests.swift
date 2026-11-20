@@ -2183,6 +2183,104 @@ final class PlayerSmokeTests: XCTestCase {
     /// Read the title of a real settled backend game, filter by its own
     /// published title, then measure the actual GRID buttons. A concept,
     /// test-only game or empty feed cannot satisfy this regression.
+    /// Independent #627 P1 native read-only menu traversal on a genuine
+    /// public backend game. Do not create a game, comment, report or block.
+    @MainActor
+    func testArcadePulseRealGridMoreMenuReadOnly() throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+
+        let actualTitle = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title.")
+        ).firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let deadline = Date().addingTimeInterval(90)
+        var lastRetry = Date.distantPast
+        while !actualTitle.exists && Date() < deadline {
+            if retry.exists && retry.isHittable &&
+               Date().timeIntervalSince(lastRetry) >= 20 {
+                retry.tap()
+                lastRetry = Date()
+            }
+            _ = actualTitle.waitForExistence(timeout: 3)
+        }
+        if !actualTitle.exists {
+            let missing = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            missing.name = "arcade-pulse-real-more-no-published-feed"
+            missing.lifetime = .keepAlways
+            add(missing)
+        }
+        XCTAssertTrue(actualTitle.exists,
+                      "Genuine published feed data is required; never create a fake game.")
+        let gameTitle = actualTitle.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertFalse(gameTitle.isEmpty)
+
+        let search = app.searchFields.firstMatch
+        if !search.exists { app.swipeDown() }
+        XCTAssertTrue(search.waitForExistence(timeout: 10) && search.isHittable)
+        search.tap()
+        search.typeText(gameTitle)
+        let keyboardSearch = app.keyboards.buttons.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "search")
+        ).firstMatch
+        XCTAssertTrue(keyboardSearch.waitForExistence(timeout: 8))
+        keyboardSearch.tap()
+        let keyboardDeadline = Date().addingTimeInterval(8)
+        while app.keyboards.firstMatch.exists && Date() < keyboardDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+
+        let grid = app.scrollViews["feed.grid.scroll"].firstMatch
+        let more = app.buttons["grid.game.social.more"].firstMatch
+        XCTAssertTrue(grid.waitForExistence(timeout: 10),
+                      "The real filtered grid must own the More action.")
+        for _ in 0..<8 where !more.exists || !more.isHittable {
+            grid.swipeUp()
+        }
+        if !more.exists || !more.isHittable {
+            let unavailable = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            unavailable.name = "arcade-pulse-real-grid-more-unreachable"
+            unavailable.lifetime = .keepAlways
+            add(unavailable)
+        }
+        XCTAssertTrue(more.exists && more.isHittable,
+                      "Real More options must remain usable on published cards.")
+        XCTAssertGreaterThanOrEqual(more.frame.width + 0.000001, 44)
+        XCTAssertGreaterThanOrEqual(more.frame.height + 0.000001, 44)
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "arcade-pulse-real-grid-before-more"
+        before.lifetime = .keepAlways
+        add(before)
+
+        more.tap()
+        // Merely open and inspect the native menu: never invoke a public
+        // report/block/not-interested mutation from this read-only test.
+        let notInterested = app.buttons["Not interested"].firstMatch
+        let report = app.buttons["Report game"].firstMatch
+        if !notInterested.waitForExistence(timeout: 8) ||
+           !report.waitForExistence(timeout: 8) {
+            let missingOptions = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            missingOptions.name = "arcade-pulse-real-grid-more-missing-options"
+            missingOptions.lifetime = .keepAlways
+            add(missingOptions)
+        }
+        XCTAssertTrue(notInterested.exists && notInterested.isHittable)
+        XCTAssertTrue(report.exists && report.isHittable)
+        // The real owner may be missing or may be the signed-in viewer.
+        // Never fabricate an owner to force the destructive Block menu.
+        let block = app.buttons["Block creator"].firstMatch
+        if block.exists {
+            XCTAssertTrue(block.isHittable)
+        }
+        let menuEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        menuEvidence.name = "arcade-pulse-real-grid-more-read-only"
+        menuEvidence.lifetime = .keepAlways
+        add(menuEvidence)
+    }
+
     @MainActor
     func testArcadePulseGameGridSocialActionsHaveTrue44ptTargets() throws {
         XCUIDevice.shared.orientation = .portrait
