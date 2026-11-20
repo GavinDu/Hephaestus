@@ -734,11 +734,11 @@ struct DiscoverView: View {
                         },
                         onOpenComments: { commentsGame = $0 },
                         onOpenCreator: { game in
-                            if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) }
+                            if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { profileRequest = CreatorProfileRequest(id: id) }
                         },
                         onReport: { reportingGame = $0 },
                         onBlockCreator: { game in
-                            if let id = game.ownerID { Task { await blockCreator(id) } }
+                            if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { Task { await blockCreator(id) } }
                         },
                         onNotInterested: { game in Task { await markNotInterested(game) } },
                         onOpenDetails: { detailGame = $0 },
@@ -769,9 +769,9 @@ struct DiscoverView: View {
                                     onToggleLike: { toggleLike(game) },
                                     onToggleFollow: { if let id = game.ownerID { Task { await toggleFollow(id) } } },
                                     onOpenComments: { commentsGame = game },
-                                    onOpenCreator: { if let id = game.ownerID { profileRequest = CreatorProfileRequest(id: id) } },
+                                    onOpenCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { profileRequest = CreatorProfileRequest(id: id) } },
                                     onReport: { reportingGame = game },
-                                    onBlockCreator: { if let id = game.ownerID { Task { await blockCreator(id) } } },
+                                    onBlockCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { Task { await blockCreator(id) } } },
                                     onNotInterested: { Task { await markNotInterested(game) } },
                                     onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } },
                                     shouldAutoplayPreview: false
@@ -1054,6 +1054,7 @@ struct DiscoverView: View {
     }
 
     private func blockCreator(_ creatorID: String) async {
+        guard ForYouPageLayout.hasNavigableCreator(ownerID: creatorID) else { return }
         let viewerID = BackendConfig.currentUserID
         let epoch = socialMutationEpoch
         do {
@@ -1567,7 +1568,7 @@ private struct ForYouGamePage: View {
             Button("Game details", systemImage: "info.circle", action: onOpenDetails)
             Button("Report game", role: .destructive, action: onReport)
             Button("Not interested", action: onNotInterested)
-            if game.ownerID != nil {
+            if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
                 Button("Block creator", role: .destructive, action: onBlockCreator)
             }
         } label: {
@@ -1635,7 +1636,7 @@ private struct ForYouGamePage: View {
                         showsAccessibleActionsSheet = false
                         onNotInterested()
                     }
-                    if game.ownerID != nil {
+                    if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
                         Button("Block creator", role: .destructive) {
                             showsAccessibleActionsSheet = false
                             onBlockCreator()
