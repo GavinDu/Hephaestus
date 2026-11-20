@@ -966,6 +966,39 @@ struct HephaestusTests {
     }
 }
 
+@Test func localLifecycleLogsAreTypeBoundedAndCannotCarryPrivateGameIdentity() {
+    let hiddenID = "private-game-token-should-not-appear"
+    let samples = [
+        PlayerLocalLifecycleLog.prewarm,
+        PlayerLocalLifecycleLog.terminatedRepeatedly,
+        PlayerLocalLifecycleLog.backgrounded,
+        PlayerLocalLifecycleLog.foregrounded,
+        PlayerLocalLifecycleLog.memoryWarning,
+        PlayerLocalLifecycleLog.opened,
+        PlayerLocalLifecycleLog.navigationFinished(milliseconds: -3),
+        PlayerLocalLifecycleLog.navigationFinished(milliseconds: 124),
+        PlayerLocalLifecycleLog.autoReload(completedReloads: -1),
+        PlayerLocalLifecycleLog.autoReload(completedReloads: 1),
+        PlayerLocalLifecycleLog.autoReload(completedReloads: Int.max),
+        PlayerLocalLifecycleLog.thermal(.serious),
+        PlayerLocalLifecycleLog.thermal(.critical)
+    ]
+    #expect(PlayerLocalLifecycleLog.navigationFinished(milliseconds: -3) ==
+            "player navigation finished in 0ms")
+    #expect(PlayerLocalLifecycleLog.navigationFinished(milliseconds: 124) ==
+            "player navigation finished in 124ms")
+    #expect(PlayerLocalLifecycleLog.autoReload(completedReloads: Int.max) ==
+            "web content process terminated; auto-reload 2/2")
+    #expect(PlayerLocalLifecycleLog.thermal(.serious) == "thermal state serious while player open")
+    for message in samples {
+        #expect(!message.contains(hiddenID))
+        #expect(!message.contains("token"))
+        #expect(!message.contains("gameID"))
+        #expect(!message.contains("https://"))
+        #expect(message.count < 96)
+    }
+}
+
 @Test func playerForegroundRetryRequiresBackgroundErrorAndConnectivity() {
     #expect(PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: false, hasError: true))
     #expect(!PlayerLifecyclePolicy.shouldRetryAfterForeground(wasBackgrounded: true, isOffline: true, hasError: true))
