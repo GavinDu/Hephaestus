@@ -797,7 +797,12 @@ struct DiscoverView: View {
                                     onToggleSaved: { toggleSaved(game) },
                                     onToggleLike: { toggleLike(game) },
                                     onToggleFollow: { if let id = game.ownerID { Task { await toggleFollow(id) } } },
-                                    onOpenComments: { commentsGame = game },
+                                    onOpenComments: {
+                                        #if DEBUG
+                                        print("UI_GRID_COMMENTS_TAP_DELIVERED")
+                                        #endif
+                                        commentsGame = game
+                                    },
                                     onOpenCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { profileRequest = CreatorProfileRequest(id: id) } },
                                     onReport: { reportingGame = game },
                                     onBlockCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { Task { await blockCreator(id) } } },
@@ -893,6 +898,16 @@ struct DiscoverView: View {
             }
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
+                    .onAppear {
+                        #if DEBUG
+                        print("UI_COMMENTS_SHEET_MOUNTED")
+                        #endif
+                    }
+            }
+            .onChange(of: commentsGame?.id) { _, selection in
+                #if DEBUG
+                print("UI_COMMENTS_HOST_SELECTION_ACTIVE=\(selection != nil)")
+                #endif
             }
             .modifier(ArcadePulseGameDetailsPresentation(selection: $detailGame))
             .sheet(item: $reportingGame) { game in
