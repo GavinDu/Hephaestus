@@ -28,12 +28,18 @@ class NativeCreatorPathAdmissionTests(unittest.TestCase):
         policy = source.split("enum BackendAPICreatorPathSegmentPolicy {", 1)[1].split(
             "/// Thin async client", 1
         )[0]
-        self.assertIn("guard count < 128", policy)
+        self.assertIn("guard byteCount < 128", policy)
         self.assertIn('creatorID != "."', policy)
         self.assertIn('creatorID != ".."', policy)
-        self.assertIn('with: "%7C"', policy)
-        self.assertIn('with: "%3A"', policy)
-        self.assertIn('with: "%40"', policy)
+        self.assertIn("CharacterSet.controlCharacters.contains(scalar)", policy)
+        self.assertIn("CharacterSet.whitespacesAndNewlines.contains(scalar)", policy)
+        self.assertIn('scalar != "/"', policy)
+        self.assertIn('scalar != "%"', policy)
+        self.assertIn('scalar != "?"', policy)
+        self.assertIn('scalar != "#"', policy)
+        self.assertIn('Array("0123456789ABCDEF".utf8)', policy)
+        self.assertIn("pathBytes.append(37)", policy)
+        self.assertIn("String(bytes: pathBytes, encoding: .utf8)", policy)
         for forbidden in ('localizedDescription', 'URLSession', 'BackendConfig',
                           'httpBody', 'queryItems', 'URLRequest'):
             self.assertNotIn(forbidden, policy)
