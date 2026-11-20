@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 from urllib import error, request
+from urllib.parse import urljoin, urlsplit
 
 MAX_BODY_BYTES = 1_048_576
 PUBLIC_ENDPOINT = "https://html-5-game-generator.replit.app/v1/creators?limit=20"
@@ -26,6 +27,33 @@ class ContractError(Exception):
 class RejectRedirects(request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def classify_redirect(location: str | None) -> str:
+    """Classify only the REDIRECT TYPE, never reveal the Location URL.
+
+    No redirect is followed. Query strings, hosts, account IDs and bearer
+    tokens remain absent from logs even if upstream reflects them in Location.
+    """
+    if not location or not location.strip():
+        return "redirect_location_missing"
+    try:
+        base = urlsplit(PUBLIC_ENDPOINT)
+        target = urlsplit(urljoin(PUBLIC_ENDPOINT, location.strip()))
+        if target.scheme.lower() != "https":
+            return "redirect_insecure_scheme"
+        if (target.hostname or "").lower() != (base.hostname or "").lower() or (
+            (target.port or 443) != (base.port or 443)
+        ):
+            return "redirect_cross_origin"
+        path = target.path.rstrip("/").lower() or "/"
+        if path == "/player":
+            return "redirect_to_player"
+        if path in {"/login", "/signin", "/sign-in", "/auth/login"}:
+            return "redirect_to_login"
+        return "redirect_same_origin_other"
+    except ValueError:
+        return "redirect_location_invalid"
 
 
 def validate_response(status: int, content_type: str, body: bytes) -> int:
@@ -81,7 +109,10 @@ def probe() -> tuple[int, int]:
     except error.HTTPError as failure:
         # No response body, headers or raw exception text is logged.
         status = int(failure.code)
-        category = "unexpected_redirect" if 300 <= status < 400 else "unexpected_http_status"
+        category = (
+            classify_redirect(failure.headers.get("Location") if failure.headers else None)
+            if 300 <= status < 400 else "unexpected_http_status"
+        )
         raise ContractError(category, status) from None
     except (error.URLError, TimeoutError, OSError):
         raise ContractError("transport_unavailable") from None
