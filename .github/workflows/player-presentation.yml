@@ -171,6 +171,21 @@ jobs:
       # Export native screenshots to a reviewable artifact directory rather
       # than burying them inside the binary .xcresult. Always run, including
       # on UI test failure, so the failed frame remains available for triage.
+      # App-side Swift print does not reliably reach XCTest stdout. Preserve
+      # only hardcoded tap/selection/mount booleans from the real simulator.
+      # Advisory evidence capture never masks a failing native assertion.
+      - name: Capture privacy-safe iPhone Comments presenter OSLog
+        if: always()
+        shell: bash
+        run: |
+          xcrun simctl spawn "${{ steps.iphone.outputs.udid }}" log show \
+            --last 45m --style compact \
+            --predicate 'subsystem == "ai.tinydream.Hephaestus" AND category == "ArcadePulseComments"' \
+            > /tmp/player-presentation-iphone-comments-oslog.log 2>&1 || true
+          if ! grep -qE 'UI_COMMENTS_|UI_GRID_COMMENTS_' /tmp/player-presentation-iphone-comments-oslog.log; then
+            echo "No app-side Comments presenter OSLog signals captured; instrumentation inconclusive."
+          fi
+
       - name: Export iPhone UI screenshot evidence
         if: always()
         shell: bash
@@ -201,6 +216,7 @@ jobs:
             /tmp/player-presentation-smoke.log
             /tmp/player-presentation-smoke.xcresult.zip
             /tmp/player-presentation-iphone-screenshots
+            /tmp/player-presentation-iphone-comments-oslog.log
           if-no-files-found: ignore
 
   ios-ipad-smoke:
@@ -246,6 +262,21 @@ jobs:
       # Export native screenshots to a reviewable artifact directory rather
       # than burying them inside the binary .xcresult. Always run, including
       # on UI test failure, so the failed frame remains available for triage.
+      # App-side Swift print does not reliably reach XCTest stdout. Preserve
+      # only hardcoded tap/selection/mount booleans from the real simulator.
+      # Advisory evidence capture never masks a failing native assertion.
+      - name: Capture privacy-safe iPad Comments presenter OSLog
+        if: always()
+        shell: bash
+        run: |
+          xcrun simctl spawn "${{ steps.ipad.outputs.udid }}" log show \
+            --last 45m --style compact \
+            --predicate 'subsystem == "ai.tinydream.Hephaestus" AND category == "ArcadePulseComments"' \
+            > /tmp/player-presentation-ipad-comments-oslog.log 2>&1 || true
+          if ! grep -qE 'UI_COMMENTS_|UI_GRID_COMMENTS_' /tmp/player-presentation-ipad-comments-oslog.log; then
+            echo "No app-side Comments presenter OSLog signals captured; instrumentation inconclusive."
+          fi
+
       - name: Export iPad UI screenshot evidence
         if: always()
         shell: bash
@@ -273,6 +304,7 @@ jobs:
             /tmp/player-presentation-ipad.log
             /tmp/player-presentation-ipad.xcresult.zip
             /tmp/player-presentation-ipad-screenshots
+            /tmp/player-presentation-ipad-comments-oslog.log
           if-no-files-found: ignore
 
   backend-play-contract:
