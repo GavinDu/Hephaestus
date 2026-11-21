@@ -342,6 +342,7 @@ struct DiscoverView: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("More feed controls")
             .accessibilityIdentifier("feed.landscape.more")
             .confirmationDialog(
