@@ -885,7 +885,10 @@ struct DiscoverView: View {
                         },
                         onReport: { reportingGame = $0 },
                         onBlockCreator: { game in
-                            if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { Task { await blockCreator(id) } }
+                            if let id = game.ownerID,
+                               ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                                   ownerID: id, viewerID: BackendConfig.currentUserID
+                               ) { Task { await blockCreator(id) } }
                         },
                         onNotInterested: { game in Task { await markNotInterested(game) } },
                         onOpenDetails: { detailGame = $0 },
@@ -918,7 +921,12 @@ struct DiscoverView: View {
                                     onOpenComments: { commentsGame = game },
                                     onOpenCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { profileRequest = CreatorProfileRequest(id: id) } },
                                     onReport: { reportingGame = game },
-                                    onBlockCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { Task { await blockCreator(id) } } },
+                                    onBlockCreator: {
+                                        if let id = game.ownerID,
+                                           ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                                               ownerID: id, viewerID: BackendConfig.currentUserID
+                                           ) { Task { await blockCreator(id) } }
+                                    },
                                     onNotInterested: { Task { await markNotInterested(game) } },
                                     onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } },
                                     shouldAutoplayPreview: false
@@ -1205,7 +1213,9 @@ struct DiscoverView: View {
     }
 
     private func blockCreator(_ creatorID: String) async {
-        guard ForYouPageLayout.hasNavigableCreator(ownerID: creatorID) else { return }
+        guard ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+            ownerID: creatorID, viewerID: BackendConfig.currentUserID
+        ) else { return }
         let viewerID = BackendConfig.currentUserID
         let epoch = socialMutationEpoch
         do {
@@ -1558,11 +1568,6 @@ private struct ForYouGamePage: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsExpressionDetails = false
-    @State private var showsAccessibleShareSheet = false
-    @State private var showsAccessibleActionsSheet = false
-    @State private var shareAfterActionsDismiss = false
-    @State private var queuedAccessibleShareURL: URL?
-    @State private var queuedAccessibleShareGameID: String?
     // A URL in the feed does not establish that its image decoded successfully.
     // Keep accessibility/media audits tied to the exact poster that rendered.
     @State private var loadedPosterURL: String?
@@ -1588,6 +1593,7 @@ private struct ForYouGamePage: View {
     let onBlockCreator: () -> Void
     let onNotInterested: () -> Void
     let onOpenDetails: () -> Void
+    let onOpenAccessibleActions: () -> Void
     let onImpression: () -> Void
 
     private var shareURL: URL {
@@ -1773,7 +1779,9 @@ private struct ForYouGamePage: View {
             Button("Game details", systemImage: "info.circle", action: onOpenDetails)
             Button("Report game", role: .destructive, action: onReport)
             Button("Not interested", action: onNotInterested)
-            if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
+            if ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                ownerID: game.ownerID, viewerID: BackendConfig.currentUserID
+            ) {
                 Button("Block creator", role: .destructive, action: onBlockCreator)
             }
         } label: {
@@ -1800,73 +1808,8 @@ private struct ForYouGamePage: View {
     // to reopen while its native menu controller is dismissing. A real,
     // explicitly dismissible native sheet keeps the same social actions
     // reachable across repeated openings, rotation and Dynamic Type.
-    private var accessibleSocialActionsSheet: some View {
-        NavigationStack {
-            List {
-                Section("Social actions") {
-                    Button(isSaved ? "Remove from library" : "Save game",
-                           systemImage: isSaved ? "bookmark.fill" : "bookmark") {
-                        showsAccessibleActionsSheet = false
-                        onToggleSaved()
-                    }
-                    Button(isLiked ? "Unlike game" : "Like game",
-                           systemImage: isLiked ? "heart.fill" : "heart") {
-                        showsAccessibleActionsSheet = false
-                        onToggleLike()
-                    }
-                    Button("View comments", systemImage: "bubble.right") {
-                        showsAccessibleActionsSheet = false
-                        onOpenComments()
-                    }
-                    Button("Share game", systemImage: "square.and.arrow.up") {
-                        // The *mounted page* presents the real system UI only
-                        // after this native actions sheet has fully dismissed.
-                        // No ShareLink is embedded in a disappearing Menu.
-                        queuedAccessibleShareURL = shareURL
-                        queuedAccessibleShareGameID = game.id
-                        shareAfterActionsDismiss = true
-                        showsAccessibleActionsSheet = false
-                    }
-                    Button("Game details", systemImage: "info.circle") {
-                        showsAccessibleActionsSheet = false
-                        onOpenDetails()
-                    }
-                    Button("Report game", role: .destructive) {
-                        showsAccessibleActionsSheet = false
-                        onReport()
-                    }
-                }
-                Section("Feed preferences") {
-                    Button("Not interested", systemImage: "eye.slash") {
-                        showsAccessibleActionsSheet = false
-                        onNotInterested()
-                    }
-                    if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
-                        Button("Block creator", role: .destructive) {
-                            showsAccessibleActionsSheet = false
-                            onBlockCreator()
-                        }
-                    }
-                }
-            }
-            .environment(\.defaultMinListRowHeight, 44)
-            .navigationTitle("Game actions")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { showsAccessibleActionsSheet = false }
-                        .accessibilityIdentifier("feed.actions.dismiss")
-                }
-            }
-        }
-        .presentationDragIndicator(.visible)
-        .accessibilityIdentifier("feed.actions.sheet")
-    }
-
     private func accessibleSocialMenu(vertical: Bool) -> some View {
-        Button {
-            showsAccessibleActionsSheet = true
-        } label: {
+        Button(action: onOpenAccessibleActions) {
             Group {
                 if vertical {
                     VStack(spacing: 3) {
@@ -2216,23 +2159,6 @@ private struct ForYouGamePage: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .sheet(isPresented: $showsAccessibleActionsSheet, onDismiss: {
-            if shareAfterActionsDismiss {
-                shareAfterActionsDismiss = false
-                showsAccessibleShareSheet = true
-                if let sharedGameID = queuedAccessibleShareGameID {
-                    Task { await BackendAPI.shared.trackSocialEvent(gameID: sharedGameID, kind: "share") }
-                }
-            }
-        }) {
-            accessibleSocialActionsSheet
-        }
-        .sheet(isPresented: $showsAccessibleShareSheet, onDismiss: {
-            queuedAccessibleShareURL = nil
-            queuedAccessibleShareGameID = nil
-        }) {
-            ArcadePulseGameShareSheet(url: queuedAccessibleShareURL ?? shareURL)
-        }
         .sheet(isPresented: $showsExpressionDetails) {
             NavigationStack {
                 ScrollView {
@@ -2306,6 +2232,118 @@ private struct ForYouGamePage: View {
     }
 }
 
+/// A view replacement in the swipe feed must not erase an Accessibility5
+/// action sheet or let it write to a game/account that is no longer selected.
+/// The pager, not an individual page with .id(game.id), owns presentation.
+enum ForYouActionOwnershipPolicy {
+    /// Fail closed in the stable pager even after the original game page
+    /// disappears: invalid publisher IDs and authenticated self-Block are
+    /// never actionable, including deferred callbacks after sheet dismissal.
+    static func canOfferCreatorBlock(ownerID: String?, viewerID: String) -> Bool {
+        guard let ownerID else { return false }
+        let owner = ownerID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !owner.isEmpty,
+              !owner.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }) else { return false }
+        let viewer = viewerID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return viewer.isEmpty || owner != viewer
+    }
+
+    static func canPresent(
+        requestedGameID: String,
+        selectedGameID: String?,
+        availableIDs: [String],
+        requestedViewerID: String,
+        currentViewerID: String,
+        requestedRevision: Int,
+        currentRevision: Int
+    ) -> Bool {
+        !requestedGameID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        requestedGameID == selectedGameID &&
+        availableIDs.contains(requestedGameID) &&
+        requestedViewerID == currentViewerID &&
+        requestedRevision == currentRevision
+    }
+}
+
+private struct ForYouActionsRequest: Identifiable {
+    let id: String
+    let viewerID: String
+    let sessionRevision: Int
+}
+
+/// A second destination must start after the native Actions sheet dismisses.
+/// No timer-based handoff and no network write on a superseded game or viewer.
+private enum ForYouDeferredAction {
+    case save, like, comments, details, report, notInterested, blockCreator
+}
+
+private struct ForYouDeferredRequest {
+    let request: ForYouActionsRequest
+    let action: ForYouDeferredAction
+}
+
+/// The real public-game action list is presented from the stable pager.
+/// Keep the same native rows and handlers, not a new set of fake social data.
+private struct ForYouGameActionsSheet: View {
+    let game: FeedGame
+    let isSaved: Bool
+    let isLiked: Bool
+    let onDismiss: () -> Void
+    let onToggleSaved: () -> Void
+    let onToggleLike: () -> Void
+    let onOpenComments: () -> Void
+    let onShare: () -> Void
+    let onOpenDetails: () -> Void
+    let onReport: () -> Void
+    let onNotInterested: () -> Void
+    let onBlockCreator: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Social actions") {
+                    Button(isSaved ? "Remove from library" : "Save game",
+                           systemImage: isSaved ? "bookmark.fill" : "bookmark",
+                           action: onToggleSaved)
+                    Button(isLiked ? "Unlike game" : "Like game",
+                           systemImage: isLiked ? "heart.fill" : "heart",
+                           action: onToggleLike)
+                    Button("View comments", systemImage: "bubble.right",
+                           action: onOpenComments)
+                    Button("Share game", systemImage: "square.and.arrow.up",
+                           action: onShare)
+                    Button("Game details", systemImage: "info.circle",
+                           action: onOpenDetails)
+                    Button("Report game", role: .destructive, action: onReport)
+                }
+                Section("Feed preferences") {
+                    Button("Not interested", systemImage: "eye.slash",
+                           action: onNotInterested)
+                    if ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                        ownerID: game.ownerID, viewerID: BackendConfig.currentUserID
+                    ) {
+                        Button("Block creator", role: .destructive,
+                               action: onBlockCreator)
+                    }
+                }
+            }
+            .environment(\.defaultMinListRowHeight, 44)
+            .navigationTitle("Game actions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done", action: onDismiss)
+                        .accessibilityIdentifier("feed.actions.dismiss")
+                }
+            }
+        }
+        .presentationDragIndicator(.visible)
+        .accessibilityIdentifier("feed.actions.sheet")
+    }
+}
+
 private struct ForYouPagerView: View {
     @Binding var settledGameID: String?
     // Diagnostic-only instrumentation: distinguish a gesture that never
@@ -2313,6 +2351,13 @@ private struct ForYouPagerView: View {
     @State private var diagnosticDragCount = 0
     @State private var diagnosticLastDragY = 0
     @State private var diagnosticLastOffset = 0
+    @State private var activeActions: ForYouActionsRequest?
+    @State private var queuedAction: ForYouDeferredRequest?
+    @State private var queuedShare: ForYouActionsRequest?
+    // The presented item is the verified selected game, never a Bool that
+    // can outlive its queued request and mount an empty native sheet.
+    @State private var activeShare: ForYouActionsRequest?
+    @State private var sessionRevision = 0
     let scope: SocialFeedScope
     let games: [FeedGame]
     let savedGameIDs: Set<String>
@@ -2358,8 +2403,89 @@ private struct ForYouPagerView: View {
             onBlockCreator: { onBlockCreator(game) },
             onNotInterested: { onNotInterested(game) },
             onOpenDetails: { onOpenDetails(game) },
+            onOpenAccessibleActions: { requestActions(for: game) },
             onImpression: { onImpression(game) }
         )
+    }
+
+    private func canPresent(_ request: ForYouActionsRequest) -> Bool {
+        ForYouActionOwnershipPolicy.canPresent(
+            requestedGameID: request.id,
+            selectedGameID: settledGameID,
+            availableIDs: games.map(\.id),
+            requestedViewerID: request.viewerID,
+            currentViewerID: BackendConfig.currentUserID,
+            requestedRevision: request.sessionRevision,
+            currentRevision: sessionRevision
+        )
+    }
+
+    private func requestActions(for game: FeedGame) {
+        let request = ForYouActionsRequest(
+            id: game.id,
+            viewerID: BackendConfig.currentUserID,
+            sessionRevision: sessionRevision
+        )
+        guard canPresent(request) else { return }
+        activeActions = request
+    }
+
+    private func queueAction(_ request: ForYouActionsRequest, _ action: ForYouDeferredAction) {
+        guard canPresent(request) else {
+            retireActions()
+            return
+        }
+        // Never present a second sheet over the first native dismiss animation.
+        queuedShare = nil
+        queuedAction = ForYouDeferredRequest(request: request, action: action)
+        activeActions = nil
+    }
+
+    private func deliverDismissedAction(_ pending: ForYouDeferredRequest) {
+        guard canPresent(pending.request),
+              let game = games.first(where: { $0.id == pending.request.id }) else {
+            return
+        }
+        switch pending.action {
+        case .save: onToggleSaved(game)
+        case .like: onToggleLike(game)
+        case .comments: onOpenComments(game)
+        case .details: onOpenDetails(game)
+        case .report: onReport(game)
+        case .notInterested: onNotInterested(game)
+        case .blockCreator:
+            if ForYouActionOwnershipPolicy.canOfferCreatorBlock(
+                ownerID: game.ownerID, viewerID: pending.request.viewerID
+            ) {
+                onBlockCreator(game)
+            }
+        }
+    }
+
+    private func requestShare(_ request: ForYouActionsRequest) {
+        guard canPresent(request) else {
+            retireActions()
+            return
+        }
+        queuedAction = nil
+        queuedShare = request
+        activeActions = nil
+    }
+
+    private func shareURL(for gameID: String) -> URL {
+        var parts = URLComponents(
+            url: BackendConfig.baseURL.appendingPathComponent("player"),
+            resolvingAgainstBaseURL: false
+        )!
+        parts.queryItems = [URLQueryItem(name: "game", value: gameID)]
+        return parts.url ?? BackendConfig.baseURL
+    }
+
+    private func retireActions() {
+        activeActions = nil
+        queuedAction = nil
+        queuedShare = nil
+        activeShare = nil
     }
 
     /// Keep only the selected card in the SwiftUI and accessibility trees.
@@ -2452,9 +2578,83 @@ private struct ForYouPagerView: View {
                 )
             }
             .onChange(of: settledGameID) { _, id in
+                if let activeActions, activeActions.id != id { retireActions() }
+                if let queuedAction, queuedAction.request.id != id { retireActions() }
+                if let queuedShare, queuedShare.id != id { retireActions() }
+                if let activeShare, activeShare.id != id { retireActions() }
                 guard let id, let index = games.firstIndex(where: { $0.id == id }) else { return }
                 if index >= max(0, games.count - 2) { onNearEnd() }
             }
+        }
+        // The stable pager lives across per-game .id(game.id) page rebuilds.
+        // Each real action revalidates selected game + viewer revision, so a
+        // stale sheet cannot mutate an earlier game after a swipe or logout.
+        .sheet(item: $activeActions, onDismiss: {
+            if let pending = queuedAction {
+                queuedAction = nil
+                // The final game/viewer check runs AFTER native dismissal.
+                deliverDismissedAction(pending)
+            }
+            if let request = queuedShare {
+                if canPresent(request) {
+                    // Present ONLY the exact validated game+viewer request.
+                    // A Boolean sheet with conditional content produced a
+                    // blank native modal on the original iPhone A5 smoke.
+                    activeShare = request
+                    Task {
+                        await BackendAPI.shared.trackSocialEvent(
+                            gameID: request.id, kind: "share")
+                    }
+                } else {
+                    queuedShare = nil
+                }
+            }
+        }) { request in
+            if canPresent(request),
+               let game = games.first(where: { $0.id == request.id }) {
+                ForYouGameActionsSheet(
+                    game: game,
+                    isSaved: savedGameIDs.contains(game.id),
+                    isLiked: likedGameIDs.contains(game.id),
+                    onDismiss: { activeActions = nil },
+                    onToggleSaved: { queueAction(request, .save) },
+                    onToggleLike: { queueAction(request, .like) },
+                    onOpenComments: { queueAction(request, .comments) },
+                    onShare: { requestShare(request) },
+                    onOpenDetails: { queueAction(request, .details) },
+                    onReport: { queueAction(request, .report) },
+                    onNotInterested: { queueAction(request, .notInterested) },
+                    onBlockCreator: { queueAction(request, .blockCreator) }
+                )
+            } else {
+                ContentUnavailableView(
+                    "Game actions unavailable",
+                    systemImage: "hand.raised",
+                    description: Text("This game is no longer the selected post.")
+                )
+                .onAppear { retireActions() }
+            }
+        }
+        .sheet(item: $activeShare, onDismiss: {
+            queuedShare = nil
+        }) { request in
+            // Validity was checked AFTER the previous Actions sheet dismissed.
+            // The SwiftUI sheet must never mount empty conditional content;
+            // session/page changes cancel this concrete presentation item.
+            ArcadePulseGameShareSheet(url: shareURL(for: request.id))
+        }
+        .onChange(of: scope) { _, _ in retireActions() }
+        .onChange(of: games.map(\.id)) { _, ids in
+            if let request = activeActions, !ids.contains(request.id) { retireActions() }
+            if let queuedAction, !ids.contains(queuedAction.request.id) { retireActions() }
+            if let request = queuedShare, !ids.contains(request.id) { retireActions() }
+            if let request = activeShare, !ids.contains(request.id) { retireActions() }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .hephaestusBackendSessionDidChange
+        )) { _ in
+            sessionRevision += 1
+            retireActions()
         }
     }
 }
