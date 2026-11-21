@@ -189,7 +189,7 @@ enum ArcadePulseCreatorAvatarURLPolicy {
         }
 
         // A relative asset name cannot smuggle another origin, while an
-        // explicitly absolute HTTPS publisher-approved CDN retains its URL.
+        // explicitly absolute HTTPS backend-supplied CDN retains its URL.
         let isRelative = parsed.scheme == nil && parsed.host == nil
         guard isRelative || parsed.scheme?.lowercased() == "https",
               let resolved = URL(string: input, relativeTo: backendBaseURL)?.absoluteURL,
