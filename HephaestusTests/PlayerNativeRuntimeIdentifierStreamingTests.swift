@@ -41,14 +41,18 @@ struct PlayerNativeRuntimeIdentifierStreamingTests {
         #expect(!PlayerNativeRuntimeIdentifierPolicy.validRunID(large))
         var binder = PlayerRuntimeSessionBindingGate()
         var runs = PlayerVerifiedRunNotificationGate()
-        #expect(!binder.bind(large))
+        let assertionResultL44 = !binder.bind(large)
+        #expect(assertionResultL44)
         #expect(binder.activeSessionID == nil)
-        #expect(runs.offer(large) == nil)
+        let assertionResultL46 = runs.offer(large) == nil
+        #expect(assertionResultL46)
         #expect(runs.pendingCount == 0)
         #expect(runs.recentCount == 0)
-        #expect(binder.bind("session-actual"))
+        let assertionResultL49 = binder.bind("session-actual")
+        #expect(assertionResultL49)
         #expect(binder.activeSessionID == "session-actual")
-        #expect(runs.offer("run-actual") == "run-actual")
+        let assertionResultL51 = runs.offer("run-actual") == "run-actual"
+        #expect(assertionResultL51)
         #expect(runs.pendingCount == 1)
     }
 
@@ -68,19 +72,27 @@ struct PlayerNativeRuntimeIdentifierStreamingTests {
             #expect(!ids.validRunID(slash))
             var binder = PlayerRuntimeSessionBindingGate()
             var runs = PlayerVerifiedRunNotificationGate()
-            #expect(!binder.bind(long))
-            #expect(!binder.bind(unicode))
-            #expect(!binder.bind(control))
-            #expect(runs.offer(long) == nil)
-            #expect(runs.offer(unicode) == nil)
-            #expect(runs.offer(slash) == nil)
+            let assertionResultL71 = !binder.bind(long)
+            #expect(assertionResultL71)
+            let assertionResultL72 = !binder.bind(unicode)
+            #expect(assertionResultL72)
+            let assertionResultL73 = !binder.bind(control)
+            #expect(assertionResultL73)
+            let assertionResultL74 = runs.offer(long) == nil
+            #expect(assertionResultL74)
+            let assertionResultL75 = runs.offer(unicode) == nil
+            #expect(assertionResultL75)
+            let assertionResultL76 = runs.offer(slash) == nil
+            #expect(assertionResultL76)
             #expect(binder.activeSessionID == nil)
             #expect(runs.pendingCount == 0)
             #expect(runs.recentCount == 0)
             let goodSession = "session-" + suffix
             let goodRun = "run-" + suffix
-            #expect(binder.bind(goodSession))
-            #expect(runs.offer(goodRun) == goodRun)
+            let assertionResultL82 = binder.bind(goodSession)
+            #expect(assertionResultL82)
+            let assertionResultL83 = runs.offer(goodRun) == goodRun
+            #expect(assertionResultL83)
             #expect(runs.isLatest(goodRun))
         }
     }
