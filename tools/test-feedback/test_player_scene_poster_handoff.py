@@ -30,7 +30,7 @@ class CurrentScenePosterSourceContract(unittest.TestCase):
         self.assertIn("acceptedSceneAttempt == expectedAttempt", guard)
         self.assertIn("navigationFinished && !hasLoadError", guard)
         self.assertIn("!hasLoadError && !sessionRevoked", guard)
-        self.assertIn("noSceneTimeoutMilliseconds = 12_000", guard)
+        self.assertIn("noSceneTimeoutMilliseconds: Int64 = 12_000", guard)
 
     def test_bounded_real_swiftui_timer_and_true_error_are_preserved(self):
         src = (ROOT / "Hephaestus/Player/PixiPlayer.swift").read_text()
