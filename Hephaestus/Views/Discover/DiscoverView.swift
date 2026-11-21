@@ -318,6 +318,7 @@ struct DiscoverView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedFeed: SocialFeedScope = .forYou
     @State private var compactSearchPresented = false
+    @State private var compactMorePresented = false
     @State private var compactSearchDraft = ""
     @State private var games: [FeedGame] = []
     @State private var playerRequest: PixiPlayerRequest?
@@ -434,7 +435,26 @@ struct DiscoverView: View {
             }
             .accessibilityLabel("Search games")
             .accessibilityIdentifier("feed.landscape.search")
-            Menu {
+            // A genuine iPhone A5 compact-landscape test found the third
+            // Menu action in the hierarchy but not hittable. The precise
+            // pop-up geometry is unproven. Present the same three real actions
+            // in a platform-owned, large-type native confirmation dialog
+            // rather than relying on compact pop-up hit-testing.
+            Button {
+                compactMorePresented = true
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("More feed controls")
+            .accessibilityIdentifier("feed.landscape.more")
+            .confirmationDialog(
+                "More feed controls",
+                isPresented: $compactMorePresented,
+                titleVisibility: .visible
+            ) {
                 Button("Feed preferences", systemImage: "slider.horizontal.3") {
                     isFeedPreferencesPresented = true
                 }
@@ -444,12 +464,7 @@ struct DiscoverView: View {
                 Button("Refresh games", systemImage: "arrow.clockwise") {
                     Task { await load() }
                 }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .frame(width: 44, height: 44)
             }
-            .accessibilityLabel("More feed controls")
-            .accessibilityIdentifier("feed.landscape.more")
         }
         .foregroundStyle(.white)
         .background(.black.opacity(0.72), in: Capsule())
