@@ -60,18 +60,11 @@ enum FeedEmptyStatePolicy {
 /// same three valid backend-published labels. A malformed early topic cannot
 /// displace a later genuine topic, and no synthetic tag is introduced.
 enum ForYouSpotlightTopicPolicy {
-    struct Presentation: Equatable {
-        let visual: String
-        let spoken: String
-    }
-
-    static func presentation(_ topics: [String]?) -> Presentation? {
-        let labels = GameFeedCardTopicPolicy.publicLabels(topics)
-        guard !labels.isEmpty else { return nil }
-        return Presentation(
-            visual: labels.map { "#\($0)" }.joined(separator: "  "),
-            spoken: "Topics: " + labels.joined(separator: ", ")
-        )
+    static func presentation(_ topics: [String]?) -> GameMetadataTopicPolicy.Presentation? {
+        // #656 already single-sources trimming, control rejection and spoken
+        // parity for four/five-tag detail panels. Immersive For You caps at
+        // three genuine topics, avoiding a diverging second formatter.
+        GameMetadataTopicPolicy.presentation(topics, maxCount: 3)
     }
 }
 
