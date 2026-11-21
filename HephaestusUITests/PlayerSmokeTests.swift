@@ -1926,6 +1926,13 @@ final class PlayerSmokeTests: XCTestCase {
 
         XCTAssertTrue(more.waitForExistence(timeout: 10) && more.isHittable)
         more.tap()
+        // Preserve an original screenshot BEFORE testing each actual action.
+        // A failed third action previously exited before the post-loop image
+        // could be attached, masking whether the native Menu was clipped.
+        let moreBeforeAssertion = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        moreBeforeAssertion.name = "arcade-pulse-iphone-a5-compact-more-before-action-checks"
+        moreBeforeAssertion.lifetime = .keepAlways
+        add(moreBeforeAssertion)
         for title in ["Feed preferences", "Discover creators", "Refresh games"] {
             let menuItem = app.buttons[title].firstMatch
             XCTAssertTrue(menuItem.waitForExistence(timeout: 8) && menuItem.isHittable,
