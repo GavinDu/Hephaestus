@@ -101,6 +101,17 @@ enum FeedSavedGameCache {
     }
 }
 
+/// Presentation selections belong to the account that opened them.
+/// A viewer switch is not a feed refresh or device rotation: retire old
+/// native sheet selections before loading the new viewer's real feed.
+enum DiscoverViewerBoundSelectionPolicy {
+    static func selectionAfterTransition<Value>(
+        _ selection: Value?, viewerChanged: Bool
+    ) -> Value? {
+        viewerChanged ? nil : selection
+    }
+}
+
 // MARK: - Discover
 
 private struct PlayerResultPresentation: Identifiable {
@@ -942,6 +953,10 @@ struct DiscoverView: View {
                 // A drafted moderation report is private viewer-authored UI.
                 // Revoke it synchronously, before the new feed can appear.
                 reportingGame = nil
+                // The sheet's inner private draft already revokes itself;
+                // its game-bound host selection must also leave this viewer.
+                commentsGame = DiscoverViewerBoundSelectionPolicy
+                    .selectionAfterTransition(commentsGame, viewerChanged: true)
                 savedGameIDs.removeAll()
                 FeedSavedGameCache.discardUnscopedHistory()
                 likedGameIDs.removeAll()
