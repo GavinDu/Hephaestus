@@ -10,6 +10,11 @@ on:
       - "HephaestusUITests/**"
       - "Hephaestus.xcodeproj/**"
       - ".github/workflows/player-presentation.yml"
+      # Creator contract regressions affect the genuine native player/creator journey.
+      # Run all mandatory presentation jobs for atomic diagnostics too.
+      - ".github/workflows/creator-discovery-schema.yml"
+      - "tools/test-feedback/check_creator_discovery_contract.py"
+      - "tools/test-feedback/test_check_creator_discovery_contract.py"
   push:
     branches: [main]
     paths:
@@ -18,6 +23,11 @@ on:
       - "HephaestusUITests/**"
       - "Hephaestus.xcodeproj/**"
       - ".github/workflows/player-presentation.yml"
+      # Creator contract regressions affect the genuine native player/creator journey.
+      # Run all mandatory presentation jobs for atomic diagnostics too.
+      - ".github/workflows/creator-discovery-schema.yml"
+      - "tools/test-feedback/check_creator_discovery_contract.py"
+      - "tools/test-feedback/test_check_creator_discovery_contract.py"
 
 permissions:
   contents: read

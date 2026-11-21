@@ -105,5 +105,62 @@ class CreatorDiscoveryContractTests(unittest.TestCase):
         self.assertNotIn("other.invalid", output.getvalue())
 
 
+    def test_redirect_destination_is_only_a_low_cardinality_classification(self):
+        source = "https://html-5-game-generator.replit.app"
+        examples = [
+            ("/player?token=SECRET-QUERY", "redirect_to_player"),
+            (source + "/player?private=SECRET-QUERY", "redirect_to_player"),
+            (source + ":443/player?private=SECRET-QUERY", "redirect_to_player"),
+            ("/login?token=SECRET-QUERY", "redirect_to_login"),
+            ("/auth/login?state=SECRET-QUERY", "redirect_to_login"),
+            ("/creator-list?email=PRIVATE", "redirect_same_origin_other"),
+            ("//another-host.invalid/auth?token=SECRET-QUERY", "redirect_cross_origin"),
+            ("http://" + "html-5-game-generator.replit.app/player",
+             "redirect_insecure_scheme"),
+            ("javascript:alert(1)", "redirect_insecure_scheme"),
+            ("https://[bad-ipv6", "redirect_location_invalid"),
+            (None, "redirect_location_missing"),
+            ("   ", "redirect_location_missing"),
+        ]
+        for location, expected in examples:
+            with self.subTest(expected=expected, location_index=examples.index((location, expected))):
+                classification = contract.classify_redirect(location)
+                self.assertEqual(classification, expected)
+                self.assertNotIn("SECRET", classification)
+                self.assertNotIn("PRIVATE", classification)
+                self.assertNotIn("html-5-game-generator", classification)
+
+    def test_actual_urllib_http302_is_rejected_without_redirect_or_url_leak(self):
+        private_location = "/player?token=SECRET-SHOULD-NEVER-LOG"
+        redirect = contract.error.HTTPError(
+            contract.PUBLIC_ENDPOINT, 302, "Found",
+            {"Location": private_location}, None
+        )
+        with mock.patch.object(contract.request, "build_opener") as opener:
+            opener.return_value.open.side_effect = redirect
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(contract.main(), 1)
+            opener.return_value.open.assert_called_once()
+        logged = output.getvalue()
+        self.assertIn("category=redirect_to_player http_status=302", logged)
+        self.assertNotIn("SECRET-SHOULD-NEVER-LOG", logged)
+        self.assertNotIn("/player", logged)
+        self.assertNotIn(contract.PUBLIC_ENDPOINT, logged)
+
+    def test_http302_cross_origin_stays_rejected_without_following(self):
+        redirect = contract.error.HTTPError(
+            contract.PUBLIC_ENDPOINT, 302, "Found",
+            {"Location": "https://external.invalid/auth?code=PRIVATE"}, None
+        )
+        with mock.patch.object(contract.request, "build_opener") as opener:
+            opener.return_value.open.side_effect = redirect
+            with self.assertRaises(contract.ContractError) as caught:
+                contract.probe()
+            opener.return_value.open.assert_called_once()
+        self.assertEqual(caught.exception.category, "redirect_cross_origin")
+        self.assertEqual(caught.exception.http_status, 302)
+
+
 if __name__ == "__main__":
     unittest.main()
