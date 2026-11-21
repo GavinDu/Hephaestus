@@ -20,6 +20,12 @@ class NativeSingleOwnerSourceContractTests(unittest.TestCase):
         self.assertIn("private var currentHostMilestone:", player)
         self.assertIn("milestone.stage == .rendererSubmitted", player)
         self.assertIn("currentHostMilestone?.stage == .firstInputAdmitted", player)
+        handler = player.split("private func handleMetric(", 1)[1].split(
+            "private func request", 1
+        )[0]
+        self.assertIn("PlayerCurrentHostMilestoneProjection.permitsMetricAdmission(", handler)
+        self.assertLess(handler.index("permitsMetricAdmission("),
+                        handler.index("metricSequenceGate.accept("))
         self.assertIn("currentNativeDocumentNonce", player)
         # A source-level regression should not quietly instantiate a second
         # coordinator, JS evaluator or package transport in this host.
