@@ -894,6 +894,9 @@ struct DiscoverView: View {
                 // reusable on sign-out or account replacement.
                 socialMutationEpoch &+= 1
                 socialMutationGate.revokeAll()
+                // A drafted moderation report is private viewer-authored UI.
+                // Revoke it synchronously, before the new feed can appear.
+                reportingGame = nil
                 savedGameIDs.removeAll()
                 likedGameIDs.removeAll()
                 followedCreatorIDs.removeAll()
@@ -3265,6 +3268,20 @@ private struct CreatorProfileSheet: View {
     }
 }
 
+/// A moderation report's confirmation belongs only to the viewer/session
+/// that initiated it. The server may have accepted an in-flight POST even
+/// after this UI revokes the response; do not misstate remote cancellation.
+enum ReportGameViewerLeasePolicy {
+    static func mayApply(
+        initiatingViewerID: String,
+        currentViewerID: String,
+        initiatingEpoch: Int,
+        currentEpoch: Int
+    ) -> Bool {
+        initiatingViewerID == currentViewerID && initiatingEpoch == currentEpoch
+    }
+}
+
 private struct ReportGameSheet: View {
     let game: FeedGame
     @Environment(\.dismiss) private var dismiss
@@ -3273,6 +3290,7 @@ private struct ReportGameSheet: View {
     @State private var errorMessage: String?
     @State private var isSubmitting = false
     @State private var submitted = false
+    @State private var viewerEpoch = 0
 
     private let reasons = [
         "Unsafe or inappropriate content",
@@ -3340,13 +3358,37 @@ private struct ReportGameSheet: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .hephaestusBackendSessionDidChange
+        )) { _ in
+            // Clear the previous viewer's private report draft and revoke
+            // any old transport completion before the host can show another account.
+            viewerEpoch &+= 1
+            selectedReason = "Unsafe or inappropriate content"
+            details = ""
+            errorMessage = nil
+            isSubmitting = false
+            submitted = false
+            dismiss()
+        }
     }
 
     private func submit() async {
         guard !isSubmitting, !submitted else { return }
+        let initiatingViewerID = BackendConfig.currentUserID
+        let initiatingEpoch = viewerEpoch
         isSubmitting = true
         errorMessage = nil
-        defer { isSubmitting = false }
+        defer {
+            if ReportGameViewerLeasePolicy.mayApply(
+                initiatingViewerID: initiatingViewerID,
+                currentViewerID: BackendConfig.currentUserID,
+                initiatingEpoch: initiatingEpoch,
+                currentEpoch: viewerEpoch
+            ) {
+                isSubmitting = false
+            }
+        }
         let trimmedDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
         let reason = trimmedDetails.isEmpty ? selectedReason : "\(selectedReason): \(trimmedDetails)"
         var boundedReason = ""
@@ -3357,9 +3399,23 @@ private struct ReportGameSheet: View {
         }
         do {
             try await BackendAPI.shared.reportGame(gameID: game.id, reason: boundedReason)
+            guard !Task.isCancelled,
+                  ReportGameViewerLeasePolicy.mayApply(
+                    initiatingViewerID: initiatingViewerID,
+                    currentViewerID: BackendConfig.currentUserID,
+                    initiatingEpoch: initiatingEpoch,
+                    currentEpoch: viewerEpoch
+                  ) else { return }
             submitted = true
             errorMessage = nil
         } catch {
+            guard !Task.isCancelled,
+                  ReportGameViewerLeasePolicy.mayApply(
+                    initiatingViewerID: initiatingViewerID,
+                    currentViewerID: BackendConfig.currentUserID,
+                    initiatingEpoch: initiatingEpoch,
+                    currentEpoch: viewerEpoch
+                  ) else { return }
             // A lost moderation POST response is not confirmed rejection.
             // Preserve the user's original reason and detailed report.
             errorMessage = ReportGameErrorPresentation.message(for: error)
