@@ -5,12 +5,18 @@ import Testing
 /// Pure link-admission cases only. No fabricated moderation server reply,
 /// synthetic appeal, network request or external moderator account.
 struct ModerationContactLinkPolicyTests {
+    private func approved(_ raw: String?, configured: Bool = true) -> URL? {
+        ModerationContactLinkPolicy.approvedURL(
+            raw, externalContactConfigured: configured
+        )
+    }
+
     @Test func acceptsGenuineAbsoluteHTTPSContactWithoutChangingDestination() {
         let raw = "https://support.example.org/appeal?game=real-game"
-        #expect(ModerationContactLinkPolicy.approvedURL(raw)?.absoluteString == raw)
-        #expect(ModerationContactLinkPolicy.approvedURL(" HTTPS://support.example.org/path ")?.host
+        #expect(approved(raw)?.absoluteString == raw)
+        #expect(approved(" HTTPS://support.example.org/path ")?.host
                 == "support.example.org")
-        #expect(ModerationContactLinkPolicy.approvedURL(
+        #expect(approved(
             "https://support.example.org/%E7%94%B3%E8%AF%89"
         )?.host == "support.example.org")
     }
@@ -26,7 +32,7 @@ struct ModerationContactLinkPolicyTests {
             "https://", "https:///no-host"
         ]
         for candidate in invalid {
-            #expect(ModerationContactLinkPolicy.approvedURL(candidate) == nil)
+            #expect(approved(candidate) == nil)
         }
     }
 
@@ -39,16 +45,23 @@ struct ModerationContactLinkPolicyTests {
             "\thttps://support.example.org/help"
         ]
         for candidate in unsafe {
-            #expect(ModerationContactLinkPolicy.approvedURL(candidate) == nil)
+            #expect(approved(candidate) == nil)
         }
+    }
+
+    @Test func producerFalseFlagNeverAdvertisesStaleContactURL() {
+        #expect(approved("https://support.example.org/appeal", configured: false) == nil)
+        #expect(approved("http://support.example.org/appeal", configured: false) == nil)
+        #expect(approved("https://support.example.org/appeal", configured: true)?
+                .host == "support.example.org")
     }
 
     @Test func externalContactDoesNotChangeInAppAppealCapability() {
         // This function only yields a trusted Link destination; it does not
         // produce an appeal acknowledgement or affect Submit button policy.
-        #expect(ModerationContactLinkPolicy.approvedURL(nil) == nil)
-        #expect(ModerationContactLinkPolicy.approvedURL("http://support.example.org") == nil)
-        #expect(ModerationContactLinkPolicy.approvedURL(
+        #expect(approved(nil) == nil)
+        #expect(approved("http://support.example.org") == nil)
+        #expect(approved(
             "https://support.example.org/appeal")?.scheme == "https")
     }
 }
