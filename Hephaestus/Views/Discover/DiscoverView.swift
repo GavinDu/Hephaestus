@@ -56,6 +56,17 @@ enum FeedEmptyStatePolicy {
     }
 }
 
+/// Presentation selections belong to the account that opened them.
+/// A viewer switch is not a feed refresh or device rotation: retire old
+/// native sheet selections before loading the new viewer's real feed.
+enum DiscoverViewerBoundSelectionPolicy {
+    static func selectionAfterTransition<Value>(
+        _ selection: Value?, viewerChanged: Bool
+    ) -> Value? {
+        viewerChanged ? nil : selection
+    }
+}
+
 // MARK: - Discover
 
 private struct PlayerResultPresentation: Identifiable {
@@ -894,6 +905,11 @@ struct DiscoverView: View {
                 // reusable on sign-out or account replacement.
                 socialMutationEpoch &+= 1
                 socialMutationGate.revokeAll()
+                // The CommentsSheet independently revokes its private drafts,
+                // but the Discover host must retire the old game-bound sheet
+                // itself before starting the next viewer's feed request.
+                commentsGame = DiscoverViewerBoundSelectionPolicy
+                    .selectionAfterTransition(commentsGame, viewerChanged: true)
                 savedGameIDs.removeAll()
                 likedGameIDs.removeAll()
                 followedCreatorIDs.removeAll()
