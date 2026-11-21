@@ -36,6 +36,26 @@ enum FeedPreferenceTopicPolicy {
     }
 }
 
+enum FeedEmptyStatePolicy {
+    static func isFiltered(searchQuery: String) -> Bool {
+        !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func title(searchQuery: String) -> String {
+        isFiltered(searchQuery: searchQuery)
+            ? "No games found" : "No games to show yet"
+    }
+
+    static func guidance(searchQuery: String, canOpenLibrary: Bool) -> String {
+        if isFiltered(searchQuery: searchQuery) {
+            return "Try a different title."
+        }
+        return canOpenLibrary
+            ? "Refresh to check for games in this feed, or open Library."
+            : "Refresh to check for games in this feed."
+    }
+}
+
 // MARK: - Discover
 
 private struct PlayerResultPresentation: Identifiable {
@@ -193,6 +213,32 @@ struct DiscoverView: View {
             .buttonStyle(.bordered)
             .tint(ArcadePulseTheme.neonMagenta)
             .accessibilityIdentifier("feed.error.library")
+        }
+    }
+
+    /// Successful zero-result feed recovery, distinct from a transport error.
+    /// The real backend may publish games later; never fabricate a card.
+    private var feedEmptyRefresh: some View {
+        Button {
+            Task { await load() }
+        } label: {
+            Label("Refresh games", systemImage: "arrow.clockwise")
+                .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(ArcadePulseRecoveryButtonStyle())
+        .accessibilityIdentifier("feed.empty.refresh")
+    }
+
+    @ViewBuilder private var feedEmptyLibrary: some View {
+        if let onOpenLibrary {
+            Button(action: onOpenLibrary) {
+                Label("Open Library", systemImage: "bookmark")
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(.bordered)
+            .tint(ArcadePulseTheme.neonMagenta)
+            .accessibilityIdentifier("feed.empty.library")
         }
     }
 
@@ -575,18 +621,45 @@ struct DiscoverView: View {
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("feed.error.recovery")
                     } else if visibleGames.isEmpty {
-                        VStack(spacing: 8) {
-                            Image(systemName: "magnifyingglass")
+                        // A genuinely empty feed is not a failed title Search.
+                        // Retain the actual selected feed and user's query.
+                        VStack(spacing: 12) {
+                            Image(systemName: FeedEmptyStatePolicy.isFiltered(
+                                searchQuery: activeSearchQuery) ? "magnifyingglass" : "gamecontroller")
                                 .font(.largeTitle)
                                 .foregroundStyle(.secondary)
-                            Text("No games found")
+                                .accessibilityHidden(true)
+                            Text(FeedEmptyStatePolicy.title(searchQuery: activeSearchQuery))
                                 .font(.headline)
-                            Text("Try a different title.")
+                                .accessibilityAddTraits(.isHeader)
+                            Text(FeedEmptyStatePolicy.guidance(
+                                searchQuery: activeSearchQuery,
+                                canOpenLibrary: onOpenLibrary != nil
+                            ))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if !FeedEmptyStatePolicy.isFiltered(searchQuery: activeSearchQuery) {
+                                if verticalSizeClass == .compact {
+                                    HStack(spacing: 12) {
+                                        feedEmptyRefresh
+                                        feedEmptyLibrary
+                                    }
+                                } else {
+                                    VStack(spacing: 12) {
+                                        feedEmptyRefresh
+                                        feedEmptyLibrary
+                                    }
+                                }
+                            }
                         }
+                        .frame(maxWidth: 520)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 44)
+                        .padding(.vertical, verticalSizeClass == .compact ? 12 : 44)
+                        .accessibilityIdentifier(
+                            FeedEmptyStatePolicy.isFiltered(searchQuery: activeSearchQuery)
+                                ? "feed.search.noResults" : "feed.empty.success")
                     } else {
                         if GameGridSingleResultLayout.centers(
                             resultCount: visibleGames.count,
