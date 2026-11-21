@@ -124,6 +124,24 @@ struct PlayerFirstInputGate {
     }
 }
 
+/// Re-evaluate native ownership when an asynchronously enqueued, non-score
+/// social metric is about to begin. Trusted flags come from the *current*
+/// Coordinator/pool, never the untrusted message body's fields. Once a real
+/// network request begins, its completion is a separate cancellation concern.
+enum PlayerRuntimeMetricDispatchPolicy {
+    static func mayStart(
+        ownsCurrentAttachment: Bool,
+        permitsRuntimeEvents: Bool,
+        taskCancelled: Bool,
+        expectedSessionID: String,
+        currentSessionID: String?
+    ) -> Bool {
+        ownsCurrentAttachment && permitsRuntimeEvents && !taskCancelled &&
+        PlayerNativeRuntimeIdentifierPolicy.validSessionID(expectedSessionID) &&
+        currentSessionID == expectedSessionID
+    }
+}
+
 /// Accept only trusted runtime metric kinds and their newer sequence values.
 /// The trusted JS runtime increments a global native sequence counter, so
 /// three per-kind high-water marks reject repeats without growing memory.
@@ -2914,16 +2932,34 @@ private struct PlayerWebView: UIViewRepresentable {
                           self.runtimeSessionID == runtimeSessionID else { return }
                     self.onFirstInput()
                 }
-                Task { await BackendAPI.shared.trackSocialEvent(
-                    gameID: expectedGameID, kind: "player_first_input",
-                    timeToFirstInputMS: ms, eventID: "ios-metric:\(metricID)"
-                ) }
+                Task { @MainActor [weak self] in
+                    guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
+                        ownsCurrentAttachment: self.ownsLiveAttachment,
+                        permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
+                        taskCancelled: Task<Never, Never>.isCancelled,
+                        expectedSessionID: runtimeSessionID,
+                        currentSessionID: self.runtimeSessionID
+                    ) else { return }
+                    await BackendAPI.shared.trackSocialEvent(
+                        gameID: self.expectedGameID, kind: "player_first_input",
+                        timeToFirstInputMS: ms, eventID: "ios-metric:\(metricID)"
+                    )
+                }
             case .perfWindow(let p95, let avg, let count):
-                Task { await BackendAPI.shared.trackSocialEvent(
-                    gameID: expectedGameID, kind: "player_perf_window",
-                    frameTimeP95MS: p95, frameTimeAvgMS: avg,
-                    frameCount: count, eventID: "ios-metric:\(metricID)"
-                ) }
+                Task { @MainActor [weak self] in
+                    guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
+                        ownsCurrentAttachment: self.ownsLiveAttachment,
+                        permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
+                        taskCancelled: Task<Never, Never>.isCancelled,
+                        expectedSessionID: runtimeSessionID,
+                        currentSessionID: self.runtimeSessionID
+                    ) else { return }
+                    await BackendAPI.shared.trackSocialEvent(
+                        gameID: self.expectedGameID, kind: "player_perf_window",
+                        frameTimeP95MS: p95, frameTimeAvgMS: avg,
+                        frameCount: count, eventID: "ios-metric:\(metricID)"
+                    )
+                }
             }
         }
 
