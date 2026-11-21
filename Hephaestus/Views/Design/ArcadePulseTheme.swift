@@ -178,6 +178,10 @@ enum ArcadePulseCreatorAvatarURLPolicy {
               !input.unicodeScalars.contains(where: {
                   CharacterSet.controlCharacters.contains($0)
               }),
+              let decoded = input.removingPercentEncoding,
+              !decoded.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }),
               let parsed = URL(string: input),
               backendBaseURL.scheme?.lowercased() == "https",
               let backendHost = backendBaseURL.host, !backendHost.isEmpty else {
