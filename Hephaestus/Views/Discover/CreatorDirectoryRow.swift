@@ -8,7 +8,11 @@ enum CreatorDirectoryRowLayout {
     /// guessed row count may substitute for a malformed backend identity.
     static func rowAccessibilityIdentifier(for creatorID: String) -> String? {
         let trimmed = creatorID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed == creatorID else { return nil }
+        // Never expose an interactive Directory row or accessibility key for
+        // control-bearing server IDs. Match the immersive creator admission.
+        guard trimmed == creatorID,
+              ForYouPageLayout.hasNavigableCreator(ownerID: creatorID)
+        else { return nil }
         return "creator.discovery.row.\(creatorID)"
     }
 
