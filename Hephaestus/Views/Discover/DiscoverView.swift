@@ -896,7 +896,7 @@ struct DiscoverView: View {
                         },
                         onReport: { reportingGame = $0 },
                         onBlockCreator: { game in
-                            if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { Task { await blockCreator(id) } }
+                            if let id = game.ownerID, ForYouPageLayout.canOfferCreatorBlock(ownerID: id, viewerID: BackendConfig.currentUserID) { Task { await blockCreator(id) } }
                         },
                         onNotInterested: { game in Task { await markNotInterested(game) } },
                         onOpenDetails: { detailGame = $0 },
@@ -929,7 +929,7 @@ struct DiscoverView: View {
                                     onOpenComments: { commentsGame = game },
                                     onOpenCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { profileRequest = CreatorProfileRequest(id: id) } },
                                     onReport: { reportingGame = game },
-                                    onBlockCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { Task { await blockCreator(id) } } },
+                                    onBlockCreator: { if let id = game.ownerID, ForYouPageLayout.canOfferCreatorBlock(ownerID: id, viewerID: BackendConfig.currentUserID) { Task { await blockCreator(id) } } },
                                     onNotInterested: { Task { await markNotInterested(game) } },
                                     onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } },
                                     shouldAutoplayPreview: false
@@ -1220,7 +1220,9 @@ struct DiscoverView: View {
     }
 
     private func blockCreator(_ creatorID: String) async {
-        guard ForYouPageLayout.hasNavigableCreator(ownerID: creatorID) else { return }
+        guard ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: creatorID, viewerID: BackendConfig.currentUserID
+        ) else { return }
         let viewerID = BackendConfig.currentUserID
         let epoch = socialMutationEpoch
         do {
@@ -1605,6 +1607,13 @@ private struct ForYouGamePage: View {
     let onOpenDetails: () -> Void
     let onImpression: () -> Void
 
+    private var canBlockCreator: Bool {
+        ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: game.ownerID,
+            viewerID: BackendConfig.currentUserID
+        )
+    }
+
     private var shareURL: URL {
         var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "game", value: game.id)]
@@ -1788,7 +1797,7 @@ private struct ForYouGamePage: View {
             Button("Game details", systemImage: "info.circle", action: onOpenDetails)
             Button("Report game", role: .destructive, action: onReport)
             Button("Not interested", action: onNotInterested)
-            if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
+            if canBlockCreator {
                 Button("Block creator", role: .destructive, action: onBlockCreator)
             }
         } label: {
@@ -1856,7 +1865,7 @@ private struct ForYouGamePage: View {
                         showsAccessibleActionsSheet = false
                         onNotInterested()
                     }
-                    if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
+                    if canBlockCreator {
                         Button("Block creator", role: .destructive) {
                             showsAccessibleActionsSheet = false
                             onBlockCreator()
