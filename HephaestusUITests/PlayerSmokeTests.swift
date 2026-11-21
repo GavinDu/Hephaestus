@@ -1571,6 +1571,15 @@ final class PlayerSmokeTests: XCTestCase {
         }
         XCTAssertTrue(commentAction.exists,
                       "Real For You posts must offer an accessible comment action; inspect authentic feed/Retry evidence.")
+        // Observe the original currently selected backend-published game title
+        // BEFORE opening Comments. No test-provided title or fake content.
+        let selectedGameTitle = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title.")
+        ).firstMatch
+        XCTAssertTrue(selectedGameTitle.waitForExistence(timeout: 5),
+                      "A genuine selected For You game must have a native titled feed page.")
+        let expectedPublishedTitle = selectedGameTitle.label
+        XCTAssertFalse(expectedPublishedTitle.isEmpty)
         commentAction.tap()
         // An axis:.vertical SwiftUI TextField can surface as a UITextView
         // rather than the generic accessibility wrapper carrying the SwiftUI
@@ -1596,6 +1605,26 @@ final class PlayerSmokeTests: XCTestCase {
                       "The composer must be an editable element for VoiceOver and XCTest.")
         XCTAssertTrue(composer.isHittable,
                       "Comment composer must remain reachable above the safe-area inset.")
+        // Native original evidence for the real published title and medium
+        // sheet geometry. This does not claim an Accessibility5 screenshot.
+        let genuineHeader = app.descendants(matching: .any)[
+            "comments.sheet.gameHeader"
+        ].firstMatch
+        let headerCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        headerCapture.name = "arcade-pulse-comments-real-game-header-before-keyboard"
+        headerCapture.lifetime = .keepAlways
+        add(headerCapture)
+        XCTAssertTrue(genuineHeader.waitForExistence(timeout: 5),
+                      "The genuine game-bound Comments header must mount.")
+        XCTAssertTrue(genuineHeader.label.contains(expectedPublishedTitle),
+                      "The Comments header must announce the same real selected published game title.")
+        XCTAssertLessThanOrEqual(genuineHeader.frame.maxY, composer.frame.minY,
+                                 "Expanded Comments header must not overlap the native composer.")
+        let nativeDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(nativeDone.exists && nativeDone.isHittable,
+                      "Expanded Comments header must preserve a reachable native Done.")
+        XCTAssertFalse(genuineHeader.frame.intersects(nativeDone.frame),
+                       "Expanded Comments header must not cover the native Done control.")
         let unavailable = app.descendants(matching: .any)["comments.send.unavailable"].firstMatch
         XCTAssertTrue(unavailable.waitForExistence(timeout: 5),
                       "Empty comments must show an explicitly unavailable Send affordance.")
