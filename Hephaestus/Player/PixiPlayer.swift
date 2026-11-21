@@ -161,6 +161,42 @@ enum PlayerRuntimeMetricDispatchPolicy {
     }
 }
 
+/// Main-actor native telemetry owner. One bounded set of URLSession-backed
+/// Swift Tasks per attached document; no queue or second runtime executor.
+/// A revoked Task may have ALREADY reached the server before cancellation.
+/// The epoch prevents late task completion from changing a later document.
+@MainActor
+final class PlayerNativeMetricTaskRegistry {
+    static let maximumInFlight = 2
+
+    private var tasks: [UInt64: Task<Void, Never>] = [:]
+    private var nextID: UInt64 = 0
+    private(set) var epoch: UInt64 = 0
+    var inFlightCount: Int { tasks.count }
+
+    @discardableResult
+    func submit(_ makeTask: (_ taskID: UInt64, _ epoch: UInt64) -> Task<Void, Never>) -> Bool {
+        guard tasks.count < Self.maximumInFlight,
+              nextID < UInt64.max, epoch < UInt64.max else { return false }
+        nextID += 1
+        let id = nextID
+        tasks[id] = makeTask(id, epoch)
+        return true
+    }
+
+    func complete(taskID: UInt64, epoch taskEpoch: UInt64) {
+        guard taskEpoch == epoch else { return }
+        tasks.removeValue(forKey: taskID)
+    }
+
+    func revoke() {
+        if epoch < UInt64.max { epoch += 1 }
+        let priorTasks = Array(tasks.values)
+        tasks.removeAll(keepingCapacity: false)
+        for task in priorTasks { task.cancel() }
+    }
+}
+
 /// Accept only trusted runtime metric kinds and their newer sequence values.
 /// The trusted JS runtime increments a global native sequence counter, so
 /// three per-kind high-water marks reject repeats without growing memory.
@@ -2769,6 +2805,9 @@ private struct PlayerWebView: UIViewRepresentable {
         private var verifiedRunGate = PlayerVerifiedRunNotificationGate()
         // At most two concurrent result lookups; deferred work stays latest-only.
         private var verifiedRunFetchTasks: [String: Task<Void, Never>] = [:]
+        // Bounded, cancellable first-input/perf telemetry owned by this
+        // Coordinator. Detached/replaced document POSTs are never left queued.
+        private let metricTelemetryTasks = PlayerNativeMetricTaskRegistry()
         private var navigationFailureGate = PlayerNavigationFailureGate()
         private var metricSequenceGate = PlayerRuntimeMetricSequenceGate()
         private var firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
@@ -2985,33 +3024,51 @@ private struct PlayerWebView: UIViewRepresentable {
                           self.runtimeSessionID == runtimeSessionID else { return }
                     self.onFirstInput()
                 }
-                Task { @MainActor [weak self] in
-                    guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
-                        ownsCurrentAttachment: self.ownsLiveAttachment,
-                        permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
-                        taskCancelled: Task<Never, Never>.isCancelled,
-                        expectedSessionID: runtimeSessionID,
-                        currentSessionID: self.runtimeSessionID
-                    ) else { return }
-                    await BackendAPI.shared.trackSocialEvent(
-                        gameID: self.expectedGameID, kind: "player_first_input",
-                        timeToFirstInputMS: ms, eventID: "ios-metric:\(metricID)"
-                    )
+                let registry = metricTelemetryTasks
+                registry.submit { [weak self, weak registry] taskID, epoch in
+                    Task { @MainActor [weak self, weak registry] in
+                        defer { registry?.complete(taskID: taskID, epoch: epoch) }
+                        // Snapshot only a native-vetted, currently attached ID.
+                        // Never retain the old Coordinator over URLSession await.
+                        let validGameID: String? = {
+                            guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
+                                ownsCurrentAttachment: self.ownsLiveAttachment,
+                                permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
+                                taskCancelled: Task<Never, Never>.isCancelled,
+                                expectedSessionID: runtimeSessionID,
+                                currentSessionID: self.runtimeSessionID
+                            ) else { return nil }
+                            return self.expectedGameID
+                        }()
+                        guard let validGameID, !Task<Never, Never>.isCancelled else { return }
+                        await BackendAPI.shared.trackSocialEvent(
+                            gameID: validGameID, kind: "player_first_input",
+                            timeToFirstInputMS: ms, eventID: "ios-metric:\(metricID)"
+                        )
+                    }
                 }
             case .perfWindow(let p95, let avg, let count):
-                Task { @MainActor [weak self] in
-                    guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
-                        ownsCurrentAttachment: self.ownsLiveAttachment,
-                        permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
-                        taskCancelled: Task<Never, Never>.isCancelled,
-                        expectedSessionID: runtimeSessionID,
-                        currentSessionID: self.runtimeSessionID
-                    ) else { return }
-                    await BackendAPI.shared.trackSocialEvent(
-                        gameID: self.expectedGameID, kind: "player_perf_window",
-                        frameTimeP95MS: p95, frameTimeAvgMS: avg,
-                        frameCount: count, eventID: "ios-metric:\(metricID)"
-                    )
+                let registry = metricTelemetryTasks
+                registry.submit { [weak self, weak registry] taskID, epoch in
+                    Task { @MainActor [weak self, weak registry] in
+                        defer { registry?.complete(taskID: taskID, epoch: epoch) }
+                        let validGameID: String? = {
+                            guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
+                                ownsCurrentAttachment: self.ownsLiveAttachment,
+                                permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
+                                taskCancelled: Task<Never, Never>.isCancelled,
+                                expectedSessionID: runtimeSessionID,
+                                currentSessionID: self.runtimeSessionID
+                            ) else { return nil }
+                            return self.expectedGameID
+                        }()
+                        guard let validGameID, !Task<Never, Never>.isCancelled else { return }
+                        await BackendAPI.shared.trackSocialEvent(
+                            gameID: validGameID, kind: "player_perf_window",
+                            frameTimeP95MS: p95, frameTimeAvgMS: avg,
+                            frameCount: count, eventID: "ios-metric:\(metricID)"
+                        )
+                    }
                 }
             }
         }
@@ -3032,6 +3089,7 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func stopObserving() {
+            metricTelemetryTasks.revoke()
             launchLifecycle.detach()
             prewarmRecoveryArmed = false
             prewarmLoadingObservation?.invalidate()
@@ -3097,6 +3155,7 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             guard acceptsCurrentHostCallbacks else { return }
+            metricTelemetryTasks.revoke()
             PlayerWebViewPool.didStartDocumentNavigation(webView)
             nativeBridgeVersionGate.reset()
             launchLifecycle.navigationStarted()
@@ -3120,6 +3179,7 @@ private struct PlayerWebView: UIViewRepresentable {
             guard acceptsCurrentHostCallbacks,
                   launchLifecycle.navigationFailed(),
                   navigationFailureGate.shouldReportFailure() else { return }
+            metricTelemetryTasks.revoke()
             disarmPrewarmRecovery()
             if let view = attachedWebView { PlayerWebViewPool.revokeDocumentNonce(view) }
             onLoadFail(error)
@@ -3183,6 +3243,7 @@ private struct PlayerWebView: UIViewRepresentable {
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             guard acceptsCurrentHostCallbacks,
                   launchLifecycle.webProcessTerminated() else { return }
+            metricTelemetryTasks.revoke()
             disarmPrewarmRecovery()
             PlayerWebViewPool.revokeDocumentNonce(webView)
             onTerminate()
