@@ -56,6 +56,25 @@ enum FeedEmptyStatePolicy {
     }
 }
 
+/// The immersive For You caption and VoiceOver announcement derive from the
+/// same three valid backend-published labels. A malformed early topic cannot
+/// displace a later genuine topic, and no synthetic tag is introduced.
+enum ForYouSpotlightTopicPolicy {
+    struct Presentation: Equatable {
+        let visual: String
+        let spoken: String
+    }
+
+    static func presentation(_ topics: [String]?) -> Presentation? {
+        let labels = GameFeedCardTopicPolicy.publicLabels(topics)
+        guard !labels.isEmpty else { return nil }
+        return Presentation(
+            visual: labels.map { "#\($0)" }.joined(separator: "  "),
+            spoken: "Topics: " + labels.joined(separator: ", ")
+        )
+    }
+}
+
 // MARK: - Discover
 
 private struct PlayerResultPresentation: Identifiable {
@@ -1849,12 +1868,12 @@ private struct ForYouGamePage: View {
                     .foregroundStyle(.white.opacity(0.94))
                     .lineLimit(2)
             }
-            if !isCompact, let topics = game.topics, !topics.isEmpty {
-                Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
+            if !isCompact, let topics = ForYouSpotlightTopicPolicy.presentation(game.topics) {
+                Text(topics.visual)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
-                    .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
+                    .accessibilityLabel(topics.spoken)
             }
             if !isCompact, let expression = game.playableExpression, expression.source_visibility == "public" {
                 Button { showsExpressionDetails = true } label: {
