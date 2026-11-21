@@ -675,10 +675,17 @@ enum PlayerNativeRuntimeIdentifierPolicy {
     static let maximumBytes = 128
 
     static func validSessionID(_ value: String) -> Bool {
-        let bytes = Array(value.utf8)
-        guard (1...maximumBytes).contains(bytes.count) else { return false }
-        // Match the server's printable ASCII identifier baseline.
-        return bytes.allSatisfy { (0x21...0x7e).contains($0) }
+        // The WebKit message body is untrusted. Reject the 129th byte before
+        // allocating a full UTF-8 copy of a potentially enormous string.
+        // Keep #451's exact server-compatible printable ASCII grammar.
+        var byteCount = 0
+        for byte in value.utf8 {
+            byteCount += 1
+            guard byteCount <= maximumBytes, (0x21...0x7e).contains(byte) else {
+                return false
+            }
+        }
+        return byteCount > 0
     }
 
     /// A genuine response must identify the exact run that was requested;
@@ -688,18 +695,22 @@ enum PlayerNativeRuntimeIdentifierPolicy {
     }
 
     static func validRunID(_ value: String) -> Bool {
-        let bytes = Array(value.utf8)
-        guard (1...maximumBytes).contains(bytes.count),
-              value != ".", value != ".." else { return false }
-        // The run ID becomes exactly one percent-encoded REST path segment.
-        // Do not allow embedded slashes, percent escapes or dot segments.
-        return bytes.allSatisfy { byte in
-            (0x41...0x5a).contains(byte) ||
-            (0x61...0x7a).contains(byte) ||
-            (0x30...0x39).contains(byte) ||
-            byte == 0x2d || byte == 0x2e ||
-            byte == 0x5f || byte == 0x7e
+        guard value != ".", value != ".." else { return false }
+        // Validate the path segment in a streaming bounded pass: don't
+        // materialize its entire UTF-8 representation before the length gate.
+        // Existing #451 unreserved grammar and dot-segment rules are unchanged.
+        var byteCount = 0
+        for byte in value.utf8 {
+            byteCount += 1
+            guard byteCount <= maximumBytes,
+                  (0x41...0x5a).contains(byte) ||
+                  (0x61...0x7a).contains(byte) ||
+                  (0x30...0x39).contains(byte) ||
+                  byte == 0x2d || byte == 0x2e ||
+                  byte == 0x5f || byte == 0x7e
+            else { return false }
         }
+        return byteCount > 0
     }
 }
 
