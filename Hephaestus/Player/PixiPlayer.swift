@@ -995,7 +995,7 @@ enum PlayerAuthorizedDocumentRevalidationPolicy {
               let originScheme = origin.scheme?.lowercased(),
               let originHost = origin.host?.lowercased(),
               scheme == originScheme, host == originHost,
-              p.port ?? (scheme == "https" ? 443 : 80) ==
+              (p.port ?? (scheme == "https" ? 443 : 80)) ==
                 (origin.port ?? (originScheme == "https" ? 443 : 80)),
               (scheme == "https" || scheme == "http"),
               p.user == nil, p.password == nil, p.fragment == nil,
