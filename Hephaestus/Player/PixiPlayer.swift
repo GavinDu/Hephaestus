@@ -2252,10 +2252,18 @@ struct PixiPlayerSheet: View {
                                 .accessibilityIdentifier("player.retry")
                                 .disabled(sessionRevoked)
                             }
-                            Button("Return to feed") {
+                            // Expand the actual Button label, not just its
+                            // outer layout frame: VoiceOver and XCTest must see
+                            // the same usable 44pt native recovery target.
+                            Button {
                                 finishToFeed()
+                            } label: {
+                                Text("Return to feed")
+                                    .frame(minWidth: HephaestusDesign.minimumActionHeight,
+                                           minHeight: HephaestusDesign.minimumActionHeight)
+                                    .contentShape(Rectangle())
                             }
-                            .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                            .buttonStyle(.bordered)
                             .accessibilityIdentifier("player.returnToFeed")
                         }
                     }
