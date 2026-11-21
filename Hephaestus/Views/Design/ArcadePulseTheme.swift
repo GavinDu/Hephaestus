@@ -165,6 +165,43 @@ struct ArcadePulsePlayCTA: View {
     }
 }
 
+/// Apply the same honest HTTPS boundary to a publisher-supplied avatar
+/// that the game's poster/clip URLs already use. Genuine relative avatar
+/// paths stay on the configured backend origin; explicit HTTPS CDN hosts are
+/// preserved. URL validation here does not attest any later HTTP redirect.
+enum ArcadePulseCreatorAvatarURLPolicy {
+    static func resolvedURL(raw: String?, backendBaseURL: URL) -> URL? {
+        guard let raw else { return nil }
+        let input = raw.trimmingCharacters(in: .whitespaces)
+        guard !input.isEmpty, !input.hasPrefix("//"),
+              !input.hasPrefix("\\\\"),
+              !input.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }),
+              let parsed = URL(string: input),
+              backendBaseURL.scheme?.lowercased() == "https",
+              let backendHost = backendBaseURL.host, !backendHost.isEmpty else {
+            return nil
+        }
+
+        // A relative asset name cannot smuggle another origin, while an
+        // explicitly absolute HTTPS publisher-approved CDN retains its URL.
+        let isRelative = parsed.scheme == nil && parsed.host == nil
+        guard isRelative || parsed.scheme?.lowercased() == "https",
+              let resolved = URL(string: input, relativeTo: backendBaseURL)?.absoluteURL,
+              resolved.scheme?.lowercased() == "https",
+              let host = resolved.host, !host.isEmpty,
+              resolved.user == nil, resolved.password == nil else {
+            return nil
+        }
+        if isRelative {
+            guard host.caseInsensitiveCompare(backendHost) == .orderedSame,
+                  resolved.port == backendBaseURL.port else { return nil }
+        }
+        return resolved
+    }
+}
+
 /// Real creator name/approved avatar supplied by FeedGame; no fake avatar,
 /// follower count, or invented identity is displayed.
 struct ArcadePulseCreatorIdentity: View {
@@ -195,7 +232,9 @@ struct ArcadePulseCreatorIdentity: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Group {
-                    if let avatarURL, let url = URL(string: avatarURL) {
+                    if let url = ArcadePulseCreatorAvatarURLPolicy.resolvedURL(
+                        raw: avatarURL, backendBaseURL: BackendConfig.baseURL
+                    ) {
                         AsyncImage(url: url) { phase in
                             if let image = phase.image {
                                 image.resizable().scaledToFill()
