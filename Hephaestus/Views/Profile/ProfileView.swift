@@ -21,6 +21,30 @@ enum ProfileBottomInsetPolicy {
     }
 }
 
+/// The moderation service supplies an optional external contact link.
+/// In-app appeals remain available even when that link is absent or unsafe.
+/// A parsed URL alone must never make a non-web or credential-bearing target
+/// look like a trusted system link.
+enum ModerationContactLinkPolicy {
+    static func approvedURL(_ raw: String?) -> URL? {
+        guard let raw else { return nil }
+        let candidate = raw.trimmingCharacters(in: .whitespaces)
+        guard !candidate.isEmpty,
+              !candidate.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }),
+              let decoded = candidate.removingPercentEncoding,
+              !decoded.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }),
+              let url = URL(string: candidate),
+              url.scheme?.lowercased() == "https",
+              let host = url.host, !host.isEmpty,
+              url.user == nil, url.password == nil else { return nil }
+        return url
+    }
+}
+
 // MARK: - Profile
 
 /// Native Profile actions can return sensitive AuthServices/URLSession errors.
@@ -373,8 +397,21 @@ private struct ModerationAppealSheet: View {
                             LabeledContent("Email", value: contact.contact_email)
                                 .textSelection(.enabled)
                         }
-                        if !contact.contact_url.isEmpty, let url = URL(string: contact.contact_url) {
-                            Link("Open moderation contact", destination: url)
+                        if let url = ModerationContactLinkPolicy.approvedURL(
+                            contact.contact_url
+                        ) {
+                            Link(destination: url) {
+                                Label("Open moderation contact",
+                                      systemImage: "arrow.up.right.square")
+                                    .frame(minHeight: 44)
+                            }
+                            .accessibilityIdentifier("profile.moderation.externalContact")
+                        } else if !contact.contact_url.isEmpty {
+                            Text("External contact link unavailable. You can still submit an in-app appeal.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("profile.moderation.externalContactUnavailable")
                         }
                         if !contact.external_contact_configured {
                             Text("No external contact channel is configured. You can still submit an in-app appeal.")
