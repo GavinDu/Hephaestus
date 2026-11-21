@@ -3084,6 +3084,11 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         private func handleMetric(_ body: [String: Any], runtimeSessionID: String) {
+            // Never consume a per-kind sequence or a first-scene/input reducer
+            // if the current attachment lacks a native nonce/session proof.
+            guard PlayerCurrentHostMilestoneProjection.permitsMetricAdmission(
+                currentHostMilestone, forSession: runtimeSessionID
+            ) else { return }
             // Reject malformed/extra fields *before* advancing the per-kind
             // high-water mark. Otherwise a bad sequence=100000 can suppress
             // a later valid scene/input message with a smaller sequence.
