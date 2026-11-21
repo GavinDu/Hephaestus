@@ -27,12 +27,12 @@ enum ProfileBottomInsetPolicy {
 /// look like a trusted system link.
 enum ModerationContactLinkPolicy {
     static func approvedURL(_ raw: String?) -> URL? {
-        guard let raw else { return nil }
+        guard let raw,
+              !raw.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }) else { return nil }
         let candidate = raw.trimmingCharacters(in: .whitespaces)
         guard !candidate.isEmpty,
-              !candidate.unicodeScalars.contains(where: {
-                  CharacterSet.controlCharacters.contains($0)
-              }),
               let decoded = candidate.removingPercentEncoding,
               !decoded.unicodeScalars.contains(where: {
                   CharacterSet.controlCharacters.contains($0)
