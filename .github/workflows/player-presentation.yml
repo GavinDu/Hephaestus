@@ -10,6 +10,10 @@ on:
       - "HephaestusUITests/**"
       - "Hephaestus.xcodeproj/**"
       - ".github/workflows/player-presentation.yml"
+      # Contract regression affects Creator discovery in the real player UX.
+      - ".github/workflows/creator-discovery-schema.yml"
+      - "tools/test-feedback/check_creator_discovery_contract.py"
+      - "tools/test-feedback/test_check_creator_discovery_contract.py"
   push:
     branches: [main]
     paths:
@@ -18,6 +22,10 @@ on:
       - "HephaestusUITests/**"
       - "Hephaestus.xcodeproj/**"
       - ".github/workflows/player-presentation.yml"
+      # Contract regression affects Creator discovery in the real player UX.
+      - ".github/workflows/creator-discovery-schema.yml"
+      - "tools/test-feedback/check_creator_discovery_contract.py"
+      - "tools/test-feedback/test_check_creator_discovery_contract.py"
 
 permissions:
   contents: read
