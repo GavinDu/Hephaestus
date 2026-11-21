@@ -1856,9 +1856,7 @@ private struct ForYouGamePage: View {
                 // The *existing real selected game's* scrollable Actions
                 // sheet keeps its first three genuine topics available to
                 // sighted and VoiceOver users without inventing a topic.
-                if let topics = GameMetadataTopicPolicy.presentation(
-                    game.topics, maxCount: 3
-                ) {
+                if let topics = ForYouAccessibleActionsTopicPolicy.summary(game.topics) {
                     Section("Game topics") {
                         Text(topics.visual)
                             .font(.body)
