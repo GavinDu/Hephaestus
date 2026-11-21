@@ -61,6 +61,18 @@ struct PlayerScenePosterHandoffPolicyTests {
         #expect(recover(scene: 7))
     }
 
+    @Test func missingSceneTimeoutMustNotTriggerNetworkAutoReload() {
+        // A renderer that never submits a scene is not proof of an offline
+        // connection. The watchdog is manual recovery, not network retry.
+        let category: PlayerLoadFailure.Category = .unknown
+        #expect(PlayerLoadRetryPolicy.shouldOfferManualRetry(category: category))
+        #expect(!PlayerLoadRetryPolicy.shouldRetryOnForeground(category: category))
+        #expect(!PlayerLoadRetryPolicy.shouldRetryOnConnectivityRestored(
+            wasOffline: true, isOffline: false, category: category,
+            hasError: true, sessionRevoked: false
+        ))
+    }
+
     @Test func oneHundredSixtyStaleAttemptsNeverReleaseOrRevive() {
         for iteration in 0..<160 {
             let attempt = iteration + 1
