@@ -3447,9 +3447,19 @@ enum CommentsDeleteReadPolicy {
     }
 }
 
-private struct CommentsSheet: View {
+private /// Native Comments header title line budget. Only actual backend-published
+/// game titles are shown; VoiceOver retains the original unabridged text.
+/// Make room for semantic Dynamic Type without increasing bottom composer size.
+enum CommentsHeaderTitleLayout {
+    static func maxLines(for size: DynamicTypeSize) -> Int {
+        size.isAccessibilitySize ? 3 : 2
+    }
+}
+
+struct CommentsSheet: View {
     let game: FeedGame
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var comments: [SocialComment] = []
     @State private var draft = ""
     @State private var errorMessage: String?
@@ -3470,7 +3480,7 @@ private struct CommentsSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                HStack(alignment: .center, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "gamecontroller.fill")
                         .font(.headline)
                         .foregroundStyle(ArcadePulseTheme.playOrange)
@@ -3481,7 +3491,8 @@ private struct CommentsSheet: View {
                             .foregroundStyle(ArcadePulseTheme.neonMagenta)
                         Text(game.title)
                             .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
+                            .lineLimit(CommentsHeaderTitleLayout.maxLines(for: dynamicTypeSize))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 0)
                     // Unknown while loading/transport failed: do not display
