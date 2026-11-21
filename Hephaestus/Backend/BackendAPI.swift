@@ -546,6 +546,53 @@ enum APIError: Error, LocalizedError {
     }
 }
 
+/// Opaque creator IDs are a *single* URL path component, never URL syntax.
+/// Syntactic admission only: server authorization and revocation are separate.
+/// Namespaced account IDs (e.g. "auth0|subject") retain their exact bytes,
+/// but their reserved separators are percent-encoded on the wire.
+enum BackendAPICreatorPathSegmentPolicy {
+    private static let upperHex = Array("0123456789ABCDEF".utf8)
+
+    static func encoded(_ creatorID: String) -> String? {
+        // The real Apple-signed backend accepts opaque Unicode subjects and
+        // prefixes them with "apple:". Never silently collapse them to ASCII
+        // or normalize owner identity. Bound bytes BEFORE any transformation.
+        var byteCount = 0
+        for _ in creatorID.utf8 {
+            guard byteCount < 128 else { return nil }
+            byteCount += 1
+        }
+        guard byteCount > 0, creatorID != ".", creatorID != ".." else {
+            return nil
+        }
+        // Raw delimiters can be double-unescaped by proxies or alter a
+        // resource path. Whitespace/control IDs also disagree with Go's
+        // creator handler (which trims PathValue); decline them explicitly.
+        for scalar in creatorID.unicodeScalars {
+            guard !CharacterSet.controlCharacters.contains(scalar),
+                  !CharacterSet.whitespacesAndNewlines.contains(scalar),
+                  scalar != "/", scalar != "\\", scalar != "%",
+                  scalar != "?", scalar != "#" else { return nil }
+        }
+        // Encode UTF-8 bytes directly as RFC3986 path-segment data. The only
+        // unescaped bytes are [A-Za-z0-9._~-]; output is <=384 ASCII bytes.
+        // This is syntactic admission, never creator authorization.
+        var pathBytes: [UInt8] = []
+        pathBytes.reserveCapacity(byteCount * 3)
+        for byte in creatorID.utf8 {
+            switch byte {
+            case 48...57, 65...90, 97...122, 45, 46, 95, 126:
+                pathBytes.append(byte)
+            default:
+                pathBytes.append(37) // %
+                pathBytes.append(upperHex[Int(byte >> 4)])
+                pathBytes.append(upperHex[Int(byte & 0x0F)])
+            }
+        }
+        return String(bytes: pathBytes, encoding: .utf8)
+    }
+}
+
 /// Thin async client for the DoodleQuest backend. One shared instance.
 /// Identity is derived from a Keychain-backed bearer token. The legacy
 /// X-User-ID header is disabled unless a developer explicitly opts in.
@@ -755,8 +802,11 @@ final class BackendAPI: ObservableObject {
     }
 
     func setFollowing(_ creatorID: String, following: Bool) async throws {
+        guard let segment = BackendAPICreatorPathSegmentPolicy.encoded(creatorID) else {
+            throw APIError.invalidInput("Invalid creator identifier.")
+        }
         let method = following ? "POST" : "DELETE"
-        let req = try makeRequest("v1/users/\(creatorID)/follow", method: method)
+        let req = try makeRequest("v1/users/\(segment)/follow", method: method)
         let _: ActionResponse = try await send(ActionResponse.self, req)
     }
 
@@ -848,8 +898,11 @@ final class BackendAPI: ObservableObject {
     }
 
     func blockCreator(_ creatorID: String, blocked: Bool) async throws {
+        guard let segment = BackendAPICreatorPathSegmentPolicy.encoded(creatorID) else {
+            throw APIError.invalidInput("Invalid creator identifier.")
+        }
         let method = blocked ? "POST" : "DELETE"
-        let req = try makeRequest("v1/users/\(creatorID)/block", method: method)
+        let req = try makeRequest("v1/users/\(segment)/block", method: method)
         let _: ActionResponse = try await send(ActionResponse.self, req)
     }
 
@@ -881,7 +934,10 @@ final class BackendAPI: ObservableObject {
     }
 
     func fetchCreatorProfile(id: String) async throws -> CreatorProfile {
-        let req = try makeRequest("v1/users/\(id)")
+        guard let segment = BackendAPICreatorPathSegmentPolicy.encoded(id) else {
+            throw APIError.invalidInput("Invalid creator identifier.")
+        }
+        let req = try makeRequest("v1/users/\(segment)")
         return try await send(CreatorProfile.self, req)
     }
 
