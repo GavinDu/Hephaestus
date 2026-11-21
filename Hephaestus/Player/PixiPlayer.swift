@@ -389,6 +389,32 @@ enum PlayerRejectedHandoffCleanupPolicy {
     }
 }
 
+/// Only a current native-admitted scene submission can release a hold poster.
+/// Navigation finish is not a first composited pixel nor gameplay start.
+enum PlayerScenePosterHandoffPolicy {
+    static let noSceneTimeoutMilliseconds = 12_000
+
+    static func mayFade(
+        expectedAttempt: Int, acceptedSceneAttempt: Int?,
+        hasHoldPoster: Bool, holdVisible: Bool, holdOpacity: Double,
+        navigationFinished: Bool, hasLoadError: Bool, sessionRevoked: Bool
+    ) -> Bool {
+        acceptedSceneAttempt == expectedAttempt &&
+        hasHoldPoster && holdVisible && holdOpacity > 0 &&
+        navigationFinished && !hasLoadError && !sessionRevoked
+    }
+
+    static func shouldOfferNoSceneRecovery(
+        expectedAttempt: Int, acceptedSceneAttempt: Int?,
+        hasHoldPoster: Bool, holdVisible: Bool,
+        navigationFinished: Bool, hasLoadError: Bool, sessionRevoked: Bool
+    ) -> Bool {
+        acceptedSceneAttempt != expectedAttempt &&
+        hasHoldPoster && holdVisible && navigationFinished &&
+        !hasLoadError && !sessionRevoked
+    }
+}
+
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
@@ -1894,8 +1920,8 @@ struct PixiPlayerSheet: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Handoff state (#58): the hold fades out once, on the first
-    /// navigation finish. Reloads and retries never re-show it.
+    /// Handoff state (#58/#765): navigation finish never fades the hold.
+    /// The admitted current scene submits first; a bounded timeout exposes Retry.
     @State private var holdOpacity = 1.0
     @State private var holdVisible = true
     @State private var prewarmHit = false
@@ -2011,11 +2037,9 @@ struct PixiPlayerSheet: View {
         // The runtime's first accepted input owns the gameplay-start
         // clock. Navigation finish may still precede the start card or
         // rendering; starting a quick-exit timer here mislabels latency.
-        // #58 handoff, once: tap-to-nav-ready is tap time
-        // to navigation finish (the shell definition
-        // Gavin confirmed), and the hold poster fades
-        // out over the live web view. Reloads skip
-        // both: the hold is already gone by then.
+        // TapToNavReady still means *only* navigation finish. The hold
+        // does not fade until a current admitted renderer scene is submitted.
+        // If prewarm reports scene before didFinish, both gates are now ready.
         if !didReportHandoff {
             didReportHandoff = true
             if let tappedAt {
@@ -2023,26 +2047,38 @@ struct PixiPlayerSheet: View {
                 PlayerTelemetry.report(gameID: gameID, kind: "perf", name: "TapToNavReady",
                                        message: "tap-to-nav-ready in \(ms)ms prewarmHit=\(prewarmHit) quality=\(effectiveQuality)")
             }
-            if admittedHoldPosterURL != nil, holdVisible {
-                if reduceMotion {
-                    holdOpacity = 0
-                    holdVisible = false
-                } else {
-                    withAnimation(.easeOut(duration: 0.25)) { holdOpacity = 0 }
-                    // A retry/account swap can occur during the 300 ms fade.
-                    // The old sheet must never mutate its successor's poster.
-                    let fadeEpoch = attempt
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(300))
-                        guard !Task.isCancelled,
-                              PlayerTransientPresentationPolicy.mayFinishPosterFade(
-                                expectedEpoch: fadeEpoch, currentEpoch: attempt,
-                                sessionRevoked: sessionRevoked,
-                                isLoading: isLoading, hasLoadError: loadError != nil
-                              ) else { return }
-                        holdVisible = false
-                    }
-                }
+        }
+        fadeHoldPosterAfterCurrentScene()
+    }
+
+    /// Scene submission is a validated current native callback, not an
+    /// observation of a GPU-composited pixel or independent score proof.
+    private func fadeHoldPosterAfterCurrentScene() {
+        guard PlayerScenePosterHandoffPolicy.mayFade(
+            expectedAttempt: attempt,
+            acceptedSceneAttempt: firstSceneSubmittedForAttempt?.epoch,
+            hasHoldPoster: admittedHoldPosterURL != nil,
+            holdVisible: holdVisible, holdOpacity: holdOpacity,
+            navigationFinished: !isLoading,
+            hasLoadError: loadError != nil, sessionRevoked: sessionRevoked
+        ) else { return }
+
+        if reduceMotion {
+            holdOpacity = 0
+            holdVisible = false
+        } else {
+            withAnimation(.easeOut(duration: 0.25)) { holdOpacity = 0 }
+            let fadeEpoch = attempt
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled,
+                      firstSceneSubmittedForAttempt?.epoch == fadeEpoch,
+                      PlayerTransientPresentationPolicy.mayFinishPosterFade(
+                        expectedEpoch: fadeEpoch, currentEpoch: attempt,
+                        sessionRevoked: sessionRevoked,
+                        isLoading: isLoading, hasLoadError: loadError != nil
+                      ) else { return }
+                holdVisible = false
             }
         }
     }
@@ -2151,6 +2187,7 @@ struct PixiPlayerSheet: View {
                             firstSceneSubmittedForAttempt = (
                                 epoch: callbackEpoch, milliseconds: ms
                             )
+                            fadeHoldPosterAfterCurrentScene()
                         },
                         onFirstInput: {
                             guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
@@ -2490,6 +2527,32 @@ struct PixiPlayerSheet: View {
                     PlayerTelemetry.report(gameID: gameID, kind: "ios-thermal",
                                            name: "ThermalState", message: "thermal state serious/critical during play")
                 }
+            }
+            .task(id: "\(attempt):\(isLoading)") {
+                // Navigation-finish is not a scene. This attempt-scoped
+                // SwiftUI task is cancelled on retry, phase change and exit.
+                let watchdogAttempt = attempt
+                guard !isLoading, loadError == nil,
+                      admittedHoldPosterURL != nil, holdVisible else { return }
+                try? await Task.sleep(for: .milliseconds(
+                    PlayerScenePosterHandoffPolicy.noSceneTimeoutMilliseconds
+                ))
+                guard !Task.isCancelled, watchdogAttempt == attempt,
+                      PlayerScenePosterHandoffPolicy.shouldOfferNoSceneRecovery(
+                        expectedAttempt: watchdogAttempt,
+                        acceptedSceneAttempt: firstSceneSubmittedForAttempt?.epoch,
+                        hasHoldPoster: admittedHoldPosterURL != nil,
+                        holdVisible: holdVisible,
+                        navigationFinished: !isLoading,
+                        hasLoadError: loadError != nil,
+                        sessionRevoked: sessionRevoked
+                      ) else { return }
+                // No compositor or rendered-scene claims from didFinish.
+                // Provide a bounded, accessible manual Retry or safe exit.
+                holdOpacity = 0
+                holdVisible = false
+                loadFailureCategory = .network
+                loadError = "The game has not drawn its first scene. Tap Retry or return to the feed."
             }
             .task(id: attempt) {
                 // Start an independent 8s timer per actual WebView attempt.
