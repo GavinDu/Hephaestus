@@ -24,6 +24,25 @@ import WebKit
 //   - lifecycle signals come from WKNavigationDelegate, KVO on the web
 //     view, OS notifications, and the validated run-result notification.
 
+/// Canonical immutable public GamePackage identity from the backend wire contract.
+/// Never trim or rewrite IDs: altered identity can reopen a different game
+/// or poison a pooled scene/credential lease. The query encoder is not a validator.
+enum PlayerPublishedGameIDPolicy {
+    static func valid(_ gameID: String) -> Bool {
+        // Iterate directly and stop after 128 bytes; untrusted feed metadata
+        // must not allocate an unbounded UTF-8 copy just for validation.
+        var count = 0
+        for byte in gameID.utf8 {
+            count += 1
+            guard count <= 128,
+                  (0x41...0x5a).contains(byte) || (0x61...0x7a).contains(byte) ||
+                  (0x30...0x39).contains(byte) || byte == 0x2d || byte == 0x5f
+            else { return false }
+        }
+        return count > 0
+    }
+}
+
 struct PixiPlayerRequest: Identifiable {
     let id = UUID()
     let gameID: String
@@ -396,7 +415,7 @@ struct PlayerPrewarmSceneMilestoneLedger {
         let runtimeSessionID: String
 
         var isValid: Bool {
-            guard !gameID.isEmpty, gameID.utf8.count <= 128,
+            guard PlayerPublishedGameIDPolicy.valid(gameID),
                   playerURL.scheme?.lowercased() == "https",
                   let host = playerURL.host, !host.isEmpty,
                   playerURL.user == nil, playerURL.password == nil,
@@ -1313,8 +1332,7 @@ enum PlayerWebViewPool {
     static func playerURL(gameID: String, quality: String? = nil) -> URL? {
         // Do not construct a player URL for an empty identifier, and never
         // forward arbitrary quality values into the runtime query contract.
-        let normalizedGameID = gameID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedGameID.isEmpty else { return nil }
+        guard PlayerPublishedGameIDPolicy.valid(gameID) else { return nil }
 
         var components = URLComponents(url: BackendConfig.baseURL, resolvingAgainstBaseURL: false)
         components?.path = "/player"
@@ -1325,7 +1343,7 @@ enum PlayerWebViewPool {
             ["low", "high"].contains(value) ? value : nil
         }
         components?.queryItems = [
-            URLQueryItem(name: "game", value: normalizedGameID),
+            URLQueryItem(name: "game", value: gameID),
             URLQueryItem(name: "quality", value: requestedQuality ?? PlayerQuality.effective(preference: preference)),
             URLQueryItem(name: "presentation", value: "play")
         ]
@@ -2311,26 +2329,28 @@ struct PixiPlayerSheet: View {
                     .accessibilityIdentifier("player.done")
                     .accessibilityHint("Close this game and return to the feed")
                     Spacer(minLength: 0)
-                    // One interactive host for both native player actions.
-                    // Avoid the UINavigationBar's measured 36pt ShareLink
-                    // hitbox without inventing a custom share controller.
-                    ShareLink(item: shareURL) {
-                        Label("Share", systemImage: "square.and.arrow.up")
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(ArcadePulseTheme.textPrimary)
-                            .frame(minWidth: 88, minHeight: 48)
-                            .background(
-                                ArcadePulseTheme.surface,
-                                in: RoundedRectangle(cornerRadius: 12)
-                            )
-                            .contentShape(Rectangle())
+                    if PlayerPublishedGameIDPolicy.valid(gameID) {
+                        // One interactive host for both native player actions.
+                        // Avoid the UINavigationBar's measured 36pt ShareLink
+                        // hitbox without inventing a custom share controller.
+                        ShareLink(item: shareURL) {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(ArcadePulseTheme.textPrimary)
+                                .frame(minWidth: 88, minHeight: 48)
+                                .background(
+                                    ArcadePulseTheme.surface,
+                                    in: RoundedRectangle(cornerRadius: 12)
+                                )
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Share game")
+                        .accessibilityIdentifier("player.share")
+                        .simultaneousGesture(TapGesture().onEnded {
+                            Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "share") }
+                        })
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Share game")
-                    .accessibilityIdentifier("player.share")
-                    .simultaneousGesture(TapGesture().onEnded {
-                        Task { await BackendAPI.shared.trackSocialEvent(gameID: gameID, kind: "share") }
-                    })
                 }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 56)
@@ -2465,6 +2485,16 @@ struct PixiPlayerSheet: View {
             .onAppear {
                 loadStartedAt = Date()
                 activeQuality = effectiveQuality
+                guard PlayerPublishedGameIDPolicy.valid(gameID) else {
+                    // Invalid canonical identity never starts a game lease.
+                    // Present a terminal, recoverable UI without logging an ID.
+                    isLoading = false
+                    loadFailureCategory = .invalidPackage
+                    loadError = "This game has an invalid identifier. Return to the feed."
+                    holdOpacity = 0
+                    holdVisible = false
+                    return
+                }
                 DevLog.info(.player, PlayerLocalLifecycleLog.opened)
             }
             .onDisappear {
