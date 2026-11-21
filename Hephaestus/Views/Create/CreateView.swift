@@ -2,6 +2,40 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+/// Explicit contrast policy shared by the real public caption and topic
+/// controls. Same verified dark palette as the original Create keywords
+/// input, without changing user text, permission gates or server POST paths.
+enum ArcadePulseCreateFieldTokens {
+    static let promptOpacity = 0.84
+    static let outlineOpacity = 0.60
+    static let minimumHeight: CGFloat = 48
+}
+
+private struct ArcadePulseCreatePublishFieldStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.body)
+            .foregroundStyle(ArcadePulseTheme.textPrimary)
+            .tint(ArcadePulseTheme.electricViolet)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(minHeight: ArcadePulseCreateFieldTokens.minimumHeight)
+            .background(
+                ArcadePulseTheme.canvas,
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(
+                        Color.white.opacity(ArcadePulseCreateFieldTokens.outlineOpacity),
+                        lineWidth: 1
+                    )
+            }
+    }
+}
+
+
 /// A private photo transfer may finish after a later selection, cancellation,
 /// or a deliberate reset. Only the current valid decoded selection can be
 /// installed as the drawing the person consents to upload.
@@ -694,10 +728,31 @@ struct CreateView: View {
             Divider()
             VStack(alignment: .leading, spacing: 10) {
                 Text("Share it with the community").font(.headline)
-                TextField("Add a caption", text: $publishCaption, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Topics, separated by commas", text: $publishTopics)
-                    .textFieldStyle(.roundedBorder)
+                TextField(
+                    "Add a caption",
+                    text: $publishCaption,
+                    prompt: Text("Add a caption").foregroundColor(
+                        .white.opacity(ArcadePulseCreateFieldTokens.promptOpacity)
+                    ),
+                    axis: .vertical
+                )
+                .lineLimit(1...4)
+                .modifier(ArcadePulseCreatePublishFieldStyle())
+                .accessibilityLabel("Add a caption")
+                .accessibilityIdentifier("create.publish.caption")
+
+                TextField(
+                    "Topics, separated by commas",
+                    text: $publishTopics,
+                    prompt: Text("Topics, separated by commas").foregroundColor(
+                        .white.opacity(ArcadePulseCreateFieldTokens.promptOpacity)
+                    )
+                )
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .modifier(ArcadePulseCreatePublishFieldStyle())
+                .accessibilityLabel("Topics, separated by commas")
+                .accessibilityIdentifier("create.publish.topics")
                 Text("Publishing submits this game, caption, and topics for public distribution. It enters moderation before appearing in feeds.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("I agree to submit this game for public sharing and moderation", isOn: $hasPublicPublishConsent)
