@@ -3603,9 +3603,18 @@ enum CommentsDeleteReadPolicy {
     }
 }
 
+/// Only a published backend game title appears in the native Comments header.
+/// Grow semantic Dynamic Type text rather than shrinking it or inventing a title.
+enum CommentsHeaderTitleLayout {
+    static func maxLines(for size: DynamicTypeSize) -> Int {
+        size.isAccessibilitySize ? 3 : 2
+    }
+}
+
 private struct CommentsSheet: View {
     let game: FeedGame
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var comments: [SocialComment] = []
     @State private var draft = ""
     @State private var errorMessage: String?
@@ -3626,7 +3635,7 @@ private struct CommentsSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                HStack(alignment: .center, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "gamecontroller.fill")
                         .font(.headline)
                         .foregroundStyle(ArcadePulseTheme.playOrange)
@@ -3637,7 +3646,8 @@ private struct CommentsSheet: View {
                             .foregroundStyle(ArcadePulseTheme.neonMagenta)
                         Text(game.title)
                             .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
+                            .lineLimit(CommentsHeaderTitleLayout.maxLines(for: dynamicTypeSize))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 0)
                     // Unknown while loading/transport failed: do not display
