@@ -1361,7 +1361,8 @@ struct HephaestusTests {
 @MainActor @Test func playerURLRejectsEmptyGameIDAndNormalizesUnsupportedQuality() {
     #expect(PlayerWebViewPool.playerURL(gameID: "   ") == nil)
 
-    let url = PlayerWebViewPool.playerURL(gameID: " game-1 ", quality: "ultra")
+    #expect(PlayerWebViewPool.playerURL(gameID: " game-1 ", quality: "ultra") == nil)
+    let url = PlayerWebViewPool.playerURL(gameID: "game-1", quality: "ultra")
     #expect(url != nil)
     guard let url else { return }
     let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -1373,6 +1374,53 @@ struct HephaestusTests {
     #expect(values["quality"] != "ultra")
 }
 
+
+@MainActor @Test func canonicalPublishedGameIDsFencePlayerURLAndPrewarmLease() {
+    let validIDs = ["game-1", "A_Z09", "_", "x" + String(repeating: "a", count: 127)]
+    for id in validIDs {
+        #expect(PlayerPublishedGameIDPolicy.valid(id))
+        guard let url = PlayerWebViewPool.playerURL(gameID: id, quality: "low") else {
+            Issue.record("Valid exact game ID did not form a native player URL")
+            continue
+        }
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        #expect(components?.path == "/player")
+        let gameItems = components?.queryItems?.filter({ $0.name == "game" }) ?? []
+        #expect(gameItems.count == 1)
+        #expect(gameItems.first?.value == id)
+    }
+    let hostileIDs = [
+        "", " ", " game-1 ", ".", "..", "a/b", "a?b", "a%b", "a#b",
+        "a+b", "a\\b", "tab\\t", "line\\n", "emoji🤖", "é",
+        String(repeating: "x", count: 129),
+        String(repeating: "x", count: 4_096)
+    ]
+    for id in hostileIDs {
+        #expect(!PlayerPublishedGameIDPolicy.valid(id))
+        #expect(PlayerWebViewPool.playerURL(gameID: id, quality: "high") == nil)
+    }
+    for attempt in 1...160 {
+        let hostile = "game/" + String(attempt)
+        #expect(!PlayerPublishedGameIDPolicy.valid(hostile))
+        #expect(PlayerWebViewPool.playerURL(gameID: hostile) == nil)
+    }
+    let nonce = String(repeating: "a", count: 32)
+    let legitimate = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "game-1",
+        playerURL: URL(string: "https://games.example.test/player?game=game-1")!,
+        documentNonce: nonce, credentialFingerprint: "scope-1",
+        runtimeSessionID: "session-1"
+    )
+    let forged = PlayerPrewarmSceneMilestoneLedger.Identity(
+        gameID: "bad/id",
+        playerURL: URL(string: "https://games.example.test/player?game=bad%2Fid")!,
+        documentNonce: nonce, credentialFingerprint: "scope-1",
+        runtimeSessionID: "session-1"
+    )
+    #expect(legitimate.isValid)
+    #expect(!forged.isValid)
+    #expect(!PlayerLoadRetryPolicy.shouldOfferManualRetry(category: .invalidPackage))
+}
 
 @Test func playerLoadFailuresUseSafeActionableMessages() {
     let timeout = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
