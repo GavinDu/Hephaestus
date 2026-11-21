@@ -1395,9 +1395,10 @@ private struct ForYouGamePage: View {
         ArcadePulseTheme.fallbackPalette(gameID: game.id)
     }
 
-    private var creatorName: String {
-        guard let creator = game.ownerID, !creator.isEmpty else { return "Mini game" }
-        return game.creatorDisplayName?.isEmpty == false ? game.creatorDisplayName! : creator
+    private var creatorName: String? {
+        ForYouPageLayout.publicCreatorName(
+            ownerID: game.ownerID, displayName: game.creatorDisplayName
+        )
     }
 
     // A missing or stale version-bound poster is not a recorded preview.
@@ -1766,7 +1767,7 @@ private struct ForYouGamePage: View {
             // Only real, navigable creator IDs deserve a profile button.
             // A missing owner was previously shown as "Mini game" with a
             // dead "View profile for Mini game" VoiceOver action.
-            if !isCompact, ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
+            if !isCompact, let creatorName {
             HStack(spacing: 8) {
                 ArcadePulseCreatorIdentity(
                     name: creatorName,
@@ -1849,7 +1850,7 @@ private struct ForYouGamePage: View {
                 .lineLimit(3)
                 .minimumScaleFactor(0.85)
 
-            if let owner = game.ownerID, !owner.isEmpty {
+            if let creatorName {
                 ArcadePulseCreatorIdentity(
                     name: creatorName,
                     avatarURL: game.creatorAvatarURL,
@@ -2342,10 +2343,10 @@ private struct ArcadePulseGameDetailsSheet: View {
                 .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("game.details.title")
-            if let owner = game.ownerID, !owner.isEmpty {
-                Label(game.creatorDisplayName?.isEmpty == false
-                      ? game.creatorDisplayName! : owner,
-                      systemImage: "person.crop.circle")
+            if let creatorName = ForYouPageLayout.publicCreatorName(
+                ownerID: game.ownerID, displayName: game.creatorDisplayName
+            ) {
+                Label(creatorName, systemImage: "person.crop.circle")
                     .foregroundStyle(ArcadePulseTheme.textSecondary)
             }
             // Play and Share must be reachable before optional long
