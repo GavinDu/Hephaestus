@@ -9,6 +9,34 @@ import UIKit
 
 
 
+/// A spoken Library action must distinguish the saved and recently played
+/// collections even when the same real title appears in both. Normalize
+/// only the accessibility label, never account data or the visible title.
+enum LibraryGameRowAccessibilityPolicy {
+    enum Scope {
+        case saved
+        case recent
+    }
+
+    static func label(title: String, scope: Scope) -> String {
+        let safeText = title.unicodeScalars.map { scalar in
+            CharacterSet.controlCharacters.contains(scalar) ? " " : String(scalar)
+        }.joined()
+        let spokenTitle = safeText
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+
+        switch scope {
+        case .saved:
+            return spokenTitle.isEmpty
+                ? "Play saved game" : "Play saved game: \(spokenTitle)"
+        case .recent:
+            return spokenTitle.isEmpty
+                ? "Play recently played game" : "Play recently played game: \(spokenTitle)"
+        }
+    }
+}
+
 // MARK: - Library
 
 /// Recently played games.
@@ -242,6 +270,9 @@ struct LibraryView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(LibraryGameRowAccessibilityPolicy.label(
+                            title: game.title, scope: .saved
+                        ))
                         .accessibilityHint("Opens the game player")
                         .listRowBackground(ArcadePulseTheme.surface)
                         .contextMenu {
@@ -291,6 +322,9 @@ struct LibraryView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(LibraryGameRowAccessibilityPolicy.label(
+                            title: game.title, scope: .recent
+                        ))
                         .accessibilityHint("Opens the game player")
                         .listRowBackground(ArcadePulseTheme.surface)
                         .contextMenu {
