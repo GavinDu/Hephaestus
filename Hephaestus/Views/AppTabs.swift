@@ -29,10 +29,10 @@ enum LibraryGameRowAccessibilityPolicy {
         switch scope {
         case .saved:
             return spokenTitle.isEmpty
-                ? "Play saved game" : "Play saved game: \\(spokenTitle)"
+                ? "Play saved game" : "Play saved game: \(spokenTitle)"
         case .recent:
             return spokenTitle.isEmpty
-                ? "Play recently played game" : "Play recently played game: \\(spokenTitle)"
+                ? "Play recently played game" : "Play recently played game: \(spokenTitle)"
         }
     }
 }
