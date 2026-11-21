@@ -2548,10 +2548,12 @@ struct PixiPlayerSheet: View {
                         sessionRevoked: sessionRevoked
                       ) else { return }
                 // No compositor or rendered-scene claims from didFinish.
-                // Provide a bounded, accessible manual Retry or safe exit.
+                // This is a stalled scene, NOT evidence of failed transport.
+                // Keep manual Retry and safe exit without auto-retrying on
+                // connectivity/foreground changes as though HTTP failed.
                 holdOpacity = 0
                 holdVisible = false
-                loadFailureCategory = .network
+                loadFailureCategory = .unknown
                 loadError = "The game has not drawn its first scene. Tap Retry or return to the feed."
             }
             .task(id: attempt) {
