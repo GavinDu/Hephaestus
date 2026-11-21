@@ -93,6 +93,15 @@ enum ForYouPageLayout {
             })
     }
 
+    /// Keep the same admitted real backend owner/name on iPhone immersive,
+    /// iPad Spotlight and Game Details as the genuine grid. A malformed
+    /// owner cannot become a dead "View profile" accessibility action.
+    static func publicCreatorName(ownerID: String?, displayName: String?) -> String? {
+        GameFeedCardCreatorIdentityPolicy.publicName(
+            ownerID: ownerID, displayName: displayName
+        )
+    }
+
     /// A stable per-game palette slot for truthful fallback artwork when no
     /// approved poster/clip exists. Hash through a larger prime first: reducing
     /// modulo a five-color palette inside the loop makes 31 ≡ 1 (mod 5)
