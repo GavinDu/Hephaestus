@@ -28,11 +28,13 @@ struct PlayerCurrentHostMilestoneProjectionTests {
         #expect(PlayerCurrentHostMilestoneProjection.gamePackageFormatVersion == "2.0")
         var reducer = PlayerHostLaunchReducer()
         #expect(project(reducer.phase)?.stage == .navigating)
-        #expect(reducer.navigationFinished())
+        let mutationResultL31 = reducer.navigationFinished()
+        #expect(mutationResultL31)
         #expect(project(reducer.phase)?.stage == .documentLoaded)
         // A real WebKit didFinish has not supplied a renderer submission.
         #expect(project(reducer.phase)?.stage != .rendererSubmitted)
-        #expect(reducer.sceneSubmitted())
+        let mutationResultL35 = reducer.sceneSubmitted()
+        #expect(mutationResultL35)
         // Renderer-submission claims need BOTH native nonce and bound session.
         #expect(project(reducer.phase) == nil)
         #expect(project(reducer.phase, documentNonce: nonce) == nil)
@@ -42,9 +44,11 @@ struct PlayerCurrentHostMilestoneProjectionTests {
         #expect(submitted?.attachmentLease == 9)
         #expect(submitted?.nativeDocumentNonce == nonce)
         #expect(submitted?.gameID == "game-1")
-        #expect(reducer.firstInput(milliseconds: 80))
+        let mutationResultL45 = reducer.firstInput(milliseconds: 80)
+        #expect(mutationResultL45)
         #expect(project(reducer.phase, documentNonce: nonce, sessionID: session)?.stage == .firstInputAdmitted)
-        #expect(!reducer.sceneSubmitted())
+        let mutationResultL47 = !reducer.sceneSubmitted()
+        #expect(mutationResultL47)
         reducer.detach()
         #expect(project(reducer.phase)?.stage == .stopped)
         #expect(project(reducer.phase, ownsLease: false) == nil)
@@ -82,27 +86,38 @@ struct PlayerCurrentHostMilestoneProjectionTests {
         for iteration in 0..<160 {
             var reducer = PlayerHostLaunchReducer()
             if iteration.isMultiple(of: 2) {
-                #expect(reducer.firstInput(milliseconds: iteration + 1))
-                #expect(reducer.sceneSubmitted())
-                #expect(reducer.navigationFinished())
+                let mutationResultL85 = reducer.firstInput(milliseconds: iteration + 1)
+                #expect(mutationResultL85)
+                let mutationResultL86 = reducer.sceneSubmitted()
+                #expect(mutationResultL86)
+                let mutationResultL87 = reducer.navigationFinished()
+                #expect(mutationResultL87)
                 #expect(project(reducer.phase, documentNonce: nonce,
                                 sessionID: session)?.stage == .firstInputAdmitted)
             } else {
-                #expect(reducer.navigationFinished())
-                #expect(reducer.sceneSubmitted())
-                #expect(!reducer.sceneSubmitted())
-                #expect(reducer.firstInput(milliseconds: iteration + 1))
+                let mutationResultL91 = reducer.navigationFinished()
+                #expect(mutationResultL91)
+                let mutationResultL92 = reducer.sceneSubmitted()
+                #expect(mutationResultL92)
+                let mutationResultL93 = !reducer.sceneSubmitted()
+                #expect(mutationResultL93)
+                let mutationResultL94 = reducer.firstInput(milliseconds: iteration + 1)
+                #expect(mutationResultL94)
                 #expect(project(reducer.phase, documentNonce: nonce,
                                 sessionID: session)?.stage == .firstInputAdmitted)
             }
             if iteration.isMultiple(of: 3) {
-                #expect(reducer.webProcessTerminated())
+                let mutationResultL99 = reducer.webProcessTerminated()
+                #expect(mutationResultL99)
             } else {
                 reducer.detach()
             }
-            #expect(!reducer.sceneSubmitted())
-            #expect(!reducer.firstInput(milliseconds: 77))
-            #expect(!reducer.navigationFinished())
+            let mutationResultL103 = !reducer.sceneSubmitted()
+            #expect(mutationResultL103)
+            let mutationResultL104 = !reducer.firstInput(milliseconds: 77)
+            #expect(mutationResultL104)
+            let mutationResultL105 = !reducer.navigationFinished()
+            #expect(mutationResultL105)
             #expect(project(reducer.phase, ownsLease: false) == nil)
             // A new navigation cannot revive the dead reducer. A genuinely
             // new Coordinator and native document nonce must be allocated.
@@ -114,13 +129,15 @@ struct PlayerCurrentHostMilestoneProjectionTests {
     @Test func poolNonceGateRevokesOldDocumentBeforeNewRuntimeBinding() {
         var gate = PlayerNativeDocumentEpochGate()
         let old = gate.prepareNavigation()
-        #expect(gate.didStartNavigation())
+        let mutationResultL117 = gate.didStartNavigation()
+        #expect(mutationResultL117)
         #expect(gate.acceptsV2(old))
         for _ in 0..<160 {
             let fresh = gate.prepareNavigation()
             #expect(!gate.acceptsV2(old))
             #expect(!gate.acceptsV2(fresh))
-            #expect(gate.didStartNavigation())
+            let mutationResultL123 = gate.didStartNavigation()
+            #expect(mutationResultL123)
             #expect(gate.acceptsV2(fresh))
             gate.invalidate()
             #expect(!gate.acceptsV2(fresh))
