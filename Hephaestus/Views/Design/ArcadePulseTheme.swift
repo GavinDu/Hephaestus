@@ -174,7 +174,7 @@ enum ArcadePulseCreatorAvatarURLPolicy {
         guard let raw else { return nil }
         let input = raw.trimmingCharacters(in: .whitespaces)
         guard !input.isEmpty, !input.hasPrefix("//"),
-              !input.hasPrefix("\\\\"),
+              input.unicodeScalars.first?.value != 92,
               !input.unicodeScalars.contains(where: {
                   CharacterSet.controlCharacters.contains($0)
               }),
