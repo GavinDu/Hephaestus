@@ -980,9 +980,36 @@ final class PlayerSmokeTests: XCTestCase {
         }
 
         library.tap()
+        // Capture the *actual* native post-tap state before a failed
+        // assertion prevents the existing successful-arrival attachment.
+        // This does not create a Library view or relax either route gate.
+        let afterTap = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        afterTap.name = UIDevice.current.userInterfaceIdiom == .pad
+            ? "arcade-pulse-ipad-feed-library-immediate-post-tap"
+            : "arcade-pulse-iphone-feed-library-immediate-post-tap"
+        afterTap.lifetime = .keepAlways
+        add(afterTap)
+
         let destination = app.descendants(matching: .any)["library.arcadePulse"].firstMatch
-        XCTAssertTrue(destination.waitForExistence(timeout: 10) && destination.isHittable,
-                      "Open Library must navigate to a visible, usable real Library, not a stale iPad detail.")
+        let libraryMounted = destination.waitForExistence(timeout: 10)
+        // A missing destination is a different defect from a stale iPad
+        // detail covering a mounted Library. Both remain hard failures.
+        if !libraryMounted {
+            let missing = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            missing.name = "arcade-pulse-feed-library-destination-not-mounted"
+            missing.lifetime = .keepAlways
+            add(missing)
+        }
+        XCTAssertTrue(libraryMounted,
+                      "Open Library did not mount the real Library destination after navigation.")
+        if !destination.isHittable {
+            let blocked = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            blocked.name = "arcade-pulse-feed-library-mounted-but-obscured"
+            blocked.lifetime = .keepAlways
+            add(blocked)
+        }
+        XCTAssertTrue(destination.isHittable,
+                      "Library mounted but is not usable; inspect stale iPad detail or overlay.")
         if UIDevice.current.userInterfaceIdiom == .pad {
             XCTAssertFalse(app.buttons["feed.error.retry"].firstMatch.isHittable,
                            "The old Discover recovery view must not cover the Library destination.")
