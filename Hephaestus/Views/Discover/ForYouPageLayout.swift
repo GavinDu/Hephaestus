@@ -93,6 +93,15 @@ enum ForYouPageLayout {
             })
     }
 
+    /// Reuse the exact same admitted real publisher name in immersive For You,
+    /// iPad Spotlight and read-only Game Details as in the public grid.
+    /// Unnavigable backend owner IDs never become fake Profile actions.
+    static func publicCreatorName(ownerID: String?, displayName: String?) -> String? {
+        GameFeedCardCreatorIdentityPolicy.publicName(
+            ownerID: ownerID, displayName: displayName
+        )
+    }
+
     /// A stable per-game palette slot for truthful fallback artwork when no
     /// approved poster/clip exists. Hash through a larger prime first: reducing
     /// modulo a five-color palette inside the loop makes 31 ≡ 1 (mod 5)
