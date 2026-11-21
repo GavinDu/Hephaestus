@@ -1,6 +1,7 @@
 import AuthenticationServices
 import AVFoundation
 import Combine
+import CryptoKit
 import Foundation
 import Network
 import PhotosUI
@@ -53,6 +54,50 @@ enum FeedEmptyStatePolicy {
         return canOpenLibrary
             ? "Refresh to check for games in this feed, or open Library."
             : "Refresh to check for games in this feed."
+    }
+}
+
+/// Account-bound display hints. The backend is authoritative. Never migrate
+/// device-wide saved flags to a new viewer or persist a guest's transient hints.
+/// Key hashing is namespace isolation, not encryption of game IDs.
+enum FeedSavedGameCache {
+    static let legacyKey = "hephaestus.savedGames"
+    private static let legacyGuestKey = "hephaestus.savedGames.guest"
+    private static let accountPrefix = "hephaestus.savedGames.account."
+
+    static func storageKey(for viewerID: String) -> String? {
+        guard !viewerID.isEmpty else { return nil }
+        let fingerprint = SHA256.hash(data: Data(viewerID.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        return accountPrefix + fingerprint
+    }
+
+    static func load(for viewerID: String, defaults: UserDefaults = .standard) -> Set<String> {
+        discardUnscopedHistory(defaults: defaults)
+        guard let key = storageKey(for: viewerID) else { return [] }
+        return Set(defaults.stringArray(forKey: key) ?? [])
+    }
+
+    static func save(
+        _ gameIDs: Set<String>, for viewerID: String, defaults: UserDefaults = .standard
+    ) {
+        discardUnscopedHistory(defaults: defaults)
+        guard let key = storageKey(for: viewerID) else { return }
+        defaults.set(gameIDs.sorted(), forKey: key)
+    }
+
+    static func discardUnscopedHistory(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: legacyKey)
+        defaults.removeObject(forKey: legacyGuestKey)
+    }
+
+    static func canApply(
+        requestedViewerID: String, currentViewerID: String,
+        requestedSessionEpoch: Int, currentSessionEpoch: Int,
+        ownsRequest: Bool
+    ) -> Bool {
+        requestedViewerID == currentViewerID &&
+            requestedSessionEpoch == currentSessionEpoch && ownsRequest
     }
 }
 
@@ -895,6 +940,7 @@ struct DiscoverView: View {
                 socialMutationEpoch &+= 1
                 socialMutationGate.revokeAll()
                 savedGameIDs.removeAll()
+                FeedSavedGameCache.discardUnscopedHistory()
                 likedGameIDs.removeAll()
                 followedCreatorIDs.removeAll()
                 mutedTopics.removeAll()
@@ -930,7 +976,7 @@ struct DiscoverView: View {
                 if gameID != nil { FeedPreviewPlayback.shared.stop() }
             }
             .task {
-                savedGameIDs = Set(UserDefaults.standard.stringArray(forKey: "hephaestus.savedGames") ?? [])
+                savedGameIDs = FeedSavedGameCache.load(for: BackendConfig.currentUserID)
                 if ProcessInfo.processInfo.arguments.contains("--ui-test-feed-error-state") {
                     // Deterministic visual QA of the network-error recovery,
                     // explicitly isolated from the normal LIVE-feed smoke.
@@ -1097,7 +1143,7 @@ struct DiscoverView: View {
                 guard epoch == socialMutationEpoch,
                       viewerID == BackendConfig.currentUserID else { return }
                 if shouldSave { savedGameIDs.insert(game.id) } else { savedGameIDs.remove(game.id) }
-                UserDefaults.standard.set(savedGameIDs.sorted(), forKey: "hephaestus.savedGames")
+                FeedSavedGameCache.save(savedGameIDs, for: viewerID)
                 if shouldSave {
                     await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "save")
                 }
@@ -1235,6 +1281,8 @@ struct DiscoverView: View {
 
     private func load() async {
         let requestedScope = selectedFeed
+        let requestedViewerID = BackendConfig.currentUserID
+        let requestedSessionEpoch = socialMutationEpoch
         // Native tests can stall only the HTTP transport, never inject a
         // success response, game card, creator, screenshot or media asset.
         #if DEBUG
@@ -1270,6 +1318,12 @@ struct DiscoverView: View {
                 hasGames: !games.isEmpty,
                 ownsRequest: feedRequestCoordinator.isCurrent(generation),
                 matchesScope: requestedScope == selectedFeed
+            ), FeedSavedGameCache.canApply(
+                requestedViewerID: requestedViewerID,
+                currentViewerID: BackendConfig.currentUserID,
+                requestedSessionEpoch: requestedSessionEpoch,
+                currentSessionEpoch: socialMutationEpoch,
+                ownsRequest: feedRequestCoordinator.isCurrent(generation)
             ) else { return }
             isSlowLoading = true
         }
@@ -1286,6 +1340,13 @@ struct DiscoverView: View {
             } catch { return }
             guard isLoading, games.isEmpty,
                   requestedScope == selectedFeed,
+                  FeedSavedGameCache.canApply(
+                      requestedViewerID: requestedViewerID,
+                      currentViewerID: BackendConfig.currentUserID,
+                      requestedSessionEpoch: requestedSessionEpoch,
+                      currentSessionEpoch: socialMutationEpoch,
+                      ownsRequest: feedRequestCoordinator.isCurrent(generation)
+                  ),
                   feedRequestCoordinator.expireIfCurrent(generation) else { return }
             isLoading = false
             isSlowLoading = false
@@ -1295,7 +1356,13 @@ struct DiscoverView: View {
         defer {
             slowHint.cancel()
             watchdog.cancel()
-            if feedRequestCoordinator.isCurrent(generation) {
+            if FeedSavedGameCache.canApply(
+                requestedViewerID: requestedViewerID,
+                currentViewerID: BackendConfig.currentUserID,
+                requestedSessionEpoch: requestedSessionEpoch,
+                currentSessionEpoch: socialMutationEpoch,
+                ownsRequest: feedRequestCoordinator.isCurrent(generation)
+            ) {
                 isLoading = false
                 isSlowLoading = false
                 feedRequestCoordinator.finishIfCurrent(generation)
@@ -1308,7 +1375,13 @@ struct DiscoverView: View {
                 request.cancel()
             }
             guard requestedScope == selectedFeed,
-                  feedRequestCoordinator.isCurrent(generation) else { return }
+                  FeedSavedGameCache.canApply(
+                      requestedViewerID: requestedViewerID,
+                      currentViewerID: BackendConfig.currentUserID,
+                      requestedSessionEpoch: requestedSessionEpoch,
+                      currentSessionEpoch: socialMutationEpoch,
+                      ownsRequest: feedRequestCoordinator.isCurrent(generation)
+                  ) else { return }
             games = loadedGames.games
             nextCursor = loadedGames.next_cursor.flatMap { $0.isEmpty ? nil : $0 }
             repairPagerSelection()
@@ -1327,21 +1400,48 @@ struct DiscoverView: View {
                 followedCreatorIDs = Set(loadedGames.games.filter { $0.viewerFollowing == true }.compactMap(\.ownerID))
                 savedGameIDs = Set(loadedGames.games.filter { $0.viewerSaved == true }.map(\.id))
                 likedGameIDs = Set(loadedGames.games.filter { $0.viewerLiked == true }.map(\.id))
-                UserDefaults.standard.set(savedGameIDs.sorted(), forKey: "hephaestus.savedGames")
+                FeedSavedGameCache.save(savedGameIDs, for: requestedViewerID)
             } else {
-                if let ids = try? await BackendAPI.shared.fetchFollowingCreatorIDs(), feedRequestCoordinator.isCurrent(generation) {
+                if let ids = try? await BackendAPI.shared.fetchFollowingCreatorIDs(),
+                   FeedSavedGameCache.canApply(
+                       requestedViewerID: requestedViewerID,
+                       currentViewerID: BackendConfig.currentUserID,
+                       requestedSessionEpoch: requestedSessionEpoch,
+                       currentSessionEpoch: socialMutationEpoch,
+                       ownsRequest: feedRequestCoordinator.isCurrent(generation)
+                   ) {
                     followedCreatorIDs = ids
                 }
-                if let ids = try? await BackendAPI.shared.fetchSavedGameIDs(), feedRequestCoordinator.isCurrent(generation) {
+                if let ids = try? await BackendAPI.shared.fetchSavedGameIDs(),
+                   FeedSavedGameCache.canApply(
+                       requestedViewerID: requestedViewerID,
+                       currentViewerID: BackendConfig.currentUserID,
+                       requestedSessionEpoch: requestedSessionEpoch,
+                       currentSessionEpoch: socialMutationEpoch,
+                       ownsRequest: feedRequestCoordinator.isCurrent(generation)
+                   ) {
                     savedGameIDs = ids
-                    UserDefaults.standard.set(ids.sorted(), forKey: "hephaestus.savedGames")
+                    FeedSavedGameCache.save(ids, for: requestedViewerID)
                 }
             }
-            if let preferences = try? await BackendAPI.shared.fetchFeedPreferences(), feedRequestCoordinator.isCurrent(generation) {
+            if let preferences = try? await BackendAPI.shared.fetchFeedPreferences(),
+               FeedSavedGameCache.canApply(
+                   requestedViewerID: requestedViewerID,
+                   currentViewerID: BackendConfig.currentUserID,
+                   requestedSessionEpoch: requestedSessionEpoch,
+                   currentSessionEpoch: socialMutationEpoch,
+                   ownsRequest: feedRequestCoordinator.isCurrent(generation)
+               ) {
                 mutedTopics = Set(preferences.muted_topics.map { $0.lowercased() })
             }
         } catch {
-            if requestedScope == selectedFeed && feedRequestCoordinator.isCurrent(generation) {
+            if requestedScope == selectedFeed && FeedSavedGameCache.canApply(
+                requestedViewerID: requestedViewerID,
+                currentViewerID: BackendConfig.currentUserID,
+                requestedSessionEpoch: requestedSessionEpoch,
+                currentSessionEpoch: socialMutationEpoch,
+                ownsRequest: feedRequestCoordinator.isCurrent(generation)
+            ) {
                 errorMessage = FeedErrorPresentation.message(for: error)
             }
         }
