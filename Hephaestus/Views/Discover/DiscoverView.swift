@@ -3447,7 +3447,7 @@ enum CommentsDeleteReadPolicy {
     }
 }
 
-private /// Native Comments header title line budget. Only actual backend-published
+/// Native Comments header title line budget. Only actual backend-published
 /// game titles are shown; VoiceOver retains the original unabridged text.
 /// Make room for semantic Dynamic Type without increasing bottom composer size.
 enum CommentsHeaderTitleLayout {
@@ -3456,7 +3456,7 @@ enum CommentsHeaderTitleLayout {
     }
 }
 
-struct CommentsSheet: View {
+private struct CommentsSheet: View {
     let game: FeedGame
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
