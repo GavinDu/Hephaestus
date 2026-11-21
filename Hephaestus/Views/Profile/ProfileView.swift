@@ -26,8 +26,10 @@ enum ProfileBottomInsetPolicy {
 /// A parsed URL alone must never make a non-web or credential-bearing target
 /// look like a trusted system link.
 enum ModerationContactLinkPolicy {
-    static func approvedURL(_ raw: String?) -> URL? {
-        guard let raw,
+    /// The producer's explicit availability flag is authoritative. A stale
+    /// URL field alone must not invent an enabled external support channel.
+    static func approvedURL(_ raw: String?, externalContactConfigured: Bool) -> URL? {
+        guard externalContactConfigured, let raw,
               !raw.unicodeScalars.contains(where: {
                   CharacterSet.controlCharacters.contains($0)
               }) else { return nil }
@@ -398,7 +400,8 @@ private struct ModerationAppealSheet: View {
                                 .textSelection(.enabled)
                         }
                         if let url = ModerationContactLinkPolicy.approvedURL(
-                            contact.contact_url
+                            contact.contact_url,
+                            externalContactConfigured: contact.external_contact_configured
                         ) {
                             Link(destination: url) {
                                 Label("Open moderation contact",
@@ -406,7 +409,8 @@ private struct ModerationAppealSheet: View {
                                     .frame(minHeight: 44)
                             }
                             .accessibilityIdentifier("profile.moderation.externalContact")
-                        } else if !contact.contact_url.isEmpty {
+                        } else if contact.external_contact_configured &&
+                                  !contact.contact_url.isEmpty {
                             Text("External contact link unavailable. You can still submit an in-app appeal.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
