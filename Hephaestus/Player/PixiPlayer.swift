@@ -27,19 +27,11 @@ import WebKit
 /// Canonical immutable public GamePackage identity from the backend wire contract.
 /// Never trim or rewrite IDs: altered identity can reopen a different game
 /// or poison a pooled scene/credential lease. The query encoder is not a validator.
+/// Source-compatible native launch/pool policy. The common ASCII/byte
+/// contract is shared with BackendAPI's verified-only leaderboard request.
 enum PlayerPublishedGameIDPolicy {
     static func valid(_ gameID: String) -> Bool {
-        // Iterate directly and stop after 128 bytes; untrusted feed metadata
-        // must not allocate an unbounded UTF-8 copy just for validation.
-        var count = 0
-        for byte in gameID.utf8 {
-            count += 1
-            guard count <= 128,
-                  (0x41...0x5a).contains(byte) || (0x61...0x7a).contains(byte) ||
-                  (0x30...0x39).contains(byte) || byte == 0x2d || byte == 0x5f
-            else { return false }
-        }
-        return count > 0
+        PublishedGameIDPolicy.valid(gameID)
     }
 }
 
