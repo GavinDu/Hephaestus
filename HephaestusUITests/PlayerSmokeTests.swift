@@ -71,6 +71,82 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertEqual(safePlayerSmokeFailureCode(""), "unclassified")
     }
 
+    /// #645: drive the REAL native player view, not a mocked gameplay sheet.
+    /// A grammar-invalid ID must never reach WKWebView URL construction,
+    /// speculative prewarm, sharing or a verified result. The entry exists
+    /// only under DEBUG + simulator; no fabricated published backend fixture.
+    @MainActor
+    func testInvalidPlayerIDShowsNativeRecoveryWithoutShare() throws {
+        try assertInvalidPlayerIDNativeRecovery(accessibilityFive: false)
+    }
+
+    /// The same real error sheet at the largest system Accessibility text
+    /// size, on both iPhone and iPad required Player Presentation runners.
+    @MainActor
+    func testInvalidPlayerIDAccessibilityFiveKeepsReturnToFeed() throws {
+        try assertInvalidPlayerIDNativeRecovery(accessibilityFive: true)
+    }
+
+    @MainActor
+    private func assertInvalidPlayerIDNativeRecovery(accessibilityFive: Bool) throws {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        if accessibilityFive {
+            app.launchArguments += [
+                "-UIPreferredContentSizeCategoryName",
+                "UICTContentSizeCategoryAccessibilityXXXL"
+            ]
+        }
+        app.launchArguments.append("--ui-test-invalid-player-id")
+        app.launch()
+
+        // This is the shipping PixiPlayerSheet rendered as a real SwiftUI
+        // modal, with an intentionally unpublishable ID. Never manufacture
+        // a feed item, creator, backend 200, scoreboard or JS callback.
+        let message = app.staticTexts["player.error.message"].firstMatch
+        XCTAssertTrue(message.waitForExistence(timeout: 20),
+                      "Invalid ID must reach a terminal, visible native error.")
+        XCTAssertEqual(message.label,
+                       "This game has an invalid identifier. Return to the feed.")
+        XCTAssertFalse(app.progressIndicators["player.loading"].exists,
+                       "Invalid identity cannot wait for WebKit or assets.")
+        XCTAssertFalse(app.buttons["player.retry"].exists,
+                       "A permanently invalid ID must not offer network Retry.")
+        XCTAssertFalse(app.buttons["player.share"].exists,
+                       "Never share an unverified/invalid game ID.")
+        XCTAssertFalse(app.webViews.firstMatch.exists,
+                       "Invalid identity must not create the player WKWebView.")
+
+        let returnButton = app.buttons["player.returnToFeed"].firstMatch
+        XCTAssertTrue(returnButton.exists && returnButton.isHittable,
+                      "Native Return to feed must remain actionable.")
+        XCTAssertGreaterThanOrEqual(returnButton.frame.height, 44,
+                                    "Return to feed needs a genuine 44pt target.")
+        XCTAssertGreaterThanOrEqual(returnButton.frame.width, 44,
+                                    "Return to feed must be usable at Accessibility5.")
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = accessibilityFive
+            ? "player-invalid-id-a5-before-return" : "player-invalid-id-before-return"
+        before.lifetime = .keepAlways
+        add(before)
+
+        returnButton.tap()
+        let dismissed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: message
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 12), .completed,
+                       "Return to feed must truly dismiss the original player sheet.")
+        XCTAssertFalse(app.buttons["player.share"].exists)
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = accessibilityFive
+            ? "player-invalid-id-a5-after-return" : "player-invalid-id-after-return"
+        after.lifetime = .keepAlways
+        add(after)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     @MainActor
     func testDiscoverLaunchesPlayer() throws {
         let app = XCUIApplication()
