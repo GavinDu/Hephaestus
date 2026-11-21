@@ -73,4 +73,75 @@ struct PlayerHoldPosterURLPolicyTests {
         #expect(PlayerHoldPosterURLPolicy.admittedURL(
             "http://127.0.0.1:8089/no", backendOrigin: development) == nil)
     }
+
+    @Test func sameOriginPosterRedirectsRespectSignedQueriesDefaultPortsAndThreeHopBudget() {
+        let original = URL(string: "https://cdn.example.test/assets/start.webp")!
+        let signed = URL(string: "https://cdn.example.test:443/assets/one.webp?sig=opaque%2Bvalue")!
+        let next = URL(string: "https://cdn.example.test/assets/two.webp?sig=another")!
+        let hop = PlayerPosterRedirectHopPolicy.self
+
+        #expect(hop.maximumRedirects == 3)
+        #expect(hop.admittedHop(original: original, from: original, to: signed,
+                                alreadyFollowed: 0, backendOrigin: production) == signed)
+        #expect(hop.admittedHop(original: original, from: signed, to: next,
+                                alreadyFollowed: 1, backendOrigin: production) == next)
+        #expect(hop.admittedHop(original: original, from: next, to: original,
+                                alreadyFollowed: 2, backendOrigin: production) == original)
+        #expect(hop.admittedHop(original: original, from: next, to: original,
+                                alreadyFollowed: 3, backendOrigin: production) == nil)
+        #expect(hop.admittedHop(original: original, from: next, to: original,
+                                alreadyFollowed: -1, backendOrigin: production) == nil)
+
+        let devStart = URL(string: "http://127.0.0.1:8080/start.png")!
+        let devNext = URL(string: "http://127.0.0.1:8080/next.png?sig=x")!
+        #expect(hop.admittedHop(original: devStart, from: devStart, to: devNext,
+                                alreadyFollowed: 0, backendOrigin: development) == devNext)
+        #expect(hop.admittedHop(original: devStart, from: devStart, to: original,
+                                alreadyFollowed: 0, backendOrigin: development) == nil)
+    }
+
+    @Test func crossOriginDowngradeCredentialAndFragmentDeniedFor160RedirectAttempts() {
+        let original = URL(string: "https://cdn.example.test/assets/first.webp")!
+        for i in 0..<160 {
+            let hostile: [String] = [
+                "https://cdn-\(i).example.test/escape",
+                "https://cdn.example.test:8443/wrong-port",
+                "http://cdn.example.test/downgrade",
+                "https://token-\(i):secret@cdn.example.test/image",
+                "https://cdn.example.test/asset#secret-\(i)",
+                "https://cdn.example.test.evil.invalid/asset",
+                "https://[::1]/poster-\(i)",
+                "file:///private/poster-\(i)"
+            ]
+            for raw in hostile {
+                guard let candidate = URL(string: raw) else { continue }
+                #expect(PlayerPosterRedirectHopPolicy.admittedHop(
+                    original: original, from: original, to: candidate,
+                    alreadyFollowed: i % 3, backendOrigin: production
+                ) == nil)
+            }
+            let wrongPrevious = URL(string: "https://other-\(i).example.test/from")!
+            #expect(PlayerPosterRedirectHopPolicy.admittedHop(
+                original: original, from: wrongPrevious, to: original,
+                alreadyFollowed: 0, backendOrigin: production
+            ) == nil)
+        }
+    }
+
+    @Test func malformedPinnedOriginalCannotAuthorizeSafeLookingRedirect() {
+        let safe = URL(string: "https://cdn.example.test/ok")!
+        let disguised = URL(string: "https://cdn.example.test@outside.example.test/unsafe")!
+        let fragments = URL(string: "https://cdn.example.test/poster#anchor")!
+        #expect(PlayerPosterRedirectHopPolicy.admittedHop(
+            original: disguised, from: disguised, to: safe,
+            alreadyFollowed: 0, backendOrigin: production
+        ) == nil)
+        #expect(PlayerPosterRedirectHopPolicy.admittedHop(
+            original: fragments, from: fragments, to: safe,
+            alreadyFollowed: 0, backendOrigin: production
+        ) == nil)
+        // Policy-only fixture: AsyncImage does not call this decision method.
+        // The secure transport, byte/pixel budget and cancellation remain #715.
+    }
+
 }
