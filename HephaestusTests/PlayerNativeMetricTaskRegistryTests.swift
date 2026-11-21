@@ -66,7 +66,12 @@ struct PlayerNativeMetricTaskRegistryTests {
         }
         #expect(handles.count == 160)
         #expect(registry.epoch == 160)
-        #expect(handles.allSatisfy { $0.isCancelled })
+        // Even iterations completed successfully before revocation, so
+        // their handles are deliberately NOT canceled. Odd iterations were
+        // still registered when their document lease was revoked.
+        for iteration in 0..<160 {
+            #expect(handles[iteration].isCancelled == !iteration.isMultiple(of: 2))
+        }
     }
 
     @Test func independentTaskCompleteReleasesTheExactSlot() {
