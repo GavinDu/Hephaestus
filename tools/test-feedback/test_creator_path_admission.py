@@ -25,8 +25,10 @@ class NativeCreatorPathAdmissionTests(unittest.TestCase):
 
     def test_policy_rejects_reserved_or_percent_syntax_before_interpolation(self):
         source = SOURCE.read_text(encoding="utf-8")
+        # Scope this audit to the creator admission enum, not to later,
+        # unrelated BackendAPI helpers inserted before the API client.
         policy = source.split("enum BackendAPICreatorPathSegmentPolicy {", 1)[1].split(
-            "/// Thin async client", 1
+            "\n}\n\n", 1
         )[0]
         self.assertIn("guard byteCount < 128", policy)
         self.assertIn('creatorID != "."', policy)
