@@ -3268,7 +3268,7 @@ private struct CreatorProfileSheet: View {
     }
 }
 
-private /// A moderation report's confirmation belongs only to the viewer/session
+/// A moderation report's confirmation belongs only to the viewer/session
 /// that initiated it. The server may have accepted an in-flight POST even
 /// after this UI revokes the response; do not misstate remote cancellation.
 enum ReportGameViewerLeasePolicy {
@@ -3282,7 +3282,7 @@ enum ReportGameViewerLeasePolicy {
     }
 }
 
-struct ReportGameSheet: View {
+private struct ReportGameSheet: View {
     let game: FeedGame
     @Environment(\.dismiss) private var dismiss
     @State private var selectedReason = "Unsafe or inappropriate content"
