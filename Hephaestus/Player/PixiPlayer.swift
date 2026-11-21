@@ -844,6 +844,22 @@ enum PlayerCurrentHostMilestoneProjection {
     // or interpret new code, nor a JS-supplied capability negotiation.
     static let gamePackageFormatVersion = "2.0"
 
+    /// Admit a current metric before it mutates either the sequence gate
+    /// or the launch reducer. Failed/stopped owners and a missing native
+    /// document nonce must not consume the next valid event slot.
+    static func permitsMetricAdmission(
+        _ milestone: PlayerCurrentHostMilestone?, forSession sessionID: String
+    ) -> Bool {
+        guard let milestone,
+              milestone.nativeDocumentNonce != nil,
+              milestone.validatedRuntimeSessionID == sessionID else { return false }
+        switch milestone.stage {
+        case .failed, .stopped: return false
+        case .navigating, .documentLoaded, .rendererSubmitted,
+             .firstInputAdmitted: return true
+        }
+    }
+
     static func project(
         phase: PlayerHostLaunchReducer.Phase,
         gameID: String,
