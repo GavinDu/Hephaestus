@@ -1404,6 +1404,25 @@ struct HephaestusTests {
     #expect(!PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: 503))
 }
 
+@Test func nativeWarmupAndAttachedMainDocumentRejectNonfinalHTTPStatuses() {
+    // One pure production policy is used by both WKNavigationResponse
+    // delegates; a URL-matched 302 login page cannot masquerade as a
+    // successful game document on either iPhone or iPad.
+    for status in 100...599 {
+        let expected = (200...299).contains(status) || status == 304
+        #expect(PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: status) == expected)
+    }
+    for status in [Int.min, -1, 0, 1, 99, 600, 999, Int.max] {
+        #expect(!PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: status))
+    }
+    for status in [200, 201, 204, 206, 299, 304] {
+        #expect(PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: status))
+    }
+    for status in [100, 101, 103, 199, 300, 301, 302, 303, 305, 307, 308, 399, 401, 403, 404, 426, 503] {
+        #expect(!PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: status))
+    }
+}
+
 @Test func playerHTTPFailuresDistinguishRetryableServerErrorsFromPermanentErrors() {
     for status in [408, 425, 429, 500, 502, 503, 504] {
         let error = PlayerLoadFailure.httpError(statusCode: status)
