@@ -87,6 +87,56 @@ enum PlayerHoldPosterURLPolicy {
     }
 }
 
+/// Pure policy for a future URLSession-backed hold-poster loader.
+/// WARNING: SwiftUI AsyncImage does not invoke this policy. #715 must wire it
+/// to a cancellable transport delegate before redirect enforcement ships.
+enum PlayerPosterRedirectHopPolicy {
+    static let maximumRedirects = 3
+
+    /// alreadyFollowed is the number of hops previously accepted (0, 1, 2).
+    /// All trust anchors are native caller-owned; never take an original
+    /// origin from a redirected HTTP response or creator-authored metadata.
+    static func admittedHop(
+        original: URL,
+        from previous: URL,
+        to proposed: URL,
+        alreadyFollowed: Int,
+        backendOrigin: URL
+    ) -> URL? {
+        guard (0..<maximumRedirects).contains(alreadyFollowed),
+              let start = admittedUnambiguousURL(original, backendOrigin: backendOrigin),
+              let prior = admittedUnambiguousURL(previous, backendOrigin: backendOrigin),
+              let next = admittedUnambiguousURL(proposed, backendOrigin: backendOrigin),
+              let pinnedOrigin = originKey(start),
+              originKey(prior) == pinnedOrigin,
+              originKey(next) == pinnedOrigin else { return nil }
+        return next
+    }
+
+    private static func admittedUnambiguousURL(_ url: URL, backendOrigin: URL) -> URL? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let encodedHost = components.percentEncodedHost, !encodedHost.isEmpty,
+              // Conservative until real publisher/CDN inventory proves additional
+              // host forms safe. Reject encoded host, IPv6 and unicode ambiguity.
+              encodedHost.unicodeScalars.allSatisfy({
+                  CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-").contains($0)
+              }) else { return nil }
+        return PlayerHoldPosterURLPolicy.admittedURL(
+            url.absoluteString, backendOrigin: backendOrigin
+        )
+    }
+
+    private static func originKey(_ url: URL) -> String? {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = parts.scheme?.lowercased(),
+              let host = parts.host?.lowercased(),
+              scheme == "https" || scheme == "http" else { return nil }
+        let port = parts.port ?? (scheme == "https" ? 443 : 80)
+        guard (1...65_535).contains(port) else { return nil }
+        return "\(scheme)|\(host)|\(port)"
+    }
+}
+
 // MARK: - Quality (performance control)
 
 /// The family's quality preference for the player. `auto` resolves at
