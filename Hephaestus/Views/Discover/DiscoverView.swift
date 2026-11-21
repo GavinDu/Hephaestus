@@ -3,9 +3,20 @@ import AVFoundation
 import Combine
 import Foundation
 import Network
+import OSLog
 import PhotosUI
 import SwiftUI
 import UIKit
+
+#if DEBUG
+/// The native XCTest process does not reliably receive app stdout.
+/// Persist only low-cardinality boolean presentation markers in simulator OSLog;
+/// no game/account identity, title, URLs, tokens, or backend response.
+private let arcadePulseCommentsDiagnostics = Logger(
+    subsystem: "ai.tinydream.Hephaestus",
+    category: "ArcadePulseComments"
+)
+#endif
 
 /// Source-owned minimum for actual native Discover toolbar Button labels.
 /// An external ToolbarItem wrapper's size is NOT its accessible hitbox.
@@ -799,7 +810,7 @@ struct DiscoverView: View {
                                     onToggleFollow: { if let id = game.ownerID { Task { await toggleFollow(id) } } },
                                     onOpenComments: {
                                         #if DEBUG
-                                        print("UI_GRID_COMMENTS_TAP_DELIVERED")
+                                        arcadePulseCommentsDiagnostics.notice("UI_GRID_COMMENTS_TAP_DELIVERED")
                                         #endif
                                         commentsGame = game
                                     },
@@ -900,13 +911,13 @@ struct DiscoverView: View {
                 CommentsSheet(game: game)
                     .onAppear {
                         #if DEBUG
-                        print("UI_COMMENTS_SHEET_MOUNTED")
+                        arcadePulseCommentsDiagnostics.notice("UI_COMMENTS_SHEET_MOUNTED")
                         #endif
                     }
             }
             .onChange(of: commentsGame?.id) { _, selection in
                 #if DEBUG
-                print("UI_COMMENTS_HOST_SELECTION_ACTIVE=\(selection != nil)")
+                arcadePulseCommentsDiagnostics.notice("UI_COMMENTS_HOST_SELECTION_ACTIVE=\(selection != nil, privacy: .public)")
                 #endif
             }
             .modifier(ArcadePulseGameDetailsPresentation(selection: $detailGame))
