@@ -330,10 +330,11 @@ struct DiscoverView: View {
             }
             .accessibilityLabel("Search games")
             .accessibilityIdentifier("feed.landscape.search")
-            // Native Menu becomes partly off-screen at iPhone A5 compact
-            // height: the third real action can exist but be unhittable.
-            // A native confirmation dialog owns its scrolling/large-type
-            // presentation instead of clipping a pop-up over the game.
+            // A genuine iPhone A5 compact-landscape test found the third
+            // Menu action in the hierarchy but not hittable. The precise
+            // pop-up geometry is unproven. Present the same three real actions
+            // in a platform-owned, large-type native confirmation dialog
+            // rather than relying on compact pop-up hit-testing.
             Button {
                 compactMorePresented = true
             } label: {
