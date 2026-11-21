@@ -504,13 +504,31 @@ final class PlayerSmokeTests: XCTestCase {
         add(before)
 
         topic.tap()
-        topic.typeText("puzzle\n")
+        // Separate the native character-entry stage from keyboard Search.
+        // If "puzzle" becomes "pu", preserve evidence of which stage did it;
+        // never adapt the expected query or seed a fake Creator to pass CI.
+        topic.typeText("puzzle")
+        let typed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        typed.name = "arcade-pulse-creator-topic-input-before-search-submit"
+        typed.lifetime = .keepAlways
+        add(typed)
+        let fullInput = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "puzzle"),
+            object: topic
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [fullInput], timeout: 5), .completed,
+                       "Native topic input lost actual typed characters BEFORE Search submit.")
         XCTAssertEqual(topic.value as? String, "puzzle",
-                       "The actual topic input must preserve the typed query.")
+                       "The real unsent Creator topic draft must equal the typed query.")
+
+        // Return must submit the same draft, not a partial stale value.
+        topic.typeText("\n")
         let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        after.name = "arcade-pulse-creator-topic-search-portrait"
+        after.name = "arcade-pulse-creator-topic-search-portrait-after-submit"
         after.lifetime = .keepAlways
         add(after)
+        XCTAssertEqual(topic.value as? String, "puzzle",
+                       "Keyboard Search must preserve the complete Creator topic query.")
 
         XCUIDevice.shared.orientation = .landscapeLeft
         let window = app.windows.firstMatch
