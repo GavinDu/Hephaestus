@@ -392,7 +392,7 @@ enum PlayerRejectedHandoffCleanupPolicy {
 /// Only a current native-admitted scene submission can release a hold poster.
 /// Navigation finish is not a first composited pixel nor gameplay start.
 enum PlayerScenePosterHandoffPolicy {
-    static let noSceneTimeoutMilliseconds = 12_000
+    static let noSceneTimeoutMilliseconds: Int64 = 12_000
 
     static func mayFade(
         expectedAttempt: Int, acceptedSceneAttempt: Int?,
