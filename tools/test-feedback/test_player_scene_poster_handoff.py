@@ -42,7 +42,8 @@ class CurrentScenePosterSourceContract(unittest.TestCase):
         self.assertIn("guard !Task.isCancelled", timer)
         self.assertIn("watchdogAttempt == attempt", timer)
         self.assertIn("PlayerScenePosterHandoffPolicy.shouldOfferNoSceneRecovery", timer)
-        self.assertIn("loadFailureCategory = .network", timer)
+        self.assertIn("loadFailureCategory = .unknown", timer)
+        self.assertNotIn("loadFailureCategory = .network", timer)
         self.assertIn(
             'loadError = "The game has not drawn its first scene. Tap Retry or return to the feed."',
             timer
