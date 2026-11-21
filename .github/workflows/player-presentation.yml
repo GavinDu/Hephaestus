@@ -182,7 +182,7 @@ jobs:
             --last 45m --style compact \
             --predicate 'subsystem == "ai.tinydream.Hephaestus" AND category == "ArcadePulseComments"' \
             > /tmp/player-presentation-iphone-comments-oslog.log 2>&1 || true
-          if ! grep -q 'UI_COMMENTS_\|UI_GRID_COMMENTS_' /tmp/player-presentation-iphone-comments-oslog.log; then
+          if ! grep -qE 'UI_COMMENTS_|UI_GRID_COMMENTS_' /tmp/player-presentation-iphone-comments-oslog.log; then
             echo "No app-side Comments presenter OSLog signals captured; instrumentation inconclusive."
           fi
 
@@ -273,7 +273,7 @@ jobs:
             --last 45m --style compact \
             --predicate 'subsystem == "ai.tinydream.Hephaestus" AND category == "ArcadePulseComments"' \
             > /tmp/player-presentation-ipad-comments-oslog.log 2>&1 || true
-          if ! grep -q 'UI_COMMENTS_\|UI_GRID_COMMENTS_' /tmp/player-presentation-ipad-comments-oslog.log; then
+          if ! grep -qE 'UI_COMMENTS_|UI_GRID_COMMENTS_' /tmp/player-presentation-ipad-comments-oslog.log; then
             echo "No app-side Comments presenter OSLog signals captured; instrumentation inconclusive."
           fi
 
