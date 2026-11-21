@@ -54,6 +54,38 @@ struct PlayerCurrentHostMilestoneProjectionTests {
         #expect(project(reducer.phase, ownsLease: false) == nil)
     }
 
+    @Test func currentNativeProofMustPrecedeMetricStateMutation() {
+        // An unproven callback must not burn the first-scene or first-input
+        // reducer slot and suppress the next legitimate current callback.
+        for iteration in 0..<160 {
+            let session = "session-\(iteration)"
+            let legitimate = project(.documentLoaded,
+                documentNonce: nonce, sessionID: session)
+            #expect(PlayerCurrentHostMilestoneProjection.permitsMetricAdmission(
+                legitimate, forSession: session
+            ))
+            #expect(!PlayerCurrentHostMilestoneProjection.permitsMetricAdmission(
+                nil, forSession: session
+            ))
+            #expect(!PlayerCurrentHostMilestoneProjection.permitsMetricAdmission(
+                project(.documentLoaded, sessionID: session), forSession: session
+            ))
+            #expect(!PlayerCurrentHostMilestoneProjection.permitsMetricAdmission(
+                project(.documentLoaded, documentNonce: nonce), forSession: session
+            ))
+            #expect(!PlayerCurrentHostMilestoneProjection.permitsMetricAdmission(
+                legitimate, forSession: "other-session"
+            ))
+            for dead in [PlayerHostLaunchReducer.Phase.navigationFailed,
+                         PlayerHostLaunchReducer.Phase.detached] {
+                #expect(!PlayerCurrentHostMilestoneProjection.permitsMetricAdmission(
+                    project(dead, documentNonce: nonce, sessionID: session),
+                    forSession: session
+                ))
+            }
+        }
+    }
+
     @Test func nativeProofRejectsHostileIdentityInvalidEpochAndExpiredAttachment() {
         for iteration in 0..<160 {
             let wrong = "bad/\(iteration)"
