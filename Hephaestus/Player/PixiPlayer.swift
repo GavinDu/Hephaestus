@@ -1088,6 +1088,120 @@ enum PlayerPrewarmResponsePolicy {
     }
 }
 
+/// Pure, native-owned cache provenance contract staged for #726.
+/// This helper does not alter the still-shipping WKNavigationResponse policies.
+/// WebKit must prove the real cached representation and current native owner
+/// before those delegates may consume any receipt or admit a HTTP 304.
+enum PlayerAuthorizedDocumentRevalidationPolicy {
+    struct Authorized200Receipt: Equatable {
+        let gameID: String
+        let immutablePlayerURL: URL
+        let credentialEpoch: UInt64
+        let attachmentLease: UInt64
+        let nativeDocumentNonce: String
+        let etag: String?
+    }
+
+    private static func validNonce(_ value: String?) -> Bool {
+        guard let value else { return false }
+        var count = 0
+        for byte in value.utf8 {
+            count += 1
+            guard count <= 32,
+                  (0x30...0x39).contains(byte) ||
+                  (0x61...0x66).contains(byte) else { return false }
+        }
+        return count == 32
+    }
+
+    private static func validETag(_ value: String?) -> Bool {
+        guard let value else { return true }
+        var count = 0
+        for byte in value.utf8 {
+            count += 1
+            // Opaque HTTP entity-tag; never log or interpolate caller text.
+            guard count <= 128, (0x20...0x7e).contains(byte) else { return false }
+        }
+        return count > 0
+    }
+
+    private static func validPlayerURL(
+        _ url: URL, gameID: String, backendOrigin: URL
+    ) -> Bool {
+        guard let p = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let origin = URLComponents(url: backendOrigin, resolvingAgainstBaseURL: false),
+              let scheme = p.scheme?.lowercased(), let host = p.host?.lowercased(),
+              let originScheme = origin.scheme?.lowercased(),
+              let originHost = origin.host?.lowercased(),
+              scheme == originScheme, host == originHost,
+              (p.port ?? (scheme == "https" ? 443 : 80)) ==
+                (origin.port ?? (originScheme == "https" ? 443 : 80)),
+              (scheme == "https" || scheme == "http"),
+              p.user == nil, p.password == nil, p.fragment == nil,
+              p.path == "/player",
+              p.queryItems?.filter({ $0.name == "game" }).map(\.value) == [gameID]
+        else { return false }
+        return true
+    }
+
+    /// Receipt construction is only permitted for a genuinely native-verified
+    /// current-owner main-frame 200, *not* a page-supplied JavaScript claim.
+    static func authorized200(
+        gameID: String, expectedPlayerURL: URL, responseURL: URL?,
+        backendOrigin: URL, statusCode: Int,
+        credentialEpoch: UInt64, attachmentLease: UInt64,
+        nativeDocumentNonce: String?, etag: String?,
+        ownsCurrentAttachment: Bool, isTrustedMainFrame: Bool,
+        hasAuthorizedCachedRepresentation: Bool
+    ) -> Authorized200Receipt? {
+        guard statusCode == 200, ownsCurrentAttachment, isTrustedMainFrame,
+              hasAuthorizedCachedRepresentation,
+              credentialEpoch > 0, attachmentLease > 0,
+              PlayerPublishedGameIDPolicy.valid(gameID),
+              validPlayerURL(expectedPlayerURL, gameID: gameID, backendOrigin: backendOrigin),
+              responseURL == expectedPlayerURL,
+              validNonce(nativeDocumentNonce), validETag(etag),
+              let nativeDocumentNonce else { return nil }
+        return Authorized200Receipt(
+            gameID: gameID, immutablePlayerURL: expectedPlayerURL,
+            credentialEpoch: credentialEpoch, attachmentLease: attachmentLease,
+            nativeDocumentNonce: nativeDocumentNonce, etag: etag
+        )
+    }
+
+    /// Status-only 304 can NEVER establish a document or render milestone.
+    /// Caller must independently prove WebKit's current cached representation
+    /// and native lease/credential/document provenance at the exact decision.
+    static func admits304(
+        receipt: Authorized200Receipt?,
+        gameID: String, expectedPlayerURL: URL, responseURL: URL?,
+        backendOrigin: URL, statusCode: Int,
+        credentialEpoch: UInt64, attachmentLease: UInt64,
+        nativeDocumentNonce: String?, responseETag: String?,
+        ownsCurrentAttachment: Bool, isTrustedMainFrame: Bool,
+        hasAuthorizedCachedRepresentation: Bool
+    ) -> Bool {
+        guard statusCode == 304, let receipt,
+              ownsCurrentAttachment, isTrustedMainFrame,
+              hasAuthorizedCachedRepresentation,
+              credentialEpoch > 0, attachmentLease > 0,
+              PlayerPublishedGameIDPolicy.valid(gameID),
+              validPlayerURL(expectedPlayerURL, gameID: gameID, backendOrigin: backendOrigin),
+              responseURL == expectedPlayerURL,
+              validNonce(nativeDocumentNonce), validETag(responseETag),
+              receipt.gameID == gameID,
+              receipt.immutablePlayerURL == expectedPlayerURL,
+              receipt.credentialEpoch == credentialEpoch,
+              receipt.attachmentLease == attachmentLease,
+              receipt.nativeDocumentNonce == nativeDocumentNonce
+        else { return false }
+        // A 304 may omit ETag. If present it must match the validated prior
+        // 200 representation; a new/different tag never authorizes cache use.
+        if let responseETag { return receipt.etag == responseETag }
+        return true
+    }
+}
+
 /// A single failed main-frame navigation can surface through both
 /// decidePolicyFor(response) and didFailProvisionalNavigation (the latter
 /// commonly reports NSURLErrorCancelled after an HTTP error response is
