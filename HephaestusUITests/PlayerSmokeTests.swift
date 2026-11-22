@@ -1863,6 +1863,134 @@ final class PlayerSmokeTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    /// Strictly load a genuine published game before checking that overlay.
+    @MainActor
+    func testArcadePulseIPhoneCompactLandscapeAccessibilityFiveToolbar() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("Distinct compact-landscape floating toolbar is iPhone-only.")
+        }
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        self.app = app
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        app.launch()
+
+        let play = app.buttons["game.play"].firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let deadline = Date().addingTimeInterval(90)
+        var lastRetry = Date.distantPast
+        while !play.exists && Date() < deadline {
+            if retry.exists && retry.isHittable &&
+               Date().timeIntervalSince(lastRetry) >= 20 {
+                retry.tap()
+                lastRetry = Date()
+            }
+            _ = play.waitForExistence(timeout: 3)
+        }
+        guard play.exists else {
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "arcade-pulse-iphone-a5-landscape-no-real-published-feed"
+            failure.lifetime = .keepAlways
+            add(failure)
+            XCTFail("Real published For You game required; never synthesize a feed for A5 landscape.")
+            return
+        }
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let rotationDeadline = Date().addingTimeInterval(12)
+        while window.frame.width <= window.frame.height && Date() < rotationDeadline {
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "Measure actual rotated compact iPhone viewport, not a transformed screenshot.")
+        XCTAssertTrue(play.waitForExistence(timeout: 10),
+                      "The same actual server-published game must retain a real Play action.")
+
+        let scope = app.descendants(matching: .any)["feed.landscape.scope"].firstMatch
+        let search = app.descendants(matching: .any)["feed.landscape.search"].firstMatch
+        let more = app.descendants(matching: .any)["feed.landscape.more"].firstMatch
+        let controls = [scope, search, more]
+        for (index, control) in controls.enumerated() {
+            XCTAssertTrue(control.waitForExistence(timeout: 10),
+                          "Compact landscape A5 control \(index) must exist over a genuine game.")
+            guard control.exists else { continue }
+            let rect = control.frame
+            let bounds = window.frame
+            print("IPHONE_A5_COMPACT_TOOLBAR index=\(index) rect=\(rect) window=\(bounds)")
+            XCTAssertGreaterThanOrEqual(rect.width + 0.000001, 44)
+            XCTAssertGreaterThanOrEqual(rect.height + 0.000001, 44)
+            XCTAssertGreaterThanOrEqual(rect.minX, bounds.minX - 0.000001)
+            XCTAssertLessThanOrEqual(rect.maxX, bounds.maxX + 0.000001)
+            XCTAssertGreaterThanOrEqual(rect.minY, bounds.minY - 0.000001)
+            XCTAssertLessThanOrEqual(rect.maxY, bounds.maxY + 0.000001)
+            XCTAssertTrue(control.isHittable,
+                          "Actual native A5 control must own a reachable hit target.")
+        }
+        for i in controls.indices {
+            for j in controls.indices where i < j {
+                XCTAssertFalse(controls[i].frame.intersects(controls[j].frame),
+                               "Compact landscape A5 toolbar controls must not overlap.")
+            }
+        }
+
+        let untouched = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        untouched.name = "arcade-pulse-iphone-a5-compact-landscape-toolbar"
+        untouched.lifetime = .keepAlways
+        add(untouched)
+
+        XCTAssertTrue(search.isHittable)
+        search.tap()
+        let field = app.descendants(matching: .any)["feed.landscape.searchField"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10) && field.isHittable,
+                      "Real compact Search sheet must be usable without changing the published feed.")
+        let sheet = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        sheet.name = "arcade-pulse-iphone-a5-compact-search-sheet"
+        sheet.lifetime = .keepAlways
+        add(sheet)
+        let cancel = app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10) && cancel.isHittable)
+        cancel.tap()
+
+        XCTAssertTrue(more.waitForExistence(timeout: 10) && more.isHittable)
+        more.tap()
+        let moreScroll = app.scrollViews["feed.landscape.more.scroll"].firstMatch
+        XCTAssertTrue(moreScroll.waitForExistence(timeout: 10) && moreScroll.isHittable,
+                      "At Accessibility5, More must show one real scrollable native action sheet.")
+        // Preserve an original screenshot BEFORE testing each actual action.
+        // A failed third action previously exited before the post-loop image
+        // could be attached, masking whether the native Menu was clipped.
+        let moreBeforeAssertion = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        moreBeforeAssertion.name = "arcade-pulse-iphone-a5-compact-more-before-action-checks"
+        moreBeforeAssertion.lifetime = .keepAlways
+        add(moreBeforeAssertion)
+        for title in ["Feed preferences", "Discover creators", "Refresh games"] {
+            let menuItem = app.buttons[title].firstMatch
+            XCTAssertTrue(menuItem.waitForExistence(timeout: 8),
+                          "Real compact A5 More actions must contain \(title).")
+            if !menuItem.isHittable {
+                moreScroll.swipeUp()
+            }
+            XCTAssertTrue(menuItem.isHittable,
+                          "Real compact A5 More actions must make \(title) physically reachable without executing it.")
+            XCTAssertGreaterThanOrEqual(menuItem.frame.height, 44,
+                                        "Each genuine More action needs an actual 44pt hit target.")
+        }
+        let menu = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        menu.name = "arcade-pulse-iphone-a5-compact-more-actions"
+        menu.lifetime = .keepAlways
+        add(menu)
+        // This action-sheet inspection is read-only: no Creator, Preferences
+        // or Refresh calls and no synthetic backend records.
+        let moreDismiss = app.buttons["feed.landscape.more.dismiss"].firstMatch
+        XCTAssertTrue(moreDismiss.waitForExistence(timeout: 8) && moreDismiss.isHittable)
+        moreDismiss.tap()
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// P1 #425: old 250pt sidebar at Accessibility5 broke real destination
     /// names *inside words* despite green route smoke. Inspect the untouched
     /// full-screen native frame; do not accept the XCUI label string alone.

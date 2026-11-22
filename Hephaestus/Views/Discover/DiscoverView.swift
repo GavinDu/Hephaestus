@@ -8,6 +8,15 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+/// The compact landscape More menu's third item was inaccessible at A5
+/// in genuine native iPhone CI. A scrollable native sheet owns all three
+/// actions and defers follow-on presentation until it fully dismisses.
+private enum CompactLandscapeMoreAction {
+    case preferences
+    case creators
+    case refresh
+}
+
 /// Source-owned minimum for actual native Discover toolbar Button labels.
 /// An external ToolbarItem wrapper's size is NOT its accessible hitbox.
 enum DiscoverToolbarActionLayout {
@@ -330,6 +339,8 @@ struct DiscoverView: View {
     @State private var selectedFeed: SocialFeedScope = .forYou
     @State private var compactSearchPresented = false
     @State private var compactSearchDraft = ""
+    @State private var compactMorePresented = false
+    @State private var compactMorePendingAction: CompactLandscapeMoreAction?
     @State private var games: [FeedGame] = []
     @State private var playerRequest: PixiPlayerRequest?
     @State private var errorMessage: String?
@@ -445,16 +456,9 @@ struct DiscoverView: View {
             }
             .accessibilityLabel("Search games")
             .accessibilityIdentifier("feed.landscape.search")
-            Menu {
-                Button("Feed preferences", systemImage: "slider.horizontal.3") {
-                    isFeedPreferencesPresented = true
-                }
-                Button("Discover creators", systemImage: "person.2") {
-                    isCreatorDiscoveryPresented = true
-                }
-                Button("Refresh games", systemImage: "arrow.clockwise") {
-                    Task { await load() }
-                }
+            Button {
+                compactMorePendingAction = nil
+                compactMorePresented = true
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .frame(width: 44, height: 44)
@@ -464,6 +468,80 @@ struct DiscoverView: View {
         }
         .foregroundStyle(.white)
         .background(.black.opacity(0.72), in: Capsule())
+    }
+
+    /// Only actual user-selected actions are delivered after the system
+    /// dismisses the More sheet. Avoid presenting a second native sheet
+    /// under the first, even in compact A5 landscape.
+    private func chooseCompactMoreAction(_ action: CompactLandscapeMoreAction) {
+        compactMorePendingAction = action
+        compactMorePresented = false
+    }
+
+    private func completeCompactMoreDismissal() {
+        guard let action = compactMorePendingAction else { return }
+        compactMorePendingAction = nil
+        switch action {
+        case .preferences:
+            isFeedPreferencesPresented = true
+        case .creators:
+            isCreatorDiscoveryPresented = true
+        case .refresh:
+            Task { await load() }
+        }
+    }
+
+    private func compactMoreRow(
+        _ title: String, systemImage: String, action: CompactLandscapeMoreAction
+    ) -> some View {
+        Button {
+            chooseCompactMoreAction(action)
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+                .foregroundStyle(ArcadePulseTheme.textPrimary)
+                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .tint(ArcadePulseTheme.electricViolet)
+    }
+
+    private var compactMoreSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    compactMoreRow(
+                        "Feed preferences", systemImage: "slider.horizontal.3",
+                        action: .preferences
+                    )
+                    compactMoreRow(
+                        "Discover creators", systemImage: "person.2",
+                        action: .creators
+                    )
+                    compactMoreRow(
+                        "Refresh games", systemImage: "arrow.clockwise",
+                        action: .refresh
+                    )
+                }
+                .padding(16)
+            }
+            .accessibilityIdentifier("feed.landscape.more.scroll")
+            .navigationTitle("More feed controls")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        compactMorePendingAction = nil
+                        compactMorePresented = false
+                    }
+                    .accessibilityIdentifier("feed.landscape.more.dismiss")
+                }
+            }
+        }
+        .presentationDetents([.large])
     }
 
     private var compactSearchSheet: some View {
@@ -1027,6 +1105,11 @@ struct DiscoverView: View {
             }
             .sheet(isPresented: $compactSearchPresented) {
                 compactSearchSheet
+            }
+            .sheet(isPresented: $compactMorePresented, onDismiss: {
+                completeCompactMoreDismissal()
+            }) {
+                compactMoreSheet
             }
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
