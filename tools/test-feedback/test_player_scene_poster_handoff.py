@@ -34,13 +34,19 @@ class CurrentScenePosterSourceContract(unittest.TestCase):
 
     def test_bounded_real_swiftui_timer_and_true_error_are_preserved(self):
         src = (ROOT / "Hephaestus/Player/PixiPlayer.swift").read_text()
-        timer = src.split('.task(id: "\\(attempt):\\(isLoading)") {', 1)[1].split(
+        self.assertIn(".task(id: noSceneWatchdogIdentity) {", src)
+        identity = src.split("private var noSceneWatchdogIdentity: String {", 1)[1].split("private var playerURL", 1)[0]
+        for key in ("attempt", "isLoading", "scenePhase", "firstSceneSubmittedForAttempt?.epoch", "sessionRevoked", "loadError != nil", "holdVisible"):
+            self.assertIn(key, identity)
+        timer = src.split('.task(id: noSceneWatchdogIdentity) {', 1)[1].split(
             ".task(id: attempt)", 1
         )[0]
         self.assertIn("let watchdogAttempt = attempt", timer)
         self.assertIn("try? await Task.sleep", timer)
         self.assertIn("guard !Task.isCancelled", timer)
         self.assertIn("watchdogAttempt == attempt", timer)
+        self.assertIn("scenePhase == .active", timer)
+        self.assertIn("isForeground: scenePhase == .active", timer)
         self.assertIn("PlayerScenePosterHandoffPolicy.shouldOfferNoSceneRecovery", timer)
         self.assertIn("loadFailureCategory = .unknown", timer)
         self.assertNotIn("loadFailureCategory = .network", timer)

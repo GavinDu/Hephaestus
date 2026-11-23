@@ -23,13 +23,14 @@ struct PlayerScenePosterHandoffPolicyTests {
     private func recover(
         expected: Int = 8, scene: Int? = nil,
         poster: Bool = true, visible: Bool = true, loaded: Bool = true,
-        hasError: Bool = false, revoked: Bool = false
+        hasError: Bool = false, revoked: Bool = false,
+        foreground: Bool = true
     ) -> Bool {
         Policy.shouldOfferNoSceneRecovery(
             expectedAttempt: expected, acceptedSceneAttempt: scene,
             hasHoldPoster: poster, holdVisible: visible,
             navigationFinished: loaded, hasLoadError: hasError,
-            sessionRevoked: revoked
+            sessionRevoked: revoked, isForeground: foreground
         )
     }
 
@@ -53,6 +54,7 @@ struct PlayerScenePosterHandoffPolicyTests {
         #expect(!fade(opacity: 0))
         #expect(!recover(hasError: true))
         #expect(!recover(revoked: true))
+        #expect(!recover(foreground: false))
         #expect(!recover(poster: false))
         #expect(!recover(visible: false))
         #expect(!recover(loaded: false))
@@ -80,6 +82,7 @@ struct PlayerScenePosterHandoffPolicyTests {
             #expect(!recover(expected: attempt, scene: attempt))
             #expect(!fade(expected: attempt, scene: nil))
             #expect(recover(expected: attempt, scene: nil))
+            #expect(!recover(expected: attempt, scene: nil, foreground: false))
             #expect(!fade(expected: attempt, scene: attempt - 1))
             #expect(recover(expected: attempt, scene: attempt - 1))
             #expect(!fade(expected: attempt, scene: attempt + 1))

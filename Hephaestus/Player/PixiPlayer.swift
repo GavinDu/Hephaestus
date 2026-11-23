@@ -443,11 +443,12 @@ enum PlayerScenePosterHandoffPolicy {
     static func shouldOfferNoSceneRecovery(
         expectedAttempt: Int, acceptedSceneAttempt: Int?,
         hasHoldPoster: Bool, holdVisible: Bool,
-        navigationFinished: Bool, hasLoadError: Bool, sessionRevoked: Bool
+        navigationFinished: Bool, hasLoadError: Bool, sessionRevoked: Bool,
+        isForeground: Bool
     ) -> Bool {
         acceptedSceneAttempt != expectedAttempt &&
         hasHoldPoster && holdVisible && navigationFinished &&
-        !hasLoadError && !sessionRevoked
+        !hasLoadError && !sessionRevoked && isForeground
     }
 }
 
@@ -2217,6 +2218,11 @@ struct PixiPlayerSheet: View {
         PlayerQuality.effective(preference: qualityPreference)
     }
 
+    // Cancel stale recovery tasks on all terminal/ownership transitions.
+    private var noSceneWatchdogIdentity: String {
+        "\(attempt):\(isLoading):\(scenePhase):\(firstSceneSubmittedForAttempt?.epoch ?? -1):\(sessionRevoked):\(loadError != nil):\(holdVisible)"
+    }
+
     private var playerURL: URL? {
         PlayerWebViewPool.playerURL(gameID: gameID, quality: activeQuality ?? effectiveQuality)
     }
@@ -2789,16 +2795,18 @@ struct PixiPlayerSheet: View {
                                            name: "ThermalState", message: "thermal state serious/critical during play")
                 }
             }
-            .task(id: "\(attempt):\(isLoading)") {
+            .task(id: noSceneWatchdogIdentity) {
                 // Navigation-finish is not a scene. This attempt-scoped
-                // SwiftUI task is cancelled on retry, phase change and exit.
+                // Task cancels on retry, phase change, scene, revocation,
+                // terminal error, poster fade and dismissal.
                 let watchdogAttempt = attempt
-                guard !isLoading, loadError == nil,
+                guard scenePhase == .active, !isLoading, loadError == nil,
                       admittedHoldPosterURL != nil, holdVisible else { return }
                 try? await Task.sleep(for: .milliseconds(
                     PlayerScenePosterHandoffPolicy.noSceneTimeoutMilliseconds
                 ))
                 guard !Task.isCancelled, watchdogAttempt == attempt,
+                      scenePhase == .active,
                       PlayerScenePosterHandoffPolicy.shouldOfferNoSceneRecovery(
                         expectedAttempt: watchdogAttempt,
                         acceptedSceneAttempt: firstSceneSubmittedForAttempt?.epoch,
@@ -2806,7 +2814,8 @@ struct PixiPlayerSheet: View {
                         holdVisible: holdVisible,
                         navigationFinished: !isLoading,
                         hasLoadError: loadError != nil,
-                        sessionRevoked: sessionRevoked
+                        sessionRevoked: sessionRevoked,
+                        isForeground: scenePhase == .active
                       ) else { return }
                 // No compositor or rendered-scene claims from didFinish.
                 // This is a stalled scene, NOT evidence of failed transport.
