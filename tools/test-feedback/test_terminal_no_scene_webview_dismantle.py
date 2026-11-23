@@ -16,7 +16,7 @@ class TerminalNoSceneMountedViewContract(unittest.TestCase):
         # Every installed sheet callback must reject a timed-out epoch before
         # mutation, including late termination (which can otherwise auto-reload).
         callback_block = src.split("private var playerContent: some View {", 1)[1].split(
-            ".id(attempt)", 1
+            "\n                    .id(attempt)", 1
         )[0]
         for callback in ("onProgress", "onLoadFinish", "onLoadFail", "onTerminate",
                          "onPrewarmHit", "onFirstSceneRenderSubmit", "onFirstInput",
