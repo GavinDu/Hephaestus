@@ -1,0 +1,9 @@
+# #770 incremental native terminal no-scene cleanup (successor Epic #642)
+
+This narrowly scoped source change removes the real mounted PlayerWebView from the active SwiftUI view hierarchy when the current attempt's 12-second no-scene watchdog reaches terminal recovery. Previously the error card was overlaid while the WebView remained mounted.
+
+The pure PlayerTerminalNoSceneMountPolicy rejects only the exact terminal attempt. SwiftUI dismantle invokes the existing Coordinator stopObserving() and PlayerWebViewPool.recycle(webView, lease: coordinator.attachmentLease), which is guarded by ownsActiveAttachment. This cancels the Coordinator's metric/result fetch tasks, detaches the receiver, invalidates document nonce/scene ledger, stops the WebView and loads blank HTML. A later manual Retry increments attempt, so it can take a NEW attachment lease; stale teardown cannot recycle the successor. Runtime scene submission, input, and verified result closures also ignore the terminal epoch.
+
+**Limits:** SwiftUI teardown occurs during view reconciliation, not as a synchronous sheet->Coordinator revocation token. Source and tests do not establish a hard before-error-card cleanup order, full WebAudio/GPU memory reclamation, genuine published-game playback, compositor-first-present, or physical 50-cycle thermal tests. Keep successor issue #770 OPEN if those stricter requirements remain, and retain original #202/#205/#279. Do not merge pending exact-head complete native CI, skeptical architect review, and valid iPhone/iPad smoke.
+
+Rollback: remove only the pure mount predicate, terminal attempt state and source/test/documentation changes.
