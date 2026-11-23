@@ -247,6 +247,17 @@ jobs:
             --log /tmp/ipad-feed-ui.log --out /tmp/test-feedback-ipad.json \
             --run-id "ipad-feed-${{ github.run_id }}-${{ github.run_attempt }}" \
             --commit "${{ github.sha }}" --layer 1 --prefix ipad-feed || true
+      # Preserve only privacy-safe DEBUG app-side Comments lifecycle markers
+      # from the actual iPad, including failures of the strict real tap test.
+      - name: Capture native iPad Comments presenter signals
+        if: always()
+        shell: bash
+        run: |
+          xcrun simctl spawn "${{ steps.ipad.outputs.udid }}" log show \
+            --last 45m --style compact \
+            --predicate 'subsystem == "ai.tinydream.Hephaestus" AND category == "ArcadePulseComments"' \
+            > /tmp/ipad-comments-presenter.log 2>&1 || true
+          grep -E 'UI_COMMENTS_|UI_GRID_COMMENTS_' /tmp/ipad-comments-presenter.log | tail -n 30 || true
       # Export native screenshots to a reviewable artifact directory rather
       # than burying them inside the binary .xcresult. Always run, including
       # on UI test failure, so the failed frame remains available for triage.
@@ -284,4 +295,5 @@ jobs:
             /tmp/ipad-feed-ui-screenshots
             /tmp/ipad-feed-ui-review
             /tmp/test-feedback-ipad.json
+            /tmp/ipad-comments-presenter.log
           if-no-files-found: ignore
