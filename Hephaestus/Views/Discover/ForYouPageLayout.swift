@@ -11,6 +11,21 @@ enum ForYouAccessibleActionsTopicPolicy {
     }
 }
 
+/// Immersive metadata must never compete with Play on short windows.
+/// Roomy stages may wrap legitimate topic text on two lines; Accessibility
+/// sizes and compact heights reserve the stage for Play. Game Details
+/// retains the genuine topic metadata without shrinking typography.
+enum ForYouTopicOverlayPolicy {
+    static func visibleLineLimit(
+        shortViewport: Bool,
+        verticalSizeClass: UserInterfaceSizeClass?,
+        dynamicTypeSize: DynamicTypeSize
+    ) -> Int {
+        shortViewport || verticalSizeClass == .compact ||
+            dynamicTypeSize >= .xxLarge ? 0 : 2
+    }
+}
+
 /// Independently tested creator-game row layout. Keep actual published
 /// titles, provenance and Play actions readable without inventing content.
 enum CreatorGameRowLayout {
@@ -101,6 +116,15 @@ enum ForYouPageLayout {
             !candidate.unicodeScalars.contains(where: {
                 CharacterSet.controlCharacters.contains($0)
             })
+    }
+
+    /// Never offer a destructive Block action against the signed-in
+    /// publisher's own identity. The backend still authorizes writes.
+    static func canOfferCreatorBlock(ownerID: String?, viewerID: String) -> Bool {
+        guard hasNavigableCreator(ownerID: ownerID), let ownerID else { return false }
+        let viewer = viewerID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return viewer.isEmpty ||
+            ownerID.trimmingCharacters(in: .whitespacesAndNewlines) != viewer
     }
 
     /// A stable per-game palette slot for truthful fallback artwork when no

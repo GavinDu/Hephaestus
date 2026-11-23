@@ -31,4 +31,44 @@ struct ArcadePulseCreatorBlockOwnerPolicyTests {
         #expect(!ForYouPageLayout.hasNavigableCreator(ownerID: ""))
         #expect(ForYouPageLayout.hasNavigableCreator(ownerID: "doodlequest"))
     }
+
+    @Test func authenticatedCreatorCannotBlockOwnPublisherIdentity() {
+        for owner in ["doodlequest", "艺术家", "creator🎮"] {
+            #expect(!ForYouPageLayout.canOfferCreatorBlock(
+                ownerID: owner, viewerID: owner
+            ))
+            #expect(!ForYouPageLayout.canOfferCreatorBlock(
+                ownerID: "  \(owner)  ", viewerID: " \(owner) "
+            ))
+        }
+    }
+
+    @Test func unrelatedCreatorAndGuestRetainExistingAuthorizationPresentation() {
+        #expect(ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: "doodlequest", viewerID: "another-creator"
+        ))
+        #expect(ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: "艺术家", viewerID: "doodlequest"
+        ))
+        #expect(ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: "doodlequest", viewerID: ""
+        ))
+        #expect(ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: "doodlequest", viewerID: "   "
+        ))
+    }
+
+    @Test func malformedOwnerCannotExposeDestructiveBlockForAnyViewer() {
+        let owners: [String?] = [
+            nil, "", " \n ", "bad\u{0000}creator", "bad\ncreator", "bad\tcreator"
+        ]
+        for owner in owners {
+            #expect(!ForYouPageLayout.canOfferCreatorBlock(
+                ownerID: owner, viewerID: ""
+            ))
+            #expect(!ForYouPageLayout.canOfferCreatorBlock(
+                ownerID: owner, viewerID: "real-viewer"
+            ))
+        }
+    }
 }
