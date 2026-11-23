@@ -428,8 +428,6 @@ enum PlayerRejectedHandoffCleanupPolicy {
 /// Only a current native-admitted scene submission can release a hold poster.
 /// Navigation finish is not a first composited pixel nor gameplay start.
 enum PlayerScenePosterHandoffPolicy {
-    static let noSceneTimeoutMilliseconds: Int64 = 12_000
-
     static func mayFade(
         expectedAttempt: Int, acceptedSceneAttempt: Int?,
         hasHoldPoster: Bool, holdVisible: Bool, holdOpacity: Double,
@@ -440,15 +438,30 @@ enum PlayerScenePosterHandoffPolicy {
         navigationFinished && !hasLoadError && !sessionRevoked
     }
 
+}
+
+/// Launch readiness is independent of optional artwork. Native navigation
+/// completion is not a scene; a trusted current renderer submission is
+/// required before exposing the stage to touch or accessibility.
+enum PlayerFirstSceneWaitPolicy {
+    enum State: Equatable { case unavailable, waiting, ready }
+    static let noSceneTimeoutMilliseconds: Int64 = 12_000
+
+    static func state(
+        currentAttempt: Int, acceptedSceneAttempt: Int?,
+        terminalAttempt: Int?, hasValidPlayerRequest: Bool,
+        navigationFinished: Bool, hasLoadError: Bool, sessionRevoked: Bool
+    ) -> State {
+        guard hasValidPlayerRequest, !hasLoadError, !sessionRevoked,
+              terminalAttempt != currentAttempt else { return .unavailable }
+        return navigationFinished && acceptedSceneAttempt == currentAttempt
+            ? .ready : .waiting
+    }
+
     static func shouldOfferNoSceneRecovery(
-        expectedAttempt: Int, acceptedSceneAttempt: Int?,
-        hasHoldPoster: Bool, holdVisible: Bool,
-        navigationFinished: Bool, hasLoadError: Bool, sessionRevoked: Bool,
-        isForeground: Bool
+        state: State, navigationFinished: Bool, isForeground: Bool
     ) -> Bool {
-        acceptedSceneAttempt != expectedAttempt &&
-        hasHoldPoster && holdVisible && navigationFinished &&
-        !hasLoadError && !sessionRevoked && isForeground
+        state == .waiting && navigationFinished && isForeground
     }
 }
 
@@ -2232,9 +2245,22 @@ struct PixiPlayerSheet: View {
         PlayerQuality.effective(preference: qualityPreference)
     }
 
-    // Cancel stale recovery tasks on all terminal/ownership transitions.
+    // Launch readiness is not determined by whether a poster is available.
+    private var firstSceneReadiness: PlayerFirstSceneWaitPolicy.State {
+        PlayerFirstSceneWaitPolicy.state(
+            currentAttempt: attempt,
+            acceptedSceneAttempt: firstSceneSubmittedForAttempt?.epoch,
+            terminalAttempt: terminalNoSceneAttempt,
+            hasValidPlayerRequest: playerURL != nil,
+            navigationFinished: !isLoading,
+            hasLoadError: loadError != nil, sessionRevoked: sessionRevoked
+        )
+    }
+
+    // Cancel stale recovery tasks on all terminal/ownership transitions,
+    // but never restart the deadline merely because artwork changes.
     private var noSceneWatchdogIdentity: String {
-        "\(attempt):\(isLoading):\(scenePhase):\(firstSceneSubmittedForAttempt?.epoch ?? -1):\(sessionRevoked):\(loadError != nil):\(holdVisible)"
+        "\(attempt):\(isLoading):\(scenePhase):\(firstSceneSubmittedForAttempt?.epoch ?? -1):\(sessionRevoked):\(loadError != nil):\(terminalNoSceneAttempt ?? -1):\(playerURL != nil)"
     }
 
     private var playerURL: URL? {
@@ -2497,12 +2523,13 @@ struct PixiPlayerSheet: View {
                         }
                     )
                     .id(attempt)
+                    .allowsHitTesting(firstSceneReadiness == .ready)
+                    .accessibilityHidden(firstSceneReadiness != .ready)
                     .ignoresSafeArea(edges: .bottom)
                 }
 
-                // #58 hold frame: the poster covers the web view until
-                // the first navigation finish fades it out. A missing
-                // poster URL means no hold at all.
+                // An admitted poster is decorative; only a current trusted
+                // scene releases it. Missing/rejected art uses a native card.
                 if admittedHoldPosterURL != nil, holdVisible {
                     holdBackdrop
                 }
@@ -2510,13 +2537,23 @@ struct PixiPlayerSheet: View {
                 if isLoading && loadError == nil, !prewarmHit {
                     if admittedHoldPosterURL != nil, holdVisible {
                         holdLoadingOverlay
-                    } else {
+                    }
+                }
+
+                // Keep an opaque, accessible fallback even after didFinish
+                // or a prewarm hit if no admitted current scene exists.
+                if firstSceneReadiness == .waiting,
+                   admittedHoldPosterURL == nil || !holdVisible {
                     PlayerStateCard {
                         VStack(spacing: 12) {
-                            ProgressView(value: progress)
-                                .progressViewStyle(.linear)
-                                .frame(width: 180)
-                            Text("Loading \(title)…")
+                            if isLoading {
+                                ProgressView(value: progress)
+                                    .progressViewStyle(.linear)
+                                    .frame(width: 180)
+                            } else {
+                                ProgressView()
+                            }
+                            Text(isLoading ? "Loading \(title)…" : "Preparing \(title)…")
                                 .accessibilityIdentifier("player.loading")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
@@ -2526,7 +2563,6 @@ struct PixiPlayerSheet: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                    }
                     }
                 }
 
@@ -2820,25 +2856,19 @@ struct PixiPlayerSheet: View {
                 }
             }
             .task(id: noSceneWatchdogIdentity) {
-                // Navigation-finish is not a scene. This attempt-scoped
-                // Task cancels on retry, phase change, scene, revocation,
-                // terminal error, poster fade and dismissal.
+                // Navigation-finish is not a scene. The same deadline applies
+                // with or without artwork; retire only this current attempt.
                 let watchdogAttempt = attempt
-                guard scenePhase == .active, !isLoading, loadError == nil,
-                      admittedHoldPosterURL != nil, holdVisible else { return }
+                guard PlayerFirstSceneWaitPolicy.shouldOfferNoSceneRecovery(
+                    state: firstSceneReadiness, navigationFinished: !isLoading,
+                    isForeground: scenePhase == .active
+                ) else { return }
                 try? await Task.sleep(for: .milliseconds(
-                    PlayerScenePosterHandoffPolicy.noSceneTimeoutMilliseconds
+                    PlayerFirstSceneWaitPolicy.noSceneTimeoutMilliseconds
                 ))
                 guard !Task.isCancelled, watchdogAttempt == attempt,
-                      scenePhase == .active,
-                      PlayerScenePosterHandoffPolicy.shouldOfferNoSceneRecovery(
-                        expectedAttempt: watchdogAttempt,
-                        acceptedSceneAttempt: firstSceneSubmittedForAttempt?.epoch,
-                        hasHoldPoster: admittedHoldPosterURL != nil,
-                        holdVisible: holdVisible,
-                        navigationFinished: !isLoading,
-                        hasLoadError: loadError != nil,
-                        sessionRevoked: sessionRevoked,
+                      PlayerFirstSceneWaitPolicy.shouldOfferNoSceneRecovery(
+                        state: firstSceneReadiness, navigationFinished: !isLoading,
                         isForeground: scenePhase == .active
                       ) else { return }
                 // Retire only this terminal attempt's mounted WebView.
