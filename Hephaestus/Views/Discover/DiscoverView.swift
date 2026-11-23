@@ -2016,6 +2016,11 @@ private struct ForYouGamePage: View {
         // the usable window is short. Preserve reachable Play and actions.
         let isCompact = shortViewport || verticalSizeClass == .compact ||
             dynamicTypeSize >= .xxLarge
+        let topicLineLimit = ForYouTopicOverlayPolicy.visibleLineLimit(
+            shortViewport: shortViewport,
+            verticalSizeClass: verticalSizeClass,
+            dynamicTypeSize: dynamicTypeSize
+        )
         return VStack(alignment: .leading, spacing: isCompact ? 6 : 14) {
             Spacer(minLength: isCompact ? 0 : 100)
             HStack(spacing: 8) {
@@ -2059,12 +2064,17 @@ private struct ForYouGamePage: View {
                     .foregroundStyle(.white.opacity(0.94))
                     .lineLimit(2)
             }
-            if !isCompact, let topics = game.topics, !topics.isEmpty {
-                Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
+            if topicLineLimit > 0,
+               let topics = GameMetadataTopicPolicy.presentation(
+                   game.topics, maxCount: 3
+               ) {
+                Text(topics.visual)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(1)
-                    .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
+                    .lineLimit(topicLineLimit)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(topics.spoken)
+                    .accessibilityIdentifier("feed.page.topics")
             }
             if !isCompact, let expression = game.playableExpression, expression.source_visibility == "public" {
                 Button { showsExpressionDetails = true } label: {

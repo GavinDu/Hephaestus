@@ -1,6 +1,21 @@
 import Foundation
 import SwiftUI
 
+/// Immersive metadata must never compete with Play on short windows.
+/// Roomy stages may wrap legitimate topic text on two lines; Accessibility
+/// sizes and compact heights reserve the stage for Play. Game Details
+/// retains the genuine topic metadata without shrinking typography.
+enum ForYouTopicOverlayPolicy {
+    static func visibleLineLimit(
+        shortViewport: Bool,
+        verticalSizeClass: UserInterfaceSizeClass?,
+        dynamicTypeSize: DynamicTypeSize
+    ) -> Int {
+        shortViewport || verticalSizeClass == .compact ||
+            dynamicTypeSize >= .xxLarge ? 0 : 2
+    }
+}
+
 /// Independently tested creator-game row layout. Keep actual published
 /// titles, provenance and Play actions readable without inventing content.
 enum CreatorGameRowLayout {
