@@ -1,0 +1,118 @@
+name: Prune identical inactive branch heads
+
+# Run once on merge, then only when explicitly dispatched.
+# This is NOT a generic stale-branch or squash-merge cleanup.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/prune-identical-branch-heads.yml
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Audit without deleting branches
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: prune-identical-branch-heads-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Confirm both refs and preserve an identical head before deletion
+        uses: actions/github-script@v8
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const dryRun = context.eventName === 'workflow_dispatch' &&
+              process.env.DRY_RUN !== 'false';
+            const [repository, branches, openPRs] = await Promise.all([
+              github.rest.repos.get({owner, repo}),
+              github.paginate(github.rest.repos.listBranches, {owner, repo, per_page: 100}),
+              github.paginate(github.rest.pulls.list, {owner, repo, state: 'open', per_page: 100}),
+            ]);
+            const fullName = repository.data.full_name;
+            const reserved = new Set([repository.data.default_branch]);
+            for (const pr of openPRs) {
+              reserved.add(pr.base.ref);
+              if (pr.head.repo?.full_name === fullName) reserved.add(pr.head.ref);
+            }
+            const grouped = new Map();
+            for (const branch of branches) {
+              const sha = branch.commit.sha;
+              if (!grouped.has(sha)) grouped.set(sha, []);
+              grouped.get(sha).push(branch);
+            }
+            const priority = branch => {
+              if (reserved.has(branch.name) || branch.protected) return 0;
+              if (!/(^|\/)tmp[\/-]/.test(branch.name)) return 1;
+              return 2;
+            };
+            let candidates = [];
+            for (const [sha, group] of grouped) {
+              if (group.length < 2) continue;
+              group.sort((a, b) => priority(a) - priority(b) ||
+                a.name.localeCompare(b.name));
+              const survivor = group[0];
+              for (const victim of group.slice(1)) {
+                if (!victim.protected && !reserved.has(victim.name)) {
+                  candidates.push({sha, survivor, victim});
+                }
+              }
+            }
+            let deleted = 0, skipped = 0;
+            const failures = [];
+            for (const {sha, survivor, victim} of candidates) {
+              try {
+                // A matching snapshot isn't enough. The immutable survivor
+                // and victim must BOTH still point to the SAME exact SHA.
+                const [keeper, target] = await Promise.all([
+                  github.rest.git.getRef({owner, repo, ref: `heads/${survivor.name}`}),
+                  github.rest.git.getRef({owner, repo, ref: `heads/${victim.name}`}),
+                ]);
+                if (keeper.data.object.sha !== sha ||
+                    target.data.object.sha !== sha) {
+                  skipped++;
+                  core.warning(`Moved ref, not deleting ${victim.name}`);
+                  continue;
+                }
+                if (dryRun) {
+                  core.info(`DRY RUN duplicate ${victim.name} @ ${sha}; keep ${survivor.name}`);
+                  continue;
+                }
+                await github.rest.git.deleteRef({
+                  owner, repo, ref: `heads/${victim.name}`
+                });
+                deleted++;
+                core.info(`Deleted identical inactive ${victim.name} @ ${sha}; kept ${survivor.name}`);
+              } catch (error) {
+                if (error.status === 404) { skipped++; continue; }
+                failures.push(`${victim.name}: ${error.status || error.message}`);
+              }
+            }
+            core.summary.addHeading('Exact duplicate-tip branch cleanup')
+              .addTable([
+                [{data:'Metric',header:true},{data:'Count',header:true}],
+                ['Branches audited',String(branches.length)],
+                ['Candidates with identical protected survivor',String(candidates.length)],
+                ['Deleted',String(deleted)],
+                ['Moved or already absent',String(skipped)],
+                ['Failures',String(failures.length)],
+                ['Dry run',String(dryRun)]
+              ]);
+            if (failures.length) {
+              core.summary.addRaw('\n' + failures.slice(0,30).join('\n'));
+              core.setFailed('One or more exact duplicate-tip deletes failed');
+            }
+            await core.summary.write();
