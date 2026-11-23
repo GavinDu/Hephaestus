@@ -171,6 +171,18 @@ jobs:
       # Export native screenshots to a reviewable artifact directory rather
       # than burying them inside the binary .xcresult. Always run, including
       # on UI test failure, so the failed frame remains available for triage.
+      # Read the genuine simulator's low-cardinality DEBUG host lifecycle only;
+      # retain when the native smoke fails without leaking published IDs,
+      # account data, comment text or requests.
+      - name: Capture iPhone Comments presenter signals
+        if: always()
+        shell: bash
+        run: |
+          xcrun simctl spawn "${{ steps.iphone.outputs.udid }}" log show \
+            --last 45m --style compact \
+            --predicate 'subsystem == "ai.tinydream.Hephaestus" AND category == "ArcadePulseComments"' \
+            > /tmp/player-presentation-iphone-comments-presenter.log 2>&1 || true
+          grep -E 'UI_COMMENTS_|UI_GRID_COMMENTS_' /tmp/player-presentation-iphone-comments-presenter.log | tail -n 30 || true
       - name: Export iPhone UI screenshot evidence
         if: always()
         shell: bash
@@ -201,6 +213,7 @@ jobs:
             /tmp/player-presentation-smoke.log
             /tmp/player-presentation-smoke.xcresult.zip
             /tmp/player-presentation-iphone-screenshots
+            /tmp/player-presentation-iphone-comments-presenter.log
           if-no-files-found: ignore
 
   ios-ipad-smoke:
@@ -246,6 +259,18 @@ jobs:
       # Export native screenshots to a reviewable artifact directory rather
       # than burying them inside the binary .xcresult. Always run, including
       # on UI test failure, so the failed frame remains available for triage.
+      # Read the genuine simulator's low-cardinality DEBUG host lifecycle only;
+      # retain when the native smoke fails without leaking published IDs,
+      # account data, comment text or requests.
+      - name: Capture iPad Comments presenter signals
+        if: always()
+        shell: bash
+        run: |
+          xcrun simctl spawn "${{ steps.ipad.outputs.udid }}" log show \
+            --last 45m --style compact \
+            --predicate 'subsystem == "ai.tinydream.Hephaestus" AND category == "ArcadePulseComments"' \
+            > /tmp/player-presentation-ipad-comments-presenter.log 2>&1 || true
+          grep -E 'UI_COMMENTS_|UI_GRID_COMMENTS_' /tmp/player-presentation-ipad-comments-presenter.log | tail -n 30 || true
       - name: Export iPad UI screenshot evidence
         if: always()
         shell: bash
@@ -273,6 +298,7 @@ jobs:
             /tmp/player-presentation-ipad.log
             /tmp/player-presentation-ipad.xcresult.zip
             /tmp/player-presentation-ipad-screenshots
+            /tmp/player-presentation-ipad-comments-presenter.log
           if-no-files-found: ignore
 
   backend-play-contract:

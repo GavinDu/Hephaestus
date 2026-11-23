@@ -17,7 +17,16 @@ class NativeHoldPosterURLPolicySourceTests(unittest.TestCase):
         self.assertIn("PlayerHoldPosterURLPolicy.admittedURL(", sheet)
         self.assertIn("holdPosterURL, backendOrigin: BackendConfig.baseURL", sheet)
         self.assertIn("if let holdURL = admittedHoldPosterURL {", sheet)
-        self.assertEqual(sheet.count("if admittedHoldPosterURL != nil, holdVisible {"), 3)
+        # The live sheet has two guarded display paths: a backdrop and a
+        # progress overlay. Check both rather than relying on an obsolete
+        # pre-handoff third guard that no longer exists in production.
+        self.assertEqual(sheet.count("if admittedHoldPosterURL != nil, holdVisible {"), 2)
+        self.assertIn("if admittedHoldPosterURL != nil, holdVisible {\n                    holdBackdrop", sheet)
+        self.assertIn(
+            "if isLoading && loadError == nil, !prewarmHit {\n"
+            "                    if admittedHoldPosterURL != nil, holdVisible {\n"
+            "                        holdLoadingOverlay", sheet
+        )
         self.assertNotIn("URL(string: holdPosterURL)", sheet)
         self.assertNotIn("if holdPosterURL != nil, holdVisible {", sheet)
 
