@@ -25,10 +25,8 @@ jobs:
         run: python3 -m unittest discover -s tools/test-feedback -p "test_*.py" -v
       - name: List Xcode schemes
         run: xcodebuild -list -project Hephaestus.xcodeproj
-      - name: Build for iOS Simulator
-        run: |
-          set -o pipefail
-          xcodebuild -project Hephaestus.xcodeproj -scheme Hephaestus -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build 2>&1 | tee /tmp/build.log || { grep -E "error:" /tmp/build.log | sort -u | head -20 | while read -r l; do echo "::error title=xcodebuild::$l"; done; exit 1; }
+      # xcodebuild test builds the application and test targets itself.
+      # Avoid a redundant generic simulator build before the unit test build.
       # Unit tests only. The template UI tests (HephaestusUITests) are
       # excluded: testLaunchPerformance made this step take ~15 minutes
       # and its repeated app launches were the main flake source. They
