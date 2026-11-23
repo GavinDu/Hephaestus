@@ -1036,8 +1036,13 @@ final class BackendAPI: ObservableObject {
     }
 
     func trackSocialEvent(gameID: String, kind: String, durationMS: Int = 0, expectedMS: Int = 0, previewDwellMS: Int = 0, timeToInteractiveMS: Int = 0, timeToFirstInputMS: Int = 0, frameTimeP95MS: Int = 0, frameTimeAvgMS: Int = 0, frameCount: Int = 0, eventID: String = UUID().uuidString) async {
-        guard let req = try? makeRequest("v1/telemetry/social-event", method: "POST",
+        // Native WKWebView metric tasks can be revoked at any suspension
+        // boundary. A cancelled client request is NOT server event deletion.
+        guard !Task<Never, Never>.isCancelled,
+              let req = try? makeRequest("v1/telemetry/social-event", method: "POST",
                                          body: EventBody(event_id: eventID, game_id: gameID, kind: kind, duration_ms: durationMS, expected_duration_ms: expectedMS, preview_dwell_ms: previewDwellMS, time_to_interactive_ms: timeToInteractiveMS, time_to_first_input_ms: timeToFirstInputMS, frame_time_p95_ms: frameTimeP95MS, frame_time_avg_ms: frameTimeAvgMS, frame_count: frameCount)) else { return }
+        guard !Task<Never, Never>.isCancelled else { return }
+        // URLSession.data(for:) cooperatively observes Swift Task.cancel().
         _ = try? await session.data(for: req)
     }
 
