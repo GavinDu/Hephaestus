@@ -2721,6 +2721,16 @@ final class PlayerSmokeTests: XCTestCase {
         }
         XCTAssertTrue(comments.waitForExistence(timeout: 5) && comments.isHittable,
                       "The genuine Comments button must remain reachable after returning to portrait.")
+        // Keep original before-tap pixels and actual native element geometry.
+        let beforeCommentsTap = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        beforeCommentsTap.name = "arcade-pulse-real-grid-before-comments-tap"
+        beforeCommentsTap.lifetime = .keepAlways
+        add(beforeCommentsTap)
+        let discoverTabForDiagnostics = app.tabBars.buttons["Discover"].firstMatch
+        let discoverTabState = discoverTabForDiagnostics.exists
+            ? String(discoverTabForDiagnostics.isSelected) : "not-present"
+        print("UI_GRID_COMMENTS_BEFORE_TAP hittable=\(comments.isHittable) rect=\(comments.frame) " +
+              "selectedDiscover=\(discoverTabState)")
         comments.tap()
         // The raw CI screenshot showed the REAL game-bound Comments sheet,
         // but SwiftUI combined its "COMMENTS ON" header and game title into
@@ -2729,8 +2739,20 @@ final class PlayerSmokeTests: XCTestCase {
         let commentsHeader = app.descendants(matching: .any)[
             "comments.sheet.gameHeader"
         ].firstMatch
-        XCTAssertTrue(commentsHeader.waitForExistence(timeout: 10),
-                      "The genuine Comments header must mount after a real grid Comments tap.")
+        let mounted = commentsHeader.waitForExistence(timeout: 10)
+        if !mounted {
+            let afterCommentsTap = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            afterCommentsTap.name = "arcade-pulse-real-grid-after-comments-tap-no-sheet"
+            afterCommentsTap.lifetime = .keepAlways
+            add(afterCommentsTap)
+            print("UI_GRID_COMMENTS_AFTER_TAP no_header=true " +
+                  "grid_action_exists=\(comments.exists) " +
+                  "grid_action_hittable=\(comments.exists && comments.isHittable) " +
+                  "done_present=\(app.buttons["Done"].firstMatch.exists) " +
+                  "discover_selected=\(discoverTabForDiagnostics.exists ? String(discoverTabForDiagnostics.isSelected) : "not-present")")
+        }
+        XCTAssertTrue(mounted,
+                      "The genuine Comments header must mount after a real grid Comments tap; inspect original screenshots and app-side presenter logs.")
         XCTAssertTrue(commentsHeader.label.contains(title),
                       "The mounted Comments sheet must describe the same real published game.")
         XCTAssertTrue(app.buttons["Done"].firstMatch.isHittable,
