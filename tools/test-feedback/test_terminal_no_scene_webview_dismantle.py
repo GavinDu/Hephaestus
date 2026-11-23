@@ -13,7 +13,19 @@ class TerminalNoSceneMountedViewContract(unittest.TestCase):
         self.assertIn("PlayerTerminalNoSceneMountPolicy.shouldMount(", src)
         self.assertIn("currentAttempt: attempt, terminalNoSceneAttempt: terminalNoSceneAttempt", src)
         self.assertIn("let url = playerURL {\n                    PlayerWebView(", src)
-        self.assertIn("terminalNoSceneAttempt != callbackEpoch", src)
+        # Every installed sheet callback must reject a timed-out epoch before
+        # mutation, including late termination (which can otherwise auto-reload).
+        callback_block = src.split("private var playerContent: some View {", 1)[1].split(
+            ".id(attempt)", 1
+        )[0]
+        for callback in ("onProgress", "onLoadFinish", "onLoadFail", "onTerminate",
+                         "onPrewarmHit", "onFirstSceneRenderSubmit", "onFirstInput",
+                         "onVerifiedRun"):
+            with self.subTest(callback=callback):
+                closure = callback_block.split(callback + ": {", 1)[1]
+                self.assertIn("guard terminalNoSceneAttempt != callbackEpoch,", closure.split("else { return }", 1)[0])
+                self.assertIn("PlayerLaunchCallbackGate.accepts(", closure.split("else { return }", 1)[0])
+        self.assertEqual(callback_block.count("guard terminalNoSceneAttempt != callbackEpoch,"), 8)
         self.assertIn("loadFailureCategory = .unknown", src)
 
     def test_real_dismantle_uses_old_coordinator_lease_not_new_sheet(self):
