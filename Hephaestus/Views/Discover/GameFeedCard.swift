@@ -55,6 +55,24 @@ enum GameMetadataTopicPolicy {
     }
 }
 
+/// Show a clickable Creator identity only when the *real server* owner ID
+/// is navigable. Bad display names fall back to that original owner, never a
+/// fabricated account, while invalid owners get an honest generic label.
+enum GameFeedCardCreatorIdentityPolicy {
+    static func publicName(ownerID: String?, displayName: String?) -> String? {
+        guard ForYouPageLayout.hasNavigableCreator(ownerID: ownerID),
+              let ownerID else { return nil }
+        let owner = ownerID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let displayName else { return owner }
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty,
+              !name.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }) else { return owner }
+        return name
+    }
+}
+
 /// A tappable social icon must own the complete 44pt hit rectangle,
 /// rather than only the surrounding HStack's layout. Actual compact width
 /// and VoiceOver action ordering are independently tested on real cards.
@@ -327,10 +345,12 @@ struct GameFeedCard: View {
             // full-sized social action instead of squeezing six controls
             // into a single clipped horizontal row.
             VStack(alignment: .leading, spacing: 8) {
-                if let creator = game.ownerID, !creator.isEmpty {
+                if let creator = GameFeedCardCreatorIdentityPolicy.publicName(
+                    ownerID: game.ownerID,
+                    displayName: game.creatorDisplayName
+                ) {
                     ArcadePulseCreatorIdentity(
-                        name: game.creatorDisplayName?.isEmpty == false
-                            ? game.creatorDisplayName! : creator,
+                        name: creator,
                         avatarURL: game.creatorAvatarURL,
                         foreground: .primary,
                         action: onOpenCreator
