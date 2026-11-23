@@ -4,9 +4,27 @@ import Combine
 import CryptoKit
 import Foundation
 import Network
+import OSLog
 import PhotosUI
 import SwiftUI
 import UIKit
+
+#if DEBUG
+/// App-side low-cardinality Comments lifecycle witness, with no published
+/// game IDs, creator/account details, comments, URLs, credentials or tokens.
+private let arcadePulseCommentsDiagnostics = Logger(
+    subsystem: "ai.tinydream.Hephaestus", category: "ArcadePulseComments"
+)
+#endif
+
+/// The compact landscape More menu's third item was inaccessible at A5
+/// in genuine native iPhone CI. A scrollable native sheet owns all three
+/// actions and defers follow-on presentation until it fully dismisses.
+private enum CompactLandscapeMoreAction {
+    case preferences
+    case creators
+    case refresh
+}
 
 /// Source-owned minimum for actual native Discover toolbar Button labels.
 /// An external ToolbarItem wrapper's size is NOT its accessible hitbox.
@@ -98,6 +116,17 @@ enum FeedSavedGameCache {
     ) -> Bool {
         requestedViewerID == currentViewerID &&
             requestedSessionEpoch == currentSessionEpoch && ownsRequest
+    }
+}
+
+/// Presentation selections belong to the account that opened them.
+/// A viewer switch is not a feed refresh or device rotation: retire old
+/// native sheet selections before loading the new viewer's real feed.
+enum DiscoverViewerBoundSelectionPolicy {
+    static func selectionAfterTransition<Value>(
+        _ selection: Value?, viewerChanged: Bool
+    ) -> Value? {
+        viewerChanged ? nil : selection
     }
 }
 
@@ -319,6 +348,8 @@ struct DiscoverView: View {
     @State private var selectedFeed: SocialFeedScope = .forYou
     @State private var compactSearchPresented = false
     @State private var compactSearchDraft = ""
+    @State private var compactMorePresented = false
+    @State private var compactMorePendingAction: CompactLandscapeMoreAction?
     @State private var games: [FeedGame] = []
     @State private var playerRequest: PixiPlayerRequest?
     @State private var errorMessage: String?
@@ -434,16 +465,9 @@ struct DiscoverView: View {
             }
             .accessibilityLabel("Search games")
             .accessibilityIdentifier("feed.landscape.search")
-            Menu {
-                Button("Feed preferences", systemImage: "slider.horizontal.3") {
-                    isFeedPreferencesPresented = true
-                }
-                Button("Discover creators", systemImage: "person.2") {
-                    isCreatorDiscoveryPresented = true
-                }
-                Button("Refresh games", systemImage: "arrow.clockwise") {
-                    Task { await load() }
-                }
+            Button {
+                compactMorePendingAction = nil
+                compactMorePresented = true
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .frame(width: 44, height: 44)
@@ -453,6 +477,80 @@ struct DiscoverView: View {
         }
         .foregroundStyle(.white)
         .background(.black.opacity(0.72), in: Capsule())
+    }
+
+    /// Only actual user-selected actions are delivered after the system
+    /// dismisses the More sheet. Avoid presenting a second native sheet
+    /// under the first, even in compact A5 landscape.
+    private func chooseCompactMoreAction(_ action: CompactLandscapeMoreAction) {
+        compactMorePendingAction = action
+        compactMorePresented = false
+    }
+
+    private func completeCompactMoreDismissal() {
+        guard let action = compactMorePendingAction else { return }
+        compactMorePendingAction = nil
+        switch action {
+        case .preferences:
+            isFeedPreferencesPresented = true
+        case .creators:
+            isCreatorDiscoveryPresented = true
+        case .refresh:
+            Task { await load() }
+        }
+    }
+
+    private func compactMoreRow(
+        _ title: String, systemImage: String, action: CompactLandscapeMoreAction
+    ) -> some View {
+        Button {
+            chooseCompactMoreAction(action)
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+                .foregroundStyle(ArcadePulseTheme.textPrimary)
+                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .tint(ArcadePulseTheme.electricViolet)
+    }
+
+    private var compactMoreSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    compactMoreRow(
+                        "Feed preferences", systemImage: "slider.horizontal.3",
+                        action: .preferences
+                    )
+                    compactMoreRow(
+                        "Discover creators", systemImage: "person.2",
+                        action: .creators
+                    )
+                    compactMoreRow(
+                        "Refresh games", systemImage: "arrow.clockwise",
+                        action: .refresh
+                    )
+                }
+                .padding(16)
+            }
+            .accessibilityIdentifier("feed.landscape.more.scroll")
+            .navigationTitle("More feed controls")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        compactMorePendingAction = nil
+                        compactMorePresented = false
+                    }
+                    .accessibilityIdentifier("feed.landscape.more.dismiss")
+                }
+            }
+        }
+        .presentationDetents([.large])
     }
 
     private var compactSearchSheet: some View {
@@ -885,7 +983,7 @@ struct DiscoverView: View {
                         },
                         onReport: { reportingGame = $0 },
                         onBlockCreator: { game in
-                            if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { Task { await blockCreator(id) } }
+                            if let id = game.ownerID, ForYouPageLayout.canOfferCreatorBlock(ownerID: id, viewerID: BackendConfig.currentUserID) { Task { await blockCreator(id) } }
                         },
                         onNotInterested: { game in Task { await markNotInterested(game) } },
                         onOpenDetails: { detailGame = $0 },
@@ -915,10 +1013,15 @@ struct DiscoverView: View {
                                     onToggleSaved: { toggleSaved(game) },
                                     onToggleLike: { toggleLike(game) },
                                     onToggleFollow: { if let id = game.ownerID { Task { await toggleFollow(id) } } },
-                                    onOpenComments: { commentsGame = game },
+                                    onOpenComments: {
+                                        #if DEBUG
+                                        arcadePulseCommentsDiagnostics.notice("UI_GRID_COMMENTS_TAP_DELIVERED")
+                                        #endif
+                                        commentsGame = game
+                                    },
                                     onOpenCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { profileRequest = CreatorProfileRequest(id: id) } },
                                     onReport: { reportingGame = game },
-                                    onBlockCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { Task { await blockCreator(id) } } },
+                                    onBlockCreator: { if let id = game.ownerID, ForYouPageLayout.canOfferCreatorBlock(ownerID: id, viewerID: BackendConfig.currentUserID) { Task { await blockCreator(id) } } },
                                     onNotInterested: { Task { await markNotInterested(game) } },
                                     onImpression: { Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "impression") } },
                                     shouldAutoplayPreview: false
@@ -942,6 +1045,10 @@ struct DiscoverView: View {
                 // A drafted moderation report is private viewer-authored UI.
                 // Revoke it synchronously, before the new feed can appear.
                 reportingGame = nil
+                // The sheet's inner private draft already revokes itself;
+                // its game-bound host selection must also leave this viewer.
+                commentsGame = DiscoverViewerBoundSelectionPolicy
+                    .selectionAfterTransition(commentsGame, viewerChanged: true)
                 savedGameIDs.removeAll()
                 FeedSavedGameCache.discardUnscopedHistory()
                 likedGameIDs.removeAll()
@@ -1013,8 +1120,25 @@ struct DiscoverView: View {
             .sheet(isPresented: $compactSearchPresented) {
                 compactSearchSheet
             }
+            .sheet(isPresented: $compactMorePresented, onDismiss: {
+                completeCompactMoreDismissal()
+            }) {
+                compactMoreSheet
+            }
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
+                    .onAppear {
+                        #if DEBUG
+                        arcadePulseCommentsDiagnostics.notice("UI_COMMENTS_SHEET_MOUNTED")
+                        #endif
+                    }
+            }
+            .onChange(of: commentsGame?.id) { _, selection in
+                #if DEBUG
+                arcadePulseCommentsDiagnostics.notice(
+                    "UI_COMMENTS_HOST_SELECTION_ACTIVE=\(selection != nil, privacy: .public)"
+                )
+                #endif
             }
             .modifier(ArcadePulseGameDetailsPresentation(selection: $detailGame))
             .sheet(item: $reportingGame) { game in
@@ -1205,7 +1329,9 @@ struct DiscoverView: View {
     }
 
     private func blockCreator(_ creatorID: String) async {
-        guard ForYouPageLayout.hasNavigableCreator(ownerID: creatorID) else { return }
+        guard ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: creatorID, viewerID: BackendConfig.currentUserID
+        ) else { return }
         let viewerID = BackendConfig.currentUserID
         let epoch = socialMutationEpoch
         do {
@@ -1590,6 +1716,13 @@ private struct ForYouGamePage: View {
     let onOpenDetails: () -> Void
     let onImpression: () -> Void
 
+    private var canBlockCreator: Bool {
+        ForYouPageLayout.canOfferCreatorBlock(
+            ownerID: game.ownerID,
+            viewerID: BackendConfig.currentUserID
+        )
+    }
+
     private var shareURL: URL {
         var components = URLComponents(url: BackendConfig.baseURL.appendingPathComponent("player"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "game", value: game.id)]
@@ -1774,7 +1907,7 @@ private struct ForYouGamePage: View {
             Button("Game details", systemImage: "info.circle", action: onOpenDetails)
             Button("Report game", role: .destructive, action: onReport)
             Button("Not interested", action: onNotInterested)
-            if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
+            if canBlockCreator {
                 Button("Block creator", role: .destructive, action: onBlockCreator)
             }
         } label: {
@@ -1842,7 +1975,7 @@ private struct ForYouGamePage: View {
                         showsAccessibleActionsSheet = false
                         onNotInterested()
                     }
-                    if ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
+                    if canBlockCreator {
                         Button("Block creator", role: .destructive) {
                             showsAccessibleActionsSheet = false
                             onBlockCreator()
@@ -1910,6 +2043,11 @@ private struct ForYouGamePage: View {
         // the usable window is short. Preserve reachable Play and actions.
         let isCompact = shortViewport || verticalSizeClass == .compact ||
             dynamicTypeSize >= .xxLarge
+        let topicLineLimit = ForYouTopicOverlayPolicy.visibleLineLimit(
+            shortViewport: shortViewport,
+            verticalSizeClass: verticalSizeClass,
+            dynamicTypeSize: dynamicTypeSize
+        )
         return VStack(alignment: .leading, spacing: isCompact ? 6 : 14) {
             Spacer(minLength: isCompact ? 0 : 100)
             HStack(spacing: 8) {
@@ -1953,12 +2091,17 @@ private struct ForYouGamePage: View {
                     .foregroundStyle(.white.opacity(0.94))
                     .lineLimit(2)
             }
-            if !isCompact, let topics = game.topics, !topics.isEmpty {
-                Text(topics.prefix(3).map { "#\($0)" }.joined(separator: "  "))
+            if topicLineLimit > 0,
+               let topics = GameMetadataTopicPolicy.presentation(
+                   game.topics, maxCount: 3
+               ) {
+                Text(topics.visual)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(1)
-                    .accessibilityLabel("Topics: " + topics.prefix(3).joined(separator: ", "))
+                    .lineLimit(topicLineLimit)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(topics.spoken)
+                    .accessibilityIdentifier("feed.page.topics")
             }
             if !isCompact, let expression = game.playableExpression, expression.source_visibility == "public" {
                 Button { showsExpressionDetails = true } label: {

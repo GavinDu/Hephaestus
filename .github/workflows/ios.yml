@@ -25,10 +25,8 @@ jobs:
         run: python3 -m unittest discover -s tools/test-feedback -p "test_*.py" -v
       - name: List Xcode schemes
         run: xcodebuild -list -project Hephaestus.xcodeproj
-      - name: Build for iOS Simulator
-        run: |
-          set -o pipefail
-          xcodebuild -project Hephaestus.xcodeproj -scheme Hephaestus -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build 2>&1 | tee /tmp/build.log || { grep -E "error:" /tmp/build.log | sort -u | head -20 | while read -r l; do echo "::error title=xcodebuild::$l"; done; exit 1; }
+      # xcodebuild test builds the application and test targets itself.
+      # Avoid a redundant generic simulator build before the unit test build.
       # Unit tests only. The template UI tests (HephaestusUITests) are
       # excluded: testLaunchPerformance made this step take ~15 minutes
       # and its repeated app launches were the main flake source. They
@@ -247,6 +245,17 @@ jobs:
             --log /tmp/ipad-feed-ui.log --out /tmp/test-feedback-ipad.json \
             --run-id "ipad-feed-${{ github.run_id }}-${{ github.run_attempt }}" \
             --commit "${{ github.sha }}" --layer 1 --prefix ipad-feed || true
+      # Preserve only privacy-safe DEBUG app-side Comments lifecycle markers
+      # from the actual iPad, including failures of the strict real tap test.
+      - name: Capture native iPad Comments presenter signals
+        if: always()
+        shell: bash
+        run: |
+          xcrun simctl spawn "${{ steps.ipad.outputs.udid }}" log show \
+            --last 45m --style compact \
+            --predicate 'subsystem == "ai.tinydream.Hephaestus" AND category == "ArcadePulseComments"' \
+            > /tmp/ipad-comments-presenter.log 2>&1 || true
+          grep -E 'UI_COMMENTS_|UI_GRID_COMMENTS_' /tmp/ipad-comments-presenter.log | tail -n 30 || true
       # Export native screenshots to a reviewable artifact directory rather
       # than burying them inside the binary .xcresult. Always run, including
       # on UI test failure, so the failed frame remains available for triage.
@@ -284,4 +293,5 @@ jobs:
             /tmp/ipad-feed-ui-screenshots
             /tmp/ipad-feed-ui-review
             /tmp/test-feedback-ipad.json
+            /tmp/ipad-comments-presenter.log
           if-no-files-found: ignore

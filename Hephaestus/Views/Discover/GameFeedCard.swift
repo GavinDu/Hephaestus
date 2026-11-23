@@ -403,7 +403,10 @@ struct GameFeedCard: View {
                     Menu {
                         Button("Not interested", systemImage: "hand.thumbsdown",
                                action: onNotInterested)
-                        if canFollowCreator {
+                        if ForYouPageLayout.canOfferCreatorBlock(
+                            ownerID: game.ownerID,
+                            viewerID: BackendConfig.currentUserID
+                        ) {
                             Button("Block creator", systemImage: "person.crop.circle.badge.xmark",
                                    role: .destructive, action: onBlockCreator)
                         }
