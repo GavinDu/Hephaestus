@@ -4,9 +4,18 @@ import Combine
 import CryptoKit
 import Foundation
 import Network
+import OSLog
 import PhotosUI
 import SwiftUI
 import UIKit
+
+#if DEBUG
+/// App-side low-cardinality Comments lifecycle witness, with no published
+/// game IDs, creator/account details, comments, URLs, credentials or tokens.
+private let arcadePulseCommentsDiagnostics = Logger(
+    subsystem: "ai.tinydream.Hephaestus", category: "ArcadePulseComments"
+)
+#endif
 
 /// Source-owned minimum for actual native Discover toolbar Button labels.
 /// An external ToolbarItem wrapper's size is NOT its accessible hitbox.
@@ -915,7 +924,12 @@ struct DiscoverView: View {
                                     onToggleSaved: { toggleSaved(game) },
                                     onToggleLike: { toggleLike(game) },
                                     onToggleFollow: { if let id = game.ownerID { Task { await toggleFollow(id) } } },
-                                    onOpenComments: { commentsGame = game },
+                                    onOpenComments: {
+                                        #if DEBUG
+                                        arcadePulseCommentsDiagnostics.notice("UI_GRID_COMMENTS_TAP_DELIVERED")
+                                        #endif
+                                        commentsGame = game
+                                    },
                                     onOpenCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { profileRequest = CreatorProfileRequest(id: id) } },
                                     onReport: { reportingGame = game },
                                     onBlockCreator: { if let id = game.ownerID, ForYouPageLayout.hasNavigableCreator(ownerID: id) { Task { await blockCreator(id) } } },
@@ -1015,6 +1029,18 @@ struct DiscoverView: View {
             }
             .sheet(item: $commentsGame) { game in
                 CommentsSheet(game: game)
+                    .onAppear {
+                        #if DEBUG
+                        arcadePulseCommentsDiagnostics.notice("UI_COMMENTS_SHEET_MOUNTED")
+                        #endif
+                    }
+            }
+            .onChange(of: commentsGame?.id) { _, selection in
+                #if DEBUG
+                arcadePulseCommentsDiagnostics.notice(
+                    "UI_COMMENTS_HOST_SELECTION_ACTIVE=\(selection != nil, privacy: .public)"
+                )
+                #endif
             }
             .modifier(ArcadePulseGameDetailsPresentation(selection: $detailGame))
             .sheet(item: $reportingGame) { game in
