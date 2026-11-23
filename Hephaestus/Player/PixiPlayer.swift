@@ -2380,19 +2380,22 @@ struct PixiPlayerSheet: View {
                         url: url,
                         gameID: gameID,
                         onProgress: { value in
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             progress = value
                         },
                         onLoadFinish: {
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             handleLoadFinish()
                         },
                         onLoadFail: { error in
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             isLoading = false
@@ -2408,7 +2411,8 @@ struct PixiPlayerSheet: View {
                                                    name: "LoadFailed", message: diagnostic)
                         },
                         onTerminate: {
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             // A terminated document must not turn a known permanent
@@ -2457,7 +2461,8 @@ struct PixiPlayerSheet: View {
                             }
                         },
                         onPrewarmHit: {
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             prewarmHit = true
