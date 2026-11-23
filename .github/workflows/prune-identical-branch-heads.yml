@@ -62,6 +62,9 @@ jobs:
             let candidates = [];
             for (const [sha, group] of grouped) {
               if (group.length < 2) continue;
+              // Keep active/protected groups wholly intact: a PR may move
+              // its head later and must not be the sole archive of a ref.
+              if (group.some(branch => branch.protected || reserved.has(branch.name))) continue;
               group.sort((a, b) => priority(a) - priority(b) ||
                 a.name.localeCompare(b.name));
               const survivor = group[0];
@@ -105,7 +108,7 @@ jobs:
               .addTable([
                 [{data:'Metric',header:true},{data:'Count',header:true}],
                 ['Branches audited',String(branches.length)],
-                ['Candidates with identical protected survivor',String(candidates.length)],
+                ['Candidates with preserved identical survivor',String(candidates.length)],
                 ['Deleted',String(deleted)],
                 ['Moved or already absent',String(skipped)],
                 ['Failures',String(failures.length)],
