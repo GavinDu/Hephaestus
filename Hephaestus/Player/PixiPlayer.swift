@@ -1110,7 +1110,6 @@ enum PlayerMainFrameNavigationPolicy {
 /// documents. A URL-matched 302 login, 1xx or nonfinal 3xx is never a game.
 /// 304 remains a *legacy cache-compatibility exception*, not independently
 /// authenticated cached bytes, scene readiness, or a compositor present.
-@MainActor
 enum PlayerMainDocumentHTTPPolicy {
     static func permitsMainDocument(statusCode: Int) -> Bool {
         (200...299).contains(statusCode) || statusCode == 304
@@ -1118,7 +1117,6 @@ enum PlayerMainDocumentHTTPPolicy {
 }
 
 /// Compatibility façade for existing prewarm policy callers and tests.
-@MainActor
 enum PlayerPrewarmResponsePolicy {
     static func shouldCacheResponse(statusCode: Int) -> Bool {
         PlayerMainDocumentHTTPPolicy.permitsMainDocument(statusCode: statusCode)
