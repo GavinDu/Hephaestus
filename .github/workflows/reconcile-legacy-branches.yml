@@ -176,7 +176,7 @@ jobs:
               for (let i=0; i<lines.length; i+=55) {
                 const body=[...header,...lines.slice(i,i+55),
                   '', 'Segment '+(Math.floor(i/55)+1)+' of '+Math.ceil(lines.length/55)]
-                  .join('\\n');
+                  .join('\n');
                 await github.rest.issues.createComment({
                   owner,repo,issue_number:deferredIssueNumber,body
                 });
