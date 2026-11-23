@@ -1,6 +1,38 @@
 import Foundation
 import SwiftUI
 
+/// Identity of the actual result action and its feed at the instant of tap.
+/// Equality revokes stale navigation without treating a page offset as an ID.
+struct FeedPlayNextContext: Equatable {
+    let presentationID: UUID
+    let runID: String
+    let gameID: String
+    let viewerID: String
+    let sessionEpoch: Int
+    let scope: SocialFeedScope
+    let searchQuery: String
+    let rootGeneration: Int
+}
+
+struct FeedPlayNextOperation {
+    let id = UUID()
+    let context: FeedPlayNextContext
+}
+
+enum FeedPlayNextPolicy {
+    static func isCurrent(_ operation: FeedPlayNextOperation,
+                          pending: FeedPlayNextOperation?,
+                          current: FeedPlayNextContext?) -> Bool {
+        guard let pending, let current else { return false }
+        return pending.id == operation.id && operation.context == current
+    }
+
+    static func nextGameID(after originID: String, visibleIDs: [String]) -> String? {
+        guard let origin = visibleIDs.firstIndex(of: originID) else { return nil }
+        return visibleIDs.dropFirst(origin + 1).first { $0 != originID }
+    }
+}
+
 /// A genuine selected For You page may hide decorative topic hashtags
 /// in compact/Accessibility5 mode to preserve Play. The existing real
 /// Game Actions sheet is scrollable and can disclose the *same* valid

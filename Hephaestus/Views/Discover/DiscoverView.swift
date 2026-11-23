@@ -135,6 +135,9 @@ enum DiscoverViewerBoundSelectionPolicy {
 private struct PlayerResultPresentation: Identifiable {
     let game: FeedGame
     let result: VerifiedRunResult
+    // Separate instance identity from the server run ID: even a replacement
+    // presentation of the same run must retire an old Next Game action.
+    let presentationID = UUID()
     var id: String { result.runID }
 }
 
@@ -384,6 +387,7 @@ struct DiscoverView: View {
     @State private var nestedGuestSignInGate = CreatorNestedGuestSignInGate()
     @State private var settledForYouGameID: String?
     @State private var resultPresentation: PlayerResultPresentation?
+    @State private var pendingPlayNext: FeedPlayNextOperation?
 
     private var activeSearchQuery: String {
         FeedCommittedSearchPolicy.effectiveQuery(
@@ -1049,6 +1053,10 @@ struct DiscoverView: View {
                 // its game-bound host selection must also leave this viewer.
                 commentsGame = DiscoverViewerBoundSelectionPolicy
                     .selectionAfterTransition(commentsGame, viewerChanged: true)
+                // Do not leave a previous viewer's result or pending Next
+                // Game action available after a real session transition.
+                pendingPlayNext = nil
+                resultPresentation = nil
                 savedGameIDs.removeAll()
                 FeedSavedGameCache.discardUnscopedHistory()
                 likedGameIDs.removeAll()
@@ -1113,8 +1121,10 @@ struct DiscoverView: View {
                     onPlayAgain: {
                         DispatchQueue.main.async { play(presentation.game) }
                     },
-                    onNextGame: { Task { await advanceToNextGame(after: presentation.game) } },
-                    onToggleLike: { toggleLike(presentation.game) }
+                    onNextGame: { beginAdvanceToNextGame(from: presentation) },
+                    onToggleLike: { toggleLike(presentation.game) },
+                    dismissesOnNextGame: false,
+                    isAdvancingToNextGame: pendingPlayNext?.context.presentationID == presentation.presentationID
                 )
             }
             .sheet(isPresented: $compactSearchPresented) {
@@ -1200,27 +1210,61 @@ struct DiscoverView: View {
                                           tappedAt: Date(), posterURL: game.previewPosterURL)
     }
 
-    private func advanceToNextGame(after game: FeedGame) async {
-        guard let index = visibleGames.firstIndex(where: { $0.id == game.id }) else {
-            resultPresentation = nil
-            return
+    private var currentPlayNextContext: FeedPlayNextContext? {
+        guard let presentation = resultPresentation else { return nil }
+        return FeedPlayNextContext(
+            presentationID: presentation.presentationID, runID: presentation.id,
+            gameID: presentation.game.id, viewerID: BackendConfig.currentUserID,
+            sessionEpoch: socialMutationEpoch, scope: selectedFeed,
+            searchQuery: activeSearchQuery, rootGeneration: feedRequestCoordinator.generation
+        )
+    }
+
+    private func beginAdvanceToNextGame(from presentation: PlayerResultPresentation) {
+        // Capture the action's identity synchronously, before the Task can
+        // run or any native dismissal can replace this result.
+        guard let context = currentPlayNextContext,
+              context.presentationID == presentation.presentationID,
+              context.runID == presentation.id,
+              pendingPlayNext?.context != context else { return }
+        let operation = FeedPlayNextOperation(context: context)
+        pendingPlayNext = operation
+        Task { await advanceToNextGame(operation) }
+    }
+
+    private func advanceToNextGame(_ operation: FeedPlayNextOperation) async {
+        defer {
+            // A retired operation must not clear the new result's progress.
+            if pendingPlayNext?.id == operation.id { pendingPlayNext = nil }
         }
-        if !visibleGames.indices.contains(index + 1), nextCursor != nil {
+        guard FeedPlayNextPolicy.isCurrent(
+            operation, pending: pendingPlayNext, current: currentPlayNextContext
+        ) else { return }
+
+        let originID = operation.context.gameID
+        let beforeIDs = visibleGames.map(\.id)
+        if beforeIDs.contains(originID),
+           FeedPlayNextPolicy.nextGameID(after: originID, visibleIDs: beforeIDs) == nil,
+           nextCursor != nil, !isLoading {
             await loadMore()
         }
-        guard visibleGames.indices.contains(index + 1) else {
-            resultPresentation = nil
-            return
-        }
-        let nextGame = visibleGames[index + 1]
+
+        // Never reuse an array index across an asynchronous page fetch.
+        // Reject revoked result, viewer/session, scope, query or root load
+        // before dismissing any sheet or touching the current feed.
+        guard !Task.isCancelled, FeedPlayNextPolicy.isCurrent(
+            operation, pending: pendingPlayNext, current: currentPlayNextContext
+        ) else { return }
+        let nextID = FeedPlayNextPolicy.nextGameID(
+            after: originID, visibleIDs: visibleGames.map(\.id))
         resultPresentation = nil
-        // Each social scope now has its own immersive pager. Play Next must
-        // keep the same feed (including private Following/Friends results),
-        // rather than switching to For You and selecting a game from another scope.
+        guard let nextID else { return }
+
         let destination = ForYouPageLayout.contextAfterPlayingNext(
-            currentScope: selectedFeed, nextGameID: nextGame.id)
+            currentScope: operation.context.scope, nextGameID: nextID)
         selectedFeed = destination.scope
         searchText = destination.searchText
+        committedSearchQuery = destination.searchText
         settledForYouGameID = destination.selectedGameID
     }
 

@@ -2874,6 +2874,10 @@ struct PlayerResultSheet: View {
     let onPlayAgain: () -> Void
     let onNextGame: () -> Void
     let onToggleLike: () -> Void
+    // The Discover presenter owns asynchronous Next Game dismissal. Keep
+    // the original synchronous behavior for any other callers.
+    var dismissesOnNextGame = true
+    var isAdvancingToNextGame = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -2918,14 +2922,23 @@ struct PlayerResultSheet: View {
                     .frame(minHeight: HephaestusDesign.minimumActionHeight)
 
                     Button {
-                        dismiss()
+                        if dismissesOnNextGame { dismiss() }
                         onNextGame()
                     } label: {
-                        Label("Next Game", systemImage: "chevron.up.2")
-                            .frame(maxWidth: .infinity)
+                        HStack {
+                            if isAdvancingToNextGame {
+                                ProgressView().accessibilityHidden(true)
+                                Text("Finding next game…")
+                            } else {
+                                Label("Next Game", systemImage: "chevron.up.2")
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                     .frame(minHeight: HephaestusDesign.minimumActionHeight)
+                    .disabled(isAdvancingToNextGame)
+                    .accessibilityLabel(isAdvancingToNextGame ? "Finding next game" : "Next Game")
 
                     Button {
                         onToggleLike()
