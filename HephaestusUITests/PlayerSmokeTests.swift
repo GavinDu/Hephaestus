@@ -1420,7 +1420,11 @@ final class PlayerSmokeTests: XCTestCase {
 
         let more = app.descendants(matching: .any)["More game actions"].firstMatch
         let retry = app.buttons["Try again"].firstMatch
-        let pending = app.buttons["feed.retryLoading"].firstMatch
+        // This real SwiftUI recovery action can be surfaced as a Button
+        // or PopUpButton by different iPad accessibility snapshots. Locate
+        // by its stable actual identifier, not XCTest's synthetic type.
+        // Keep the same finite 44pt+ rect, tap pacing and real-game gate.
+        let pending = app.descendants(matching: .any)["feed.retryLoading"].firstMatch
         let deadline = Date().addingTimeInterval(120)
         var lastRetry = Date.distantPast
         var attemptedRetry = false
