@@ -1106,12 +1106,22 @@ enum PlayerMainFrameNavigationPolicy {
     }
 }
 
+/// One production status gate for BOTH prewarmed and attached main-frame
+/// documents. A URL-matched 302 login, 1xx or nonfinal 3xx is never a game.
+/// 304 remains a *legacy cache-compatibility exception*, not independently
+/// authenticated cached bytes, scene readiness, or a compositor present.
+@MainActor
+enum PlayerMainDocumentHTTPPolicy {
+    static func permitsMainDocument(statusCode: Int) -> Bool {
+        (200...299).contains(statusCode) || statusCode == 304
+    }
+}
+
+/// Compatibility façade for existing prewarm policy callers and tests.
+@MainActor
 enum PlayerPrewarmResponsePolicy {
-    /// A prewarmed page is reusable only when the main document did not
-    /// return an HTTP error. Otherwise the attached player must retry and
-    /// surface the normal actionable load-failure state.
     static func shouldCacheResponse(statusCode: Int) -> Bool {
-        statusCode < 400
+        PlayerMainDocumentHTTPPolicy.permitsMainDocument(statusCode: statusCode)
     }
 }
 
@@ -2096,17 +2106,26 @@ enum PlayerWebViewPool {
                 decisionHandler(.cancel)
                 return
             }
-            guard navigationResponse.isForMainFrame,
-                  let response = navigationResponse.response as? HTTPURLResponse,
-                  !PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: response.statusCode) else {
+            guard navigationResponse.isForMainFrame else {
+                // Keep existing subresource policy; only the main document
+                // may authorize a successful game page handoff.
                 decisionHandler(.allow)
                 return
             }
-            // A 4xx/5xx HTML error page is not a successfully prewarmed
-            // game. Clear the pool entry before cancelling so take(url:)
-            // starts a fresh attached navigation and can show its error UI.
-            PlayerWebViewPool.markFailed(webView, responseURL: response.url)
-            decisionHandler(.cancel)
+            guard let response = navigationResponse.response as? HTTPURLResponse,
+                  PlayerMainDocumentHTTPPolicy.permitsMainDocument(
+                    statusCode: response.statusCode
+                  ) else {
+                // Reject 1xx, nonfinal redirect/login, 4xx/5xx and non-HTTP
+                // main documents. Do not cache a stalled/no-body page as warm.
+                // This invalidates only the same expected pooled URL.
+                PlayerWebViewPool.markFailed(
+                    webView, responseURL: navigationResponse.response.url
+                )
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -3547,14 +3566,26 @@ private struct PlayerWebView: UIViewRepresentable {
                 decisionHandler(.cancel)
                 return
             }
-            guard navigationResponse.isForMainFrame,
-                  let response = navigationResponse.response as? HTTPURLResponse,
-                  response.statusCode >= 400 else {
+            guard navigationResponse.isForMainFrame else {
                 decisionHandler(.allow)
                 return
             }
-            reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: response.statusCode))
-            decisionHandler(.cancel)
+            guard let response = navigationResponse.response as? HTTPURLResponse else {
+                // Non-HTTP main-document response is not a usable player.
+                // Reuse a bounded generic category, never log raw Location.
+                reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: 0))
+                decisionHandler(.cancel)
+                return
+            }
+            guard PlayerMainDocumentHTTPPolicy.permitsMainDocument(
+                statusCode: response.statusCode
+            ) else {
+                // Navigation-finished cannot make a 302 login game-ready.
+                reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: response.statusCode))
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
