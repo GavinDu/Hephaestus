@@ -168,6 +168,46 @@ struct ArcadePulsePlayCTA: View {
     }
 }
 
+/// Admit only trusted-form backend creator avatar source URLs. This is an
+/// initial URL check, not proof of redirect or content provenance.
+enum ArcadePulseCreatorAvatarURLPolicy {
+    static func resolvedURL(raw: String?, backendBaseURL: URL) -> URL? {
+        guard let raw else { return nil }
+        let input = raw.trimmingCharacters(in: .whitespaces)
+        guard !input.isEmpty, !input.hasPrefix("//"),
+              !input.hasPrefix("\\"),
+              !input.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }),
+              let decoded = input.removingPercentEncoding,
+              !decoded.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }),
+              let parsed = URL(string: input),
+              backendBaseURL.scheme?.lowercased() == "https",
+              let backendHost = backendBaseURL.host, !backendHost.isEmpty,
+              backendBaseURL.user == nil, backendBaseURL.password == nil else {
+            return nil
+        }
+
+        // Backend-relative avatar paths may only resolve to the configured
+        // HTTPS backend origin. Explicit absolute HTTPS CDN URLs are allowed.
+        let isRelative = parsed.scheme == nil && parsed.host == nil
+        guard isRelative || parsed.scheme?.lowercased() == "https",
+              let resolved = URL(string: input, relativeTo: backendBaseURL)?.absoluteURL,
+              resolved.scheme?.lowercased() == "https",
+              let host = resolved.host, !host.isEmpty,
+              resolved.user == nil, resolved.password == nil else {
+            return nil
+        }
+        if isRelative {
+            guard host.caseInsensitiveCompare(backendHost) == .orderedSame,
+                  resolved.port == backendBaseURL.port else { return nil }
+        }
+        return resolved
+    }
+}
+
 /// Real creator name/approved avatar supplied by FeedGame; no fake avatar,
 /// follower count, or invented identity is displayed.
 struct ArcadePulseCreatorIdentity: View {
@@ -198,7 +238,9 @@ struct ArcadePulseCreatorIdentity: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Group {
-                    if let avatarURL, let url = URL(string: avatarURL) {
+                    if let url = ArcadePulseCreatorAvatarURLPolicy.resolvedURL(
+                        raw: avatarURL, backendBaseURL: BackendConfig.baseURL
+                    ) {
                         AsyncImage(url: url) { phase in
                             if let image = phase.image {
                                 image.resizable().scaledToFill()

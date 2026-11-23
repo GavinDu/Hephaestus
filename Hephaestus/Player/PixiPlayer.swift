@@ -161,6 +161,42 @@ enum PlayerRuntimeMetricDispatchPolicy {
     }
 }
 
+/// Main-actor native telemetry owner. One bounded set of URLSession-backed
+/// Swift Tasks per attached document; no queue or second runtime executor.
+/// A revoked Task may have ALREADY reached the server before cancellation.
+/// The epoch prevents late task completion from changing a later document.
+@MainActor
+final class PlayerNativeMetricTaskRegistry {
+    static let maximumInFlight = 2
+
+    private var tasks: [UInt64: Task<Void, Never>] = [:]
+    private var nextID: UInt64 = 0
+    private(set) var epoch: UInt64 = 0
+    var inFlightCount: Int { tasks.count }
+
+    @discardableResult
+    func submit(_ makeTask: (_ taskID: UInt64, _ epoch: UInt64) -> Task<Void, Never>) -> Bool {
+        guard tasks.count < Self.maximumInFlight,
+              nextID < UInt64.max, epoch < UInt64.max else { return false }
+        nextID += 1
+        let id = nextID
+        tasks[id] = makeTask(id, epoch)
+        return true
+    }
+
+    func complete(taskID: UInt64, epoch taskEpoch: UInt64) {
+        guard taskEpoch == epoch else { return }
+        tasks.removeValue(forKey: taskID)
+    }
+
+    func revoke() {
+        if epoch < UInt64.max { epoch += 1 }
+        let priorTasks = Array(tasks.values)
+        tasks.removeAll(keepingCapacity: false)
+        for task in priorTasks { task.cancel() }
+    }
+}
+
 /// Accept only trusted runtime metric kinds and their newer sequence values.
 /// The trusted JS runtime increments a global native sequence counter, so
 /// three per-kind high-water marks reject repeats without growing memory.
@@ -701,10 +737,17 @@ enum PlayerNativeRuntimeIdentifierPolicy {
     static let maximumBytes = 128
 
     static func validSessionID(_ value: String) -> Bool {
-        let bytes = Array(value.utf8)
-        guard (1...maximumBytes).contains(bytes.count) else { return false }
-        // Match the server's printable ASCII identifier baseline.
-        return bytes.allSatisfy { (0x21...0x7e).contains($0) }
+        // The WebKit message body is untrusted. Reject the 129th byte before
+        // allocating a full UTF-8 copy of a potentially enormous string.
+        // Keep #451's exact server-compatible printable ASCII grammar.
+        var byteCount = 0
+        for byte in value.utf8 {
+            byteCount += 1
+            guard byteCount <= maximumBytes, (0x21...0x7e).contains(byte) else {
+                return false
+            }
+        }
+        return byteCount > 0
     }
 
     /// A genuine response must identify the exact run that was requested;
@@ -714,18 +757,22 @@ enum PlayerNativeRuntimeIdentifierPolicy {
     }
 
     static func validRunID(_ value: String) -> Bool {
-        let bytes = Array(value.utf8)
-        guard (1...maximumBytes).contains(bytes.count),
-              value != ".", value != ".." else { return false }
-        // The run ID becomes exactly one percent-encoded REST path segment.
-        // Do not allow embedded slashes, percent escapes or dot segments.
-        return bytes.allSatisfy { byte in
-            (0x41...0x5a).contains(byte) ||
-            (0x61...0x7a).contains(byte) ||
-            (0x30...0x39).contains(byte) ||
-            byte == 0x2d || byte == 0x2e ||
-            byte == 0x5f || byte == 0x7e
+        guard value != ".", value != ".." else { return false }
+        // Validate the path segment in a streaming bounded pass: don't
+        // materialize its entire UTF-8 representation before the length gate.
+        // Existing #451 unreserved grammar and dot-segment rules are unchanged.
+        var byteCount = 0
+        for byte in value.utf8 {
+            byteCount += 1
+            guard byteCount <= maximumBytes,
+                  (0x41...0x5a).contains(byte) ||
+                  (0x61...0x7a).contains(byte) ||
+                  (0x30...0x39).contains(byte) ||
+                  byte == 0x2d || byte == 0x2e ||
+                  byte == 0x5f || byte == 0x7e
+            else { return false }
         }
+        return byteCount > 0
     }
 }
 
@@ -840,6 +887,98 @@ struct PlayerHostLaunchReducer {
     mutating func detach() {
         phase = .detached
         observedTerminalNavigation = true
+    }
+}
+
+/// Read-only projection of the one shipping WKWebView host (#731/#642).
+/// It does not instantiate GamePlayerCore.PlayerLaunchCoordinator or fetch,
+/// validate or decode packages/assets a second time. "rendererSubmitted"
+/// means a vetted Pixi render submission, never a GPU-composited frame.
+struct PlayerCurrentHostMilestone: Equatable {
+    enum Stage: Equatable {
+        case navigating
+        case documentLoaded
+        case rendererSubmitted
+        case firstInputAdmitted
+        case failed
+        case stopped
+    }
+
+    let stage: Stage
+    let gameID: String
+    let attachmentLease: UInt64
+    let nativeDocumentNonce: String?
+    let validatedRuntimeSessionID: String?
+}
+
+enum PlayerCurrentHostMilestoneProjection {
+    // Aligned to the Go GamePackage envelope's installed major format.
+    // This is a static native compatibility assertion, not a request to fetch
+    // or interpret new code, nor a JS-supplied capability negotiation.
+    static let gamePackageFormatVersion = "2.0"
+
+    /// Admit a current metric before it mutates either the sequence gate
+    /// or the launch reducer. Failed/stopped owners and a missing native
+    /// document nonce must not consume the next valid event slot.
+    static func permitsMetricAdmission(
+        _ milestone: PlayerCurrentHostMilestone?, forSession sessionID: String
+    ) -> Bool {
+        guard let milestone,
+              milestone.nativeDocumentNonce != nil,
+              milestone.validatedRuntimeSessionID == sessionID else { return false }
+        switch milestone.stage {
+        case .failed, .stopped: return false
+        case .navigating, .documentLoaded, .rendererSubmitted,
+             .firstInputAdmitted: return true
+        }
+    }
+
+    static func project(
+        phase: PlayerHostLaunchReducer.Phase,
+        gameID: String,
+        playerURL: URL,
+        attachmentLease: UInt64,
+        nativeDocumentNonce: String?,
+        validatedRuntimeSessionID: String?,
+        ownsCurrentAttachment: Bool
+    ) -> PlayerCurrentHostMilestone? {
+        guard ownsCurrentAttachment, attachmentLease > 0,
+              PlayerPublishedGameIDPolicy.valid(gameID),
+              let parts = URLComponents(url: playerURL, resolvingAgainstBaseURL: false),
+              let scheme = parts.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              parts.host != nil, parts.user == nil, parts.password == nil,
+              parts.fragment == nil, parts.path == "/player",
+              parts.queryItems?.filter({ $0.name == "game" }).map(\.value) == [gameID]
+        else { return nil }
+        // The nonce is generated by the native pool, never read from the
+        // page. No raw WebKit callback is admitted into this projector.
+        if let nonce = nativeDocumentNonce {
+            guard nonce.utf8.count == 32,
+                  nonce.utf8.allSatisfy({
+                      (0x30...0x39).contains($0) || (0x61...0x66).contains($0)
+                  }) else { return nil }
+        }
+        if let sessionID = validatedRuntimeSessionID {
+            guard PlayerNativeRuntimeIdentifierPolicy.validSessionID(sessionID) else { return nil }
+        }
+        let stage: PlayerCurrentHostMilestone.Stage
+        switch phase {
+        case .navigating: stage = .navigating
+        case .documentLoaded: stage = .documentLoaded
+        case .sceneSubmitted:
+            guard nativeDocumentNonce != nil, validatedRuntimeSessionID != nil else { return nil }
+            stage = .rendererSubmitted
+        case .interactive:
+            guard nativeDocumentNonce != nil, validatedRuntimeSessionID != nil else { return nil }
+            stage = .firstInputAdmitted
+        case .navigationFailed, .webProcessTerminated: stage = .failed
+        case .detached: stage = .stopped
+        }
+        return PlayerCurrentHostMilestone(
+            stage: stage, gameID: gameID, attachmentLease: attachmentLease,
+            nativeDocumentNonce: nativeDocumentNonce,
+            validatedRuntimeSessionID: validatedRuntimeSessionID
+        )
     }
 }
 
@@ -972,6 +1111,120 @@ enum PlayerPrewarmResponsePolicy {
     /// surface the normal actionable load-failure state.
     static func shouldCacheResponse(statusCode: Int) -> Bool {
         statusCode < 400
+    }
+}
+
+/// Pure, native-owned cache provenance contract staged for #726.
+/// This helper does not alter the still-shipping WKNavigationResponse policies.
+/// WebKit must prove the real cached representation and current native owner
+/// before those delegates may consume any receipt or admit a HTTP 304.
+enum PlayerAuthorizedDocumentRevalidationPolicy {
+    struct Authorized200Receipt: Equatable {
+        let gameID: String
+        let immutablePlayerURL: URL
+        let credentialEpoch: UInt64
+        let attachmentLease: UInt64
+        let nativeDocumentNonce: String
+        let etag: String?
+    }
+
+    private static func validNonce(_ value: String?) -> Bool {
+        guard let value else { return false }
+        var count = 0
+        for byte in value.utf8 {
+            count += 1
+            guard count <= 32,
+                  (0x30...0x39).contains(byte) ||
+                  (0x61...0x66).contains(byte) else { return false }
+        }
+        return count == 32
+    }
+
+    private static func validETag(_ value: String?) -> Bool {
+        guard let value else { return true }
+        var count = 0
+        for byte in value.utf8 {
+            count += 1
+            // Opaque HTTP entity-tag; never log or interpolate caller text.
+            guard count <= 128, (0x20...0x7e).contains(byte) else { return false }
+        }
+        return count > 0
+    }
+
+    private static func validPlayerURL(
+        _ url: URL, gameID: String, backendOrigin: URL
+    ) -> Bool {
+        guard let p = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let origin = URLComponents(url: backendOrigin, resolvingAgainstBaseURL: false),
+              let scheme = p.scheme?.lowercased(), let host = p.host?.lowercased(),
+              let originScheme = origin.scheme?.lowercased(),
+              let originHost = origin.host?.lowercased(),
+              scheme == originScheme, host == originHost,
+              (p.port ?? (scheme == "https" ? 443 : 80)) ==
+                (origin.port ?? (originScheme == "https" ? 443 : 80)),
+              (scheme == "https" || scheme == "http"),
+              p.user == nil, p.password == nil, p.fragment == nil,
+              p.path == "/player",
+              p.queryItems?.filter({ $0.name == "game" }).map(\.value) == [gameID]
+        else { return false }
+        return true
+    }
+
+    /// Receipt construction is only permitted for a genuinely native-verified
+    /// current-owner main-frame 200, *not* a page-supplied JavaScript claim.
+    static func authorized200(
+        gameID: String, expectedPlayerURL: URL, responseURL: URL?,
+        backendOrigin: URL, statusCode: Int,
+        credentialEpoch: UInt64, attachmentLease: UInt64,
+        nativeDocumentNonce: String?, etag: String?,
+        ownsCurrentAttachment: Bool, isTrustedMainFrame: Bool,
+        hasAuthorizedCachedRepresentation: Bool
+    ) -> Authorized200Receipt? {
+        guard statusCode == 200, ownsCurrentAttachment, isTrustedMainFrame,
+              hasAuthorizedCachedRepresentation,
+              credentialEpoch > 0, attachmentLease > 0,
+              PlayerPublishedGameIDPolicy.valid(gameID),
+              validPlayerURL(expectedPlayerURL, gameID: gameID, backendOrigin: backendOrigin),
+              responseURL == expectedPlayerURL,
+              validNonce(nativeDocumentNonce), validETag(etag),
+              let nativeDocumentNonce else { return nil }
+        return Authorized200Receipt(
+            gameID: gameID, immutablePlayerURL: expectedPlayerURL,
+            credentialEpoch: credentialEpoch, attachmentLease: attachmentLease,
+            nativeDocumentNonce: nativeDocumentNonce, etag: etag
+        )
+    }
+
+    /// Status-only 304 can NEVER establish a document or render milestone.
+    /// Caller must independently prove WebKit's current cached representation
+    /// and native lease/credential/document provenance at the exact decision.
+    static func admits304(
+        receipt: Authorized200Receipt?,
+        gameID: String, expectedPlayerURL: URL, responseURL: URL?,
+        backendOrigin: URL, statusCode: Int,
+        credentialEpoch: UInt64, attachmentLease: UInt64,
+        nativeDocumentNonce: String?, responseETag: String?,
+        ownsCurrentAttachment: Bool, isTrustedMainFrame: Bool,
+        hasAuthorizedCachedRepresentation: Bool
+    ) -> Bool {
+        guard statusCode == 304, let receipt,
+              ownsCurrentAttachment, isTrustedMainFrame,
+              hasAuthorizedCachedRepresentation,
+              credentialEpoch > 0, attachmentLease > 0,
+              PlayerPublishedGameIDPolicy.valid(gameID),
+              validPlayerURL(expectedPlayerURL, gameID: gameID, backendOrigin: backendOrigin),
+              responseURL == expectedPlayerURL,
+              validNonce(nativeDocumentNonce), validETag(responseETag),
+              receipt.gameID == gameID,
+              receipt.immutablePlayerURL == expectedPlayerURL,
+              receipt.credentialEpoch == credentialEpoch,
+              receipt.attachmentLease == attachmentLease,
+              receipt.nativeDocumentNonce == nativeDocumentNonce
+        else { return false }
+        // A 304 may omit ETag. If present it must match the validated prior
+        // 200 representation; a new/different tag never authorizes cache use.
+        if let responseETag { return receipt.etag == responseETag }
+        return true
     }
 }
 
@@ -1425,6 +1678,14 @@ enum PlayerWebViewPool {
     static func hasCurrentDocumentNonce(_ webView: WKWebView) -> Bool {
         pooledView === webView && isAttached &&
             documentEpochGate.navigationStarted && documentEpochGate.currentNonce != nil
+    }
+
+    /// A current native epoch can be exposed to the attached Coordinator
+    /// without trusting a JS echo of the nonce or accepting a retired lease.
+    static func currentNativeDocumentNonce(_ webView: WKWebView, lease: UInt64) -> String? {
+        guard ownsActiveAttachment(webView, lease: lease),
+              documentEpochGate.navigationStarted else { return nil }
+        return documentEpochGate.currentNonce
     }
 
     static func revokeDocumentNonce(_ webView: WKWebView) {
@@ -2834,6 +3095,9 @@ private struct PlayerWebView: UIViewRepresentable {
         private var verifiedRunGate = PlayerVerifiedRunNotificationGate()
         // At most two concurrent result lookups; deferred work stays latest-only.
         private var verifiedRunFetchTasks: [String: Task<Void, Never>] = [:]
+        // Bounded, cancellable first-input/perf telemetry owned by this
+        // Coordinator. Detached/replaced document POSTs are never left queued.
+        private let metricTelemetryTasks = PlayerNativeMetricTaskRegistry()
         private var navigationFailureGate = PlayerNavigationFailureGate()
         private var metricSequenceGate = PlayerRuntimeMetricSequenceGate()
         private var firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
@@ -2847,6 +3111,23 @@ private struct PlayerWebView: UIViewRepresentable {
             policy: .legacyCompatible
         )
         private var runtimeSessionID: String? { runtimeSessionGate.activeSessionID }
+        /// The single source of host progress is this Coordinator's reducer
+        /// plus the pool-owned current lease and nonce. No GamePlayerCore
+        /// transport actor is started in the shipping application.
+        private var currentHostMilestone: PlayerCurrentHostMilestone? {
+            guard let webView = attachedWebView else { return nil }
+            return PlayerCurrentHostMilestoneProjection.project(
+                phase: launchLifecycle.phase,
+                gameID: expectedGameID, playerURL: expectedURL,
+                attachmentLease: attachmentLease,
+                nativeDocumentNonce: PlayerWebViewPool.currentNativeDocumentNonce(
+                    webView, lease: attachmentLease
+                ),
+                validatedRuntimeSessionID: runtimeSessionID,
+                ownsCurrentAttachment: ownsLiveAttachment
+            )
+        }
+
         private var isActive: Bool { launchLifecycle.isAttached }
         private var hasObservedTerminalNavigation: Bool { launchLifecycle.observedTerminalNavigation }
         lazy var messageProxy = WeakScriptMessageHandler(delegate: self)
@@ -3012,6 +3293,13 @@ private struct PlayerWebView: UIViewRepresentable {
         private func reportAcceptedFirstSceneSubmission(
             milliseconds: Int, runtimeSessionID: String
         ) {
+            // Before any host-visible milestone, prove the current native
+            // lease/nonce/session projection. A scene may arrive after the
+            // first input; never regress an already interactive host.
+            guard let milestone = currentHostMilestone,
+                  milestone.validatedRuntimeSessionID == runtimeSessionID,
+                  milestone.stage == .rendererSubmitted ||
+                      milestone.stage == .firstInputAdmitted else { return }
             PlayerTelemetry.report(
                 gameID: expectedGameID, kind: "perf",
                 name: "FirstSceneRenderSubmitted",
@@ -3025,6 +3313,11 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         private func handleMetric(_ body: [String: Any], runtimeSessionID: String) {
+            // Never consume a per-kind sequence or a first-scene/input reducer
+            // if the current attachment lacks a native nonce/session proof.
+            guard PlayerCurrentHostMilestoneProjection.permitsMetricAdmission(
+                currentHostMilestone, forSession: runtimeSessionID
+            ) else { return }
             // Reject malformed/extra fields *before* advancing the per-kind
             // high-water mark. Otherwise a bad sequence=100000 can suppress
             // a later valid scene/input message with a smaller sequence.
@@ -3042,7 +3335,8 @@ private struct PlayerWebView: UIViewRepresentable {
                     milliseconds: ms, runtimeSessionID: runtimeSessionID
                 )
             case .firstInput(let ms):
-                guard launchLifecycle.firstInput(milliseconds: ms) else { return }
+                guard launchLifecycle.firstInput(milliseconds: ms),
+                      currentHostMilestone?.stage == .firstInputAdmitted else { return }
                 Task { @MainActor [weak self] in
                     // After a retry, session equality alone cannot authorize
                     // the retired Coordinator to update the old player sheet.
@@ -3050,33 +3344,51 @@ private struct PlayerWebView: UIViewRepresentable {
                           self.runtimeSessionID == runtimeSessionID else { return }
                     self.onFirstInput()
                 }
-                Task { @MainActor [weak self] in
-                    guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
-                        ownsCurrentAttachment: self.ownsLiveAttachment,
-                        permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
-                        taskCancelled: Task<Never, Never>.isCancelled,
-                        expectedSessionID: runtimeSessionID,
-                        currentSessionID: self.runtimeSessionID
-                    ) else { return }
-                    await BackendAPI.shared.trackSocialEvent(
-                        gameID: self.expectedGameID, kind: "player_first_input",
-                        timeToFirstInputMS: ms, eventID: "ios-metric:\(metricID)"
-                    )
+                let registry = metricTelemetryTasks
+                registry.submit { [weak self, weak registry] taskID, epoch in
+                    Task { @MainActor [weak self, weak registry] in
+                        defer { registry?.complete(taskID: taskID, epoch: epoch) }
+                        // Snapshot only a native-vetted, currently attached ID.
+                        // Never retain the old Coordinator over URLSession await.
+                        let validGameID: String? = {
+                            guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
+                                ownsCurrentAttachment: self.ownsLiveAttachment,
+                                permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
+                                taskCancelled: Task<Never, Never>.isCancelled,
+                                expectedSessionID: runtimeSessionID,
+                                currentSessionID: self.runtimeSessionID
+                            ) else { return nil }
+                            return self.expectedGameID
+                        }()
+                        guard let validGameID, !Task<Never, Never>.isCancelled else { return }
+                        await BackendAPI.shared.trackSocialEvent(
+                            gameID: validGameID, kind: "player_first_input",
+                            timeToFirstInputMS: ms, eventID: "ios-metric:\(metricID)"
+                        )
+                    }
                 }
             case .perfWindow(let p95, let avg, let count):
-                Task { @MainActor [weak self] in
-                    guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
-                        ownsCurrentAttachment: self.ownsLiveAttachment,
-                        permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
-                        taskCancelled: Task<Never, Never>.isCancelled,
-                        expectedSessionID: runtimeSessionID,
-                        currentSessionID: self.runtimeSessionID
-                    ) else { return }
-                    await BackendAPI.shared.trackSocialEvent(
-                        gameID: self.expectedGameID, kind: "player_perf_window",
-                        frameTimeP95MS: p95, frameTimeAvgMS: avg,
-                        frameCount: count, eventID: "ios-metric:\(metricID)"
-                    )
+                let registry = metricTelemetryTasks
+                registry.submit { [weak self, weak registry] taskID, epoch in
+                    Task { @MainActor [weak self, weak registry] in
+                        defer { registry?.complete(taskID: taskID, epoch: epoch) }
+                        let validGameID: String? = {
+                            guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
+                                ownsCurrentAttachment: self.ownsLiveAttachment,
+                                permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
+                                taskCancelled: Task<Never, Never>.isCancelled,
+                                expectedSessionID: runtimeSessionID,
+                                currentSessionID: self.runtimeSessionID
+                            ) else { return nil }
+                            return self.expectedGameID
+                        }()
+                        guard let validGameID, !Task<Never, Never>.isCancelled else { return }
+                        await BackendAPI.shared.trackSocialEvent(
+                            gameID: validGameID, kind: "player_perf_window",
+                            frameTimeP95MS: p95, frameTimeAvgMS: avg,
+                            frameCount: count, eventID: "ios-metric:\(metricID)"
+                        )
+                    }
                 }
             }
         }
@@ -3097,6 +3409,7 @@ private struct PlayerWebView: UIViewRepresentable {
         }
 
         func stopObserving() {
+            metricTelemetryTasks.revoke()
             launchLifecycle.detach()
             prewarmRecoveryArmed = false
             prewarmLoadingObservation?.invalidate()
@@ -3162,6 +3475,7 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             guard acceptsCurrentHostCallbacks else { return }
+            metricTelemetryTasks.revoke()
             PlayerWebViewPool.didStartDocumentNavigation(webView)
             nativeBridgeVersionGate.reset()
             launchLifecycle.navigationStarted()
@@ -3185,6 +3499,7 @@ private struct PlayerWebView: UIViewRepresentable {
             guard acceptsCurrentHostCallbacks,
                   launchLifecycle.navigationFailed(),
                   navigationFailureGate.shouldReportFailure() else { return }
+            metricTelemetryTasks.revoke()
             disarmPrewarmRecovery()
             if let view = attachedWebView { PlayerWebViewPool.revokeDocumentNonce(view) }
             onLoadFail(error)
@@ -3248,6 +3563,7 @@ private struct PlayerWebView: UIViewRepresentable {
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             guard acceptsCurrentHostCallbacks,
                   launchLifecycle.webProcessTerminated() else { return }
+            metricTelemetryTasks.revoke()
             disarmPrewarmRecovery()
             PlayerWebViewPool.revokeDocumentNonce(webView)
             onTerminate()
