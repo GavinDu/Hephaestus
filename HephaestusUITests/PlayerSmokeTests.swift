@@ -3390,7 +3390,11 @@ final class PlayerSmokeTests: XCTestCase {
 
         let play = app.buttons["game.play"].firstMatch
         let retry = app.buttons["Try again"].firstMatch
-        let pendingRetry = app.buttons["feed.retryLoading"].firstMatch
+        // The actual SwiftUI feed.retryLoading control may be exposed as a
+        // Button or PopUpButton at Accessibility5. Query its unchanged stable
+        // identifier without assuming a concrete native automation type.
+        // Keep real backend retry pacing, 44pt geometry and Play gate below.
+        let pendingRetry = app.descendants(matching: .any)["feed.retryLoading"].firstMatch
         let startedLoading = Date()
         let feedDeadline = startedLoading.addingTimeInterval(120)
         var pendingRetryUsed = false
