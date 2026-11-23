@@ -1970,6 +1970,20 @@ private struct ForYouGamePage: View {
                         onReport()
                     }
                 }
+                // Accessibility5's compact immersive stage suppresses
+                // optional metadata to protect Play and the social rail.
+                // The *existing real selected game's* scrollable Actions
+                // sheet keeps its first three genuine topics available to
+                // sighted and VoiceOver users without inventing a topic.
+                if let topics = ForYouAccessibleActionsTopicPolicy.summary(game.topics) {
+                    Section("Game topics") {
+                        Text(topics.visual)
+                            .font(.body)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel(topics.spoken)
+                            .accessibilityIdentifier("feed.actions.topics")
+                    }
+                }
                 Section("Feed preferences") {
                     Button("Not interested", systemImage: "eye.slash") {
                         showsAccessibleActionsSheet = false

@@ -1,6 +1,16 @@
 import Foundation
 import SwiftUI
 
+/// A genuine selected For You page may hide decorative topic hashtags
+/// in compact/Accessibility5 mode to preserve Play. The existing real
+/// Game Actions sheet is scrollable and can disclose the *same* valid
+/// backend topic subset without inventing a fourth topic or creator.
+enum ForYouAccessibleActionsTopicPolicy {
+    static func summary(_ topics: [String]?) -> GameMetadataTopicPolicy.Presentation? {
+        GameMetadataTopicPolicy.presentation(topics, maxCount: 3)
+    }
+}
+
 /// Immersive metadata must never compete with Play on short windows.
 /// Roomy stages may wrap legitimate topic text on two lines; Accessibility
 /// sizes and compact heights reserve the stage for Play. Game Details
