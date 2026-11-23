@@ -346,16 +346,33 @@ struct CreatorDiscoveryResponse: Decodable {
 /// One canonical, validated game-id REST path segment; the backend's
 /// published-game IDs are ASCII letters, numbers, '-' and '_', max 128 bytes.
 /// Do not interpolate a network/client supplied path into URL() unchecked.
+/// One allocation-bounded public GamePackage identifier contract for
+/// native player launch, prewarm, Share and verified-only leaderboard reads.
+/// Syntax is not authorization, publication status, or replay attestation.
+/// Backend/Go ID conformance must remain checked independently.
+enum PublishedGameIDPolicy {
+    static let maximumUTF8Bytes = 128
+
+    static func valid(_ gameID: String) -> Bool {
+        var bytes = 0
+        for byte in gameID.utf8 {
+            bytes += 1
+            guard bytes <= maximumUTF8Bytes,
+                  (0x41...0x5a).contains(byte) ||
+                  (0x61...0x7a).contains(byte) ||
+                  (0x30...0x39).contains(byte) ||
+                  byte == 0x2d || byte == 0x5f
+            else { return false }
+        }
+        return bytes > 0
+    }
+}
+
+/// Source-compatible façade for existing leaderboard-only call sites/tests.
+/// The grammar is now owned by PublishedGameIDPolicy, not duplicated here.
 enum VerifiedLeaderboardGameIDPolicy {
     static func valid(_ value: String) -> Bool {
-        let bytes = Array(value.utf8)
-        guard (1...128).contains(bytes.count) else { return false }
-        return bytes.allSatisfy { byte in
-            (0x41...0x5a).contains(byte) ||
-            (0x61...0x7a).contains(byte) ||
-            (0x30...0x39).contains(byte) ||
-            byte == 0x2d || byte == 0x5f
-        }
+        PublishedGameIDPolicy.valid(value)
     }
 }
 

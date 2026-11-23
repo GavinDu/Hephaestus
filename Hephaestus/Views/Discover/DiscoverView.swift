@@ -206,12 +206,14 @@ enum FeedCommittedSearchPolicy {
 private struct FeedSearchVisibilityModifier: ViewModifier {
     @Binding var text: String
     let hidesNativeSearch: Bool
+    let onSubmitSearch: () -> Void
 
     @ViewBuilder func body(content: Content) -> some View {
         if hidesNativeSearch {
             content
         } else {
             content.searchable(text: $text, prompt: "Find a game")
+                .onSubmit(of: .search, onSubmitSearch)
         }
     }
 }
@@ -384,6 +386,15 @@ struct DiscoverView: View {
     @State private var nestedGuestSignInGate = CreatorNestedGuestSignInGate()
     @State private var settledForYouGameID: String?
     @State private var resultPresentation: PlayerResultPresentation?
+
+    // Both real native Search and the explicit grid action commit the same
+    // draft before releasing keyboard focus. Never call dismissSearch(),
+    // which can clear the actual user query.
+    private func commitDiscoverSearch() {
+        committedSearchQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                        to: nil, from: nil, for: nil)
+    }
 
     private var activeSearchQuery: String {
         FeedCommittedSearchPolicy.effectiveQuery(
@@ -653,8 +664,19 @@ struct DiscoverView: View {
 
                     // A real title query must survive UIKit's native
                     // search drawer collapse until explicit user clearing.
-                    if !committedSearchQuery.isEmpty {
-                        HStack {
+                    if !activeSearchQuery.isEmpty {
+                        HStack(spacing: 12) {
+                            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                               searchText.trimmingCharacters(in: .whitespacesAndNewlines) != committedSearchQuery {
+                                Button(action: commitDiscoverSearch) {
+                                    Label("Apply search", systemImage: "checkmark.circle")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(minWidth: ArcadePulseTheme.minimumTarget,
+                                               minHeight: ArcadePulseTheme.minimumTarget)
+                                        .contentShape(Rectangle())
+                                }
+                                .accessibilityIdentifier("feed.grid.applySearch")
+                            }
                             Spacer(minLength: 0)
                             Button {
                                 searchText = ""
@@ -890,10 +912,8 @@ struct DiscoverView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(usesCompactLandscapeOverlay ? .hidden : .visible, for: .navigationBar)
             .modifier(FeedSearchVisibilityModifier(
-                text: $searchText, hidesNativeSearch: usesCompactLandscapeOverlay))
-            .onSubmit(of: .search) {
-                committedSearchQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
+                text: $searchText, hidesNativeSearch: usesCompactLandscapeOverlay,
+                onSubmitSearch: commitDiscoverSearch))
             .toolbar {
                 if usesCompactFeedScopeMenu {
                     ToolbarItem(placement: .topBarTrailing) {

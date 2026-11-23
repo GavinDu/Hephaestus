@@ -2423,7 +2423,18 @@ final class PlayerSmokeTests: XCTestCase {
         while app.keyboards.firstMatch.exists && Date() < keyboardDeadline {
             Thread.sleep(forTimeInterval: 0.2)
         }
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        if app.keyboards.firstMatch.exists {
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "arcade-pulse-real-grid-native-search-keyboard-remained"
+            failure.lifetime = .keepAlways
+            add(failure)
+        }
+        XCTAssertFalse(app.keyboards.firstMatch.exists,
+                       "Native Search must release keyboard focus before real grid More.")
+        let apply = app.buttons["feed.grid.applySearch"].firstMatch
+        XCTAssertFalse(apply.exists,
+                       "Native Search must commit the genuine draft, not just hide the keyboard.")
+        XCTAssertTrue(app.buttons["feed.grid.clearSearch"].firstMatch.waitForExistence(timeout: 8))
 
         let grid = app.scrollViews["feed.grid.scroll"].firstMatch
         let more = app.buttons["grid.game.social.more"].firstMatch
@@ -3390,7 +3401,11 @@ final class PlayerSmokeTests: XCTestCase {
 
         let play = app.buttons["game.play"].firstMatch
         let retry = app.buttons["Try again"].firstMatch
-        let pendingRetry = app.buttons["feed.retryLoading"].firstMatch
+        // The actual SwiftUI feed.retryLoading control may be exposed as a
+        // Button or PopUpButton at Accessibility5. Query its unchanged stable
+        // identifier without assuming a concrete native automation type.
+        // Keep real backend retry pacing, 44pt geometry and Play gate below.
+        let pendingRetry = app.descendants(matching: .any)["feed.retryLoading"].firstMatch
         let startedLoading = Date()
         let feedDeadline = startedLoading.addingTimeInterval(120)
         var pendingRetryUsed = false
