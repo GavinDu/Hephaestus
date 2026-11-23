@@ -33,6 +33,12 @@ jobs:
                context.payload.inputs?.dry_run === 'false');
             const archivePrefix = 'archive/2026-11-22/legacy-branches/';
             const keep = new Set(["runtime/642-765-scene-authorized-poster-20261121","runtime/642-653-shared-gameid-policy-20261121","fix/ui-668-grid-creator-identity-clean-main-20261121","fix/ui-695-immersive-creator-on-clean-752-20261121","fix/ui-768-a5-real-topics-actions-20261121"]);
+            const deferredIssueNumber = 776;
+            const deferredIssue = await github.rest.issues.get({
+              owner, repo, issue_number: deferredIssueNumber
+            });
+            if (deferredIssue.data.state !== 'open')
+              throw Error('Branch governance recovery ledger #776 must remain open');
             const [repository, branches, openPRs] = await Promise.all([
               github.rest.repos.get({owner, repo}),
               github.paginate(github.rest.repos.listBranches, {owner, repo, per_page: 100}),
@@ -43,6 +49,7 @@ jobs:
             const rows = [];
             let archived = 0, deleted = 0, kept = 0, skipped = 0;
             const failures = [];
+            const deferredRows = [];
             const candidates = branches.filter(b => b.name !== 'main');
             if (keep.size > 5) throw Error('Too many keep refs');
             for (const b of candidates) {
@@ -118,6 +125,9 @@ jobs:
                 deleted++;
                 row.disposition = Number(row.ahead)===0 ? 'ARCHIVED + DELETE ancestor' :
                   'ARCHIVED + DELETE unmerged';
+                if (Number(row.ahead)>0)
+                  deferredRows.push({name:b.name,sha:b.commit.sha,ahead:row.ahead,
+                    behind:row.behind,tag:row.tag});
                 core.info(row.disposition+': '+b.name+' @ '+b.commit.sha+' -> '+row.tag);
               } catch(e) {
                 row.disposition='SKIP preservation/delete error'; skipped++;
@@ -150,5 +160,27 @@ jobs:
             core.summary.addTable([header.map(x=>({data:x,header:true})),...cells]);
             await core.summary.write();
             if (failures.length) core.setFailed(failures.slice(0,20).join('\n'));
+            if (runDeletes && deferredRows.length) {
+              const header = [
+                '## Archived-but-unmerged source recovery — run '+context.runId,
+                '',
+                '**A tag is source preservation, NOT code integrated in main.**',
+                'Source may be restored to a new CI-gated PR when its product issue is prioritized.',
+                '',
+                '| Original branch | Exact SHA | Ahead | Behind | Verified tag |',
+                '|---|---|---:|---:|---|'
+              ];
+              const lines = deferredRows.map(r => '| \`'+r.name+'\` | \`'+r.sha+'\` | '+
+                r.ahead+' | '+r.behind+' | \`'+r.tag+'\` |');
+              // Keep GitHub issue comments below the platform size limit.
+              for (let i=0; i<lines.length; i+=55) {
+                const body=[...header,...lines.slice(i,i+55),
+                  '', 'Segment '+(Math.floor(i/55)+1)+' of '+Math.ceil(lines.length/55)]
+                  .join('\\n');
+                await github.rest.issues.createComment({
+                  owner,repo,issue_number:deferredIssueNumber,body
+                });
+              }
+            }
             if (runDeletes && remaining.length>6)
               core.setFailed('Branch cap not reached: '+(remaining.length-1)+' non-main');
