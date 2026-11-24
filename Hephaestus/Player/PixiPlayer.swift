@@ -1116,6 +1116,38 @@ enum PlayerMainDocumentHTTPPolicy {
     }
 }
 
+/// Fixed diagnostic categories only. At most four observations per native
+/// prepared navigation, shared across speculative and attached owners.
+/// A WKNavigationResponse has no nonce receipt; this is NOT authorization.
+struct PlayerMainDocumentResponseObservations {
+    private enum Kind: Hashable {
+        case prewarm200, prewarm304, attached200, attached304
+    }
+    private var observed: Set<Kind> = []
+
+    mutating func record(statusCode: Int, isAttached: Bool) -> String? {
+        let kind: Kind
+        switch (isAttached, statusCode) {
+        case (false, 200): kind = .prewarm200
+        case (false, 304): kind = .prewarm304
+        case (true, 200): kind = .attached200
+        case (true, 304): kind = .attached304
+        default: return nil
+        }
+        guard observed.insert(kind).inserted else { return nil }
+        switch kind {
+        case .prewarm200: return "player HTTP observation: prewarm 200"
+        case .prewarm304: return "player HTTP observation: prewarm 304"
+        case .attached200: return "player HTTP observation: attached 200"
+        case .attached304: return "player HTTP observation: attached 304"
+        }
+    }
+
+    mutating func reset() {
+        observed.removeAll(keepingCapacity: true)
+    }
+}
+
 /// Compatibility façade for existing prewarm policy callers and tests.
 enum PlayerPrewarmResponsePolicy {
     static func shouldCacheResponse(statusCode: Int) -> Bool {
@@ -1583,6 +1615,7 @@ enum PlayerWebViewPool {
     private static var attachedReceiverLease: UInt64?
     private static weak var attachedMessageReceiver: (any WKScriptMessageHandler)?
     private static var documentEpochGate = PlayerNativeDocumentEpochGate()
+    private static var mainDocumentResponseObservations = PlayerMainDocumentResponseObservations()
     private static var sessionFingerprint: String?
     private static let sessionObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
         forName: .hephaestusBackendSessionDidChange, object: nil, queue: .main
@@ -1655,6 +1688,7 @@ enum PlayerWebViewPool {
         sceneMilestoneLedger.invalidate()
         transferringLease = nil
         let nonce = documentEpochGate.prepareNavigation()
+        mainDocumentResponseObservations.reset()
         // Only installed native code can issue a fresh current-document
         // challenge. Page code cannot derive future navigation epochs.
         // This app has no other WKUserScripts in this private pooled player.
@@ -1695,6 +1729,26 @@ enum PlayerWebViewPool {
         guard ownsActiveAttachment(webView, lease: lease),
               documentEpochGate.navigationStarted else { return nil }
         return documentEpochGate.currentNonce
+    }
+
+    /// Diagnostic only: the current native navigation context is not a
+    /// cryptographic association of the response with its cached body.
+    static func observeMainDocumentResponse(
+        _ webView: WKWebView, response: HTTPURLResponse, lease: UInt64?
+    ) {
+        guard pooledView === webView, let currentURL,
+              response.url == currentURL, documentEpochGate.navigationStarted,
+              documentEpochGate.currentNonce != nil else { return }
+        if let lease {
+            guard ownsActiveAttachment(webView, lease: lease) else { return }
+        } else {
+            guard !isAttached else { return }
+        }
+        if let message = mainDocumentResponseObservations.record(
+            statusCode: response.statusCode, isAttached: lease != nil
+        ) {
+            DevLog.info(.player, message)
+        }
     }
 
     static func revokeDocumentNonce(_ webView: WKWebView) {
@@ -2123,6 +2177,9 @@ enum PlayerWebViewPool {
                 decisionHandler(.cancel)
                 return
             }
+            PlayerWebViewPool.observeMainDocumentResponse(
+                webView, response: response, lease: nil
+            )
             decisionHandler(.allow)
         }
 
@@ -3583,6 +3640,9 @@ private struct PlayerWebView: UIViewRepresentable {
                 decisionHandler(.cancel)
                 return
             }
+            PlayerWebViewPool.observeMainDocumentResponse(
+                webView, response: response, lease: attachmentLease
+            )
             decisionHandler(.allow)
         }
 
