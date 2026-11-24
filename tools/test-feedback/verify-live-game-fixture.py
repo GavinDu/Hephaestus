@@ -8,6 +8,8 @@ suppress a failing XCTest, or print a full public feed/creator identity.
 """
 
 import argparse
+import http.client
+import math
 import json
 import re
 import sys
@@ -60,9 +62,16 @@ def reject_non_json_constant(_value):
     raise ValueError("non-JSON numeric constant")
 
 
+def finite_json_float(value):
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("nonfinite JSON number")
+    return result
+
+
 def read_public_json(opener, url, timeout):
-    req = request.Request(url, headers={"Accept": "application/json"})
     try:
+        req = request.Request(url, headers={"Accept": "application/json"})
         with opener.open(req, timeout=timeout) as response:
             if response.status != 200:
                 raise FixtureError(f"endpoint returned HTTP {response.status}")
@@ -71,7 +80,8 @@ def read_public_json(opener, url, timeout):
             if response.headers.get_content_type() != "application/json":
                 raise FixtureError("public fixture endpoint is not JSON content")
             raw = response.read(MAX_JSON_BYTES + 1)
-    except (error.HTTPError, error.URLError, TimeoutError, OSError) as exc:
+    except (error.HTTPError, error.URLError, TimeoutError, OSError,
+            http.client.HTTPException, ValueError) as exc:
         if isinstance(exc, error.HTTPError):
             raise FixtureError(f"endpoint returned HTTP {exc.code}") from exc
         raise FixtureError("public fixture endpoint unreachable or timed out") from exc
@@ -79,7 +89,8 @@ def read_public_json(opener, url, timeout):
         raise FixtureError("public fixture JSON exceeds 2 MB bound")
     try:
         value = json.loads(raw, object_pairs_hook=unique_json_object,
-                           parse_constant=reject_non_json_constant)
+                           parse_constant=reject_non_json_constant,
+                           parse_float=finite_json_float)
     except (ValueError, UnicodeDecodeError, RecursionError) as exc:
         raise FixtureError("public fixture response is not valid JSON") from exc
     if not isinstance(value, dict):

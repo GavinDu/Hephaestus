@@ -1,6 +1,7 @@
 """Offline regression for the real-feed CI prerequisite; never mock the app."""
 
 import importlib.util
+import http.client
 import io
 from contextlib import redirect_stdout, redirect_stderr
 from unittest.mock import patch
@@ -268,10 +269,22 @@ class LiveGameFixtureTests(unittest.TestCase):
                     b'{"games":[],"extra":NaN}',
                     b'{"games":[],"extra":Infinity}',
                     b'{"games":[],"extra":-Infinity}',
+                    b'{"games":[],"extra":1e999}',
                     b'{"games":[' + b'[' * 1500 + b']' * 1500 + b']}'):
             with self.subTest(raw_length=len(raw)):
                 with self.assertRaisesRegex(fixture.FixtureError, "feed_failure=invalid_json"):
                     fixture.check_once(FakeOpener({self.FEED: (raw, "application/json")}), self.FEED, 1)
+
+    def test_transport_errors_are_redacted_even_if_protocol_parser_has_private_text(self):
+        for error in (http.client.BadStatusLine("private-wire-value"),
+                      http.client.IncompleteRead(b"private-wire-value", 9),
+                      ValueError("private-wire-value")):
+            with self.subTest(category=type(error).__name__):
+                opener = FakeOpener({self.FEED: error})
+                with self.assertRaises(fixture.FixtureError) as raised:
+                    fixture.check_once(opener, self.FEED, 1)
+                self.assertEqual(str(raised.exception), "feed_failure=transport")
+                self.assertNotIn("private-wire-value", str(raised.exception))
 
     def test_response_byte_bound_and_non_object(self):
         for raw, reason in ((b"x" * (fixture.MAX_JSON_BYTES + 1), "too_large"),
