@@ -206,12 +206,14 @@ enum FeedCommittedSearchPolicy {
 private struct FeedSearchVisibilityModifier: ViewModifier {
     @Binding var text: String
     let hidesNativeSearch: Bool
+    let onSubmitSearch: () -> Void
 
     @ViewBuilder func body(content: Content) -> some View {
         if hidesNativeSearch {
             content
         } else {
             content.searchable(text: $text, prompt: "Find a game")
+                .onSubmit(of: .search, onSubmitSearch)
         }
     }
 }
@@ -385,6 +387,15 @@ struct DiscoverView: View {
     @State private var nestedGuestSignInGate = CreatorNestedGuestSignInGate()
     @State private var settledForYouGameID: String?
     @State private var resultPresentation: PlayerResultPresentation?
+
+    // Both real native Search and the explicit grid action commit the same
+    // draft before releasing keyboard focus. Never call dismissSearch(),
+    // which can clear the actual user query.
+    private func commitDiscoverSearch() {
+        committedSearchQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                        to: nil, from: nil, for: nil)
+    }
 
     private var activeSearchQuery: String {
         FeedCommittedSearchPolicy.effectiveQuery(
@@ -654,8 +665,19 @@ struct DiscoverView: View {
 
                     // A real title query must survive UIKit's native
                     // search drawer collapse until explicit user clearing.
-                    if !committedSearchQuery.isEmpty {
-                        HStack {
+                    if !activeSearchQuery.isEmpty {
+                        HStack(spacing: 12) {
+                            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                               searchText.trimmingCharacters(in: .whitespacesAndNewlines) != committedSearchQuery {
+                                Button(action: commitDiscoverSearch) {
+                                    Label("Apply search", systemImage: "checkmark.circle")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(minWidth: ArcadePulseTheme.minimumTarget,
+                                               minHeight: ArcadePulseTheme.minimumTarget)
+                                        .contentShape(Rectangle())
+                                }
+                                .accessibilityIdentifier("feed.grid.applySearch")
+                            }
                             Spacer(minLength: 0)
                             Button {
                                 searchText = ""
@@ -894,10 +916,8 @@ struct DiscoverView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(usesCompactLandscapeOverlay ? .hidden : .visible, for: .navigationBar)
             .modifier(FeedSearchVisibilityModifier(
-                text: $searchText, hidesNativeSearch: usesCompactLandscapeOverlay))
-            .onSubmit(of: .search) {
-                committedSearchQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
+                text: $searchText, hidesNativeSearch: usesCompactLandscapeOverlay,
+                onSubmitSearch: commitDiscoverSearch))
             .toolbar {
                 if usesCompactFeedScopeMenu {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -1767,9 +1787,10 @@ private struct ForYouGamePage: View {
         ArcadePulseTheme.fallbackPalette(gameID: game.id)
     }
 
-    private var creatorName: String {
-        guard let creator = game.ownerID, !creator.isEmpty else { return "Mini game" }
-        return game.creatorDisplayName?.isEmpty == false ? game.creatorDisplayName! : creator
+    private var creatorName: String? {
+        ForYouPageLayout.publicCreatorName(
+            ownerID: game.ownerID, displayName: game.creatorDisplayName
+        )
     }
 
     // A missing or stale version-bound poster is not a recorded preview.
@@ -1884,9 +1905,10 @@ private struct ForYouGamePage: View {
     // like the familiar vertical rails in short-video feeds. Never invent
     // engagement counts when the backend has not provided verified totals.
     private func iconAction(_ symbol: String, label: String, caption: String? = nil,
-                            action: @escaping () -> Void) -> some View {
+                            metric: Int? = nil, action: @escaping () -> Void) -> some View {
         ArcadePulseAction(symbol: symbol, accessibilityLabel: label,
                           caption: caption, action: action)
+            .accessibilityValue(ArcadePulseImmersiveFeedStyle.metric(metric) ?? "")
     }
 
     // A network lease suppresses duplicate taps, but suppression without
@@ -1932,7 +1954,8 @@ private struct ForYouGamePage: View {
         } else {
             iconAction(isLiked ? "heart.fill" : "heart",
                        label: isLiked ? "Unlike game" : "Like game",
-                       caption: vertical ? "Like" : nil, action: onToggleLike)
+                       caption: vertical ? ArcadePulseImmersiveFeedStyle.caption("Like", count: game.likeCount) : nil,
+                       metric: game.likeCount, action: onToggleLike)
         }
         iconAction("bubble.right", label: "View comments",
                    caption: vertical ? "Comment" : nil, action: onOpenComments)
@@ -1951,13 +1974,14 @@ private struct ForYouGamePage: View {
         .accessibilitySortPriority(70)
         ShareLink(item: shareURL) {
             ArcadePulseActionGlyph(symbol: "square.and.arrow.up",
-                                   caption: vertical ? "Share" : nil)
+                                   caption: vertical ? ArcadePulseImmersiveFeedStyle.caption("Share", count: game.shares) : nil)
         }
         .simultaneousGesture(TapGesture().onEnded {
             Task { await BackendAPI.shared.trackSocialEvent(gameID: game.id, kind: "share") }
         })
         .foregroundStyle(.white)
         .accessibilityLabel("Share \(game.title)")
+        .accessibilityValue(ArcadePulseImmersiveFeedStyle.metric(game.shares) ?? "")
     }
 
     /// A labeled menu is critical for low-vision users who enlarge text but
@@ -2077,7 +2101,13 @@ private struct ForYouGamePage: View {
         } else if vertical {
             VStack(spacing: 5) { socialActionButtons(vertical: true) }
                 .padding(4)
-                .background(.black.opacity(0.3), in: Capsule())
+                .background(ArcadePulseImmersiveFeedStyle.navy.opacity(0.90),
+                            in: RoundedRectangle(cornerRadius: 18))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18)
+                        .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
+                        .allowsHitTesting(false)
+                }
                 .accessibilityIdentifier("feed.actionRail")
         } else {
             HStack(spacing: 8) { socialActionButtons(vertical: false) }
@@ -2122,7 +2152,7 @@ private struct ForYouGamePage: View {
                 .font(dynamicTypeSize.isAccessibilitySize
                     ? .system(size: 22, weight: .bold, design: .rounded)
                     : .system(isCompact ? .title2 : .title, design: .rounded).weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(dynamicTypeSize.isAccessibilitySize ? Color.white : ArcadePulseImmersiveFeedStyle.cyan)
                 .lineLimit(2)
                 .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.85 : 1)
                 // On short iPhone landscape screens a long bilingual game title
@@ -2162,12 +2192,12 @@ private struct ForYouGamePage: View {
             // Only real, navigable creator IDs deserve a profile button.
             // A missing owner was previously shown as "Mini game" with a
             // dead "View profile for Mini game" VoiceOver action.
-            if !isCompact, ForYouPageLayout.hasNavigableCreator(ownerID: game.ownerID) {
+            if !isCompact, let creatorName {
             HStack(spacing: 8) {
                 ArcadePulseCreatorIdentity(
                     name: creatorName,
                     avatarURL: game.creatorAvatarURL,
-                    foreground: ArcadePulseTheme.textPrimary,
+                    foreground: ArcadePulseImmersiveFeedStyle.cyan,
                     action: onOpenCreator
                 )
                 .accessibilitySortPriority(80)
@@ -2199,7 +2229,7 @@ private struct ForYouGamePage: View {
             }
             if isCompact { socialActions(vertical: false) }
             HStack(spacing: 10) {
-                ArcadePulsePlayCTA(action: onPlay)
+                ArcadePulsePlayCTA(immersiveFeed: true, action: onPlay)
                 // Do not attach a zero-distance drag to Play. On short
                 // landscape screens that button fills the lower swipe
                 // start region and steals the parent page gesture.
@@ -2245,7 +2275,7 @@ private struct ForYouGamePage: View {
                 .lineLimit(3)
                 .minimumScaleFactor(0.85)
 
-            if let owner = game.ownerID, !owner.isEmpty {
+            if let creatorName {
                 ArcadePulseCreatorIdentity(
                     name: creatorName,
                     avatarURL: game.creatorAvatarURL,
@@ -2319,9 +2349,9 @@ private struct ForYouGamePage: View {
                 // inventing a poster or implying recorded gameplay exists.
                 LinearGradient(
                     colors: [
-                        ArcadePulseTheme.canvas,
-                        palette[0].opacity(0.30),
-                        palette[1].opacity(0.25)
+                        ArcadePulseImmersiveFeedStyle.navy,
+                        palette[0].opacity(0.20),
+                        ArcadePulseImmersiveFeedStyle.navy
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -2740,10 +2770,10 @@ private struct ArcadePulseGameDetailsSheet: View {
                 .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("game.details.title")
-            if let owner = game.ownerID, !owner.isEmpty {
-                Label(game.creatorDisplayName?.isEmpty == false
-                      ? game.creatorDisplayName! : owner,
-                      systemImage: "person.crop.circle")
+            if let creatorName = ForYouPageLayout.publicCreatorName(
+                ownerID: game.ownerID, displayName: game.creatorDisplayName
+            ) {
+                Label(creatorName, systemImage: "person.crop.circle")
                     .foregroundStyle(ArcadePulseTheme.textSecondary)
             }
             // Play and Share must be reachable before optional long
