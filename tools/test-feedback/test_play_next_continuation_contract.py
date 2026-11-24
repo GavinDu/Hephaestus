@@ -19,6 +19,9 @@ class PlayNextContinuationContractTests(unittest.TestCase):
         self.assertGreater(advance.rindex("FeedPlayNextPolicy.isCurrent("), advance.index("await loadMore()"))
         self.assertGreater(advance.index("resultPresentation = nil"), advance.rindex("FeedPlayNextPolicy.isCurrent("))
         self.assertIn("visibleIDs: visibleGames.map(\\.id)", advance)
+        self.assertLess(advance.index("guard let nextID else"), advance.index("resultPresentation = nil"))
+        self.assertIn("playNextFeedback = FeedPlayNextFeedback(context: operation.context", advance)
+        self.assertIn("playNextFeedback = nil", begin)
         self.assertIn("committedSearchQuery = destination.searchText", advance)
         self.assertIn("if pendingPlayNext?.id == operation.id", advance)
         self.assertIn("dismissesOnNextGame: false", source)
@@ -30,6 +33,8 @@ class PlayNextContinuationContractTests(unittest.TestCase):
         self.assertIn("if dismissesOnNextGame { dismiss() }", sheet)
         self.assertIn(".disabled(isAdvancingToNextGame)", sheet)
         self.assertIn("Finding next game", sheet)
+        self.assertIn("player.result.nextFeedback", sheet)
+        self.assertIn("ScrollView {", sheet)
         self.assertIn("Button(\"Done\") { dismiss() }", sheet)
 
 

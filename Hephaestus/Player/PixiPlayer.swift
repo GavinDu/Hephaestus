@@ -2878,10 +2878,12 @@ struct PlayerResultSheet: View {
     // the original synchronous behavior for any other callers.
     var dismissesOnNextGame = true
     var isAdvancingToNextGame = false
+    var nextGameFeedback: String? = nil
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
+            ScrollView {
             VStack(spacing: 20) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 54))
@@ -2940,6 +2942,14 @@ struct PlayerResultSheet: View {
                     .disabled(isAdvancingToNextGame)
                     .accessibilityLabel(isAdvancingToNextGame ? "Finding next game" : "Next Game")
 
+                    if let nextGameFeedback, !isAdvancingToNextGame {
+                        Text(nextGameFeedback)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("player.result.nextFeedback")
+                    }
+
                     Button {
                         onToggleLike()
                     } label: {
@@ -2954,6 +2964,8 @@ struct PlayerResultSheet: View {
                 .frame(maxWidth: 420)
             }
             .padding(24)
+            .frame(maxWidth: .infinity)
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(ArcadePulseTheme.canvas)
             .foregroundStyle(ArcadePulseTheme.textPrimary)

@@ -390,6 +390,7 @@ struct DiscoverView: View {
     @State private var settledForYouGameID: String?
     @State private var resultPresentation: PlayerResultPresentation?
     @State private var pendingPlayNext: FeedPlayNextOperation?
+    @State private var playNextFeedback: FeedPlayNextFeedback?
 
     // Both real native Search and the explicit grid action commit the same
     // draft before releasing keyboard focus. Never call dismissSearch(),
@@ -1076,6 +1077,7 @@ struct DiscoverView: View {
                 // Do not leave a previous viewer's result or pending Next
                 // Game action available after a real session transition.
                 pendingPlayNext = nil
+                playNextFeedback = nil
                 resultPresentation = nil
                 savedGameIDs.removeAll()
                 FeedSavedGameCache.discardUnscopedHistory()
@@ -1130,6 +1132,7 @@ struct DiscoverView: View {
                 PixiPlayerSheet(gameID: request.gameID, title: request.title,
                                 holdPosterURL: request.posterURL, tappedAt: request.tappedAt, onFinish: {
                     guard let game = games.first(where: { $0.id == request.gameID }) else { return }
+                    playNextFeedback = nil
                     resultPresentation = PlayerResultPresentation(game: game, result: $0)
                 })
             }
@@ -1144,7 +1147,8 @@ struct DiscoverView: View {
                     onNextGame: { beginAdvanceToNextGame(from: presentation) },
                     onToggleLike: { toggleLike(presentation.game) },
                     dismissesOnNextGame: false,
-                    isAdvancingToNextGame: pendingPlayNext?.context.presentationID == presentation.presentationID
+                    isAdvancingToNextGame: pendingPlayNext?.context == currentPlayNextContext && pendingPlayNext != nil,
+                    nextGameFeedback: playNextFeedback?.message(for: currentPlayNextContext, presentationID: presentation.presentationID)
                 )
             }
             .sheet(isPresented: $compactSearchPresented) {
@@ -1248,6 +1252,7 @@ struct DiscoverView: View {
               context.runID == presentation.id,
               pendingPlayNext?.context != context else { return }
         let operation = FeedPlayNextOperation(context: context)
+        playNextFeedback = nil
         pendingPlayNext = operation
         Task { await advanceToNextGame(operation) }
     }
@@ -1277,8 +1282,16 @@ struct DiscoverView: View {
         ) else { return }
         let nextID = FeedPlayNextPolicy.nextGameID(
             after: originID, visibleIDs: visibleGames.map(\.id))
+        guard let nextID else {
+            let reason = FeedPlayNextPolicy.unavailableReason(
+                originPresent: visibleGames.contains { $0.id == originID },
+                isLoading: isLoading || isLoadingMore,
+                hasCursor: nextCursor != nil, hasError: loadMoreError != nil)
+            playNextFeedback = FeedPlayNextFeedback(context: operation.context, reason: reason)
+            return
+        }
+        playNextFeedback = nil
         resultPresentation = nil
-        guard let nextID else { return }
 
         let destination = ForYouPageLayout.contextAfterPlayingNext(
             currentScope: operation.context.scope, nextGameID: nextID)

@@ -47,6 +47,20 @@ struct FeedPlayNextPolicyTests {
         #expect(!FeedPlayNextPolicy.isCurrent(operation, pending: nil, current: context()))
     }
 
+    @Test func noSuccessorReasonsAndFeedbackAreContextBound() {
+        #expect(FeedPlayNextPolicy.unavailableReason(originPresent: true, isLoading: true, hasCursor: true, hasError: true) == .loading)
+        #expect(FeedPlayNextPolicy.unavailableReason(originPresent: false, isLoading: false, hasCursor: true, hasError: false) == .originUnavailable)
+        #expect(FeedPlayNextPolicy.unavailableReason(originPresent: true, isLoading: false, hasCursor: true, hasError: true) == .pageFailed)
+        #expect(FeedPlayNextPolicy.unavailableReason(originPresent: true, isLoading: false, hasCursor: true, hasError: false) == .moreAvailable)
+        #expect(FeedPlayNextPolicy.unavailableReason(originPresent: true, isLoading: false, hasCursor: false, hasError: false) == .noMoreMatches)
+        let feedback = FeedPlayNextFeedback(context: context(), reason: .pageFailed)
+        #expect(feedback.message(for: context(), presentationID: presentationID) != nil)
+        #expect(feedback.message(for: context(session: 3), presentationID: presentationID) == nil)
+        #expect(feedback.message(for: context(query: "new"), presentationID: presentationID) == nil)
+        #expect(feedback.message(for: context(), presentationID: UUID()) == nil)
+        #expect(feedback.message(for: nil, presentationID: presentationID) == nil)
+    }
+
     @Test func replacementOperationCannotBeRetiredByPreviousOneEvenWithSameContext() {
         let old = FeedPlayNextOperation(context: context())
         let replacement = FeedPlayNextOperation(context: context())

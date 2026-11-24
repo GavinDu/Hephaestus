@@ -19,7 +19,40 @@ struct FeedPlayNextOperation {
     let context: FeedPlayNextContext
 }
 
+enum FeedPlayNextUnavailableReason: Equatable {
+    case originUnavailable, loading, pageFailed, moreAvailable, noMoreMatches
+
+    var message: String {
+        switch self {
+        case .originUnavailable: return "This game is no longer in the current feed."
+        case .loading: return "The feed is still loading. Try Next Game again."
+        case .pageFailed: return "Could not load more games. Try Next Game again."
+        case .moreAvailable: return "No next match yet. Try Next Game again."
+        case .noMoreMatches: return "No more matches in this feed."
+        }
+    }
+}
+
+struct FeedPlayNextFeedback {
+    let context: FeedPlayNextContext
+    let reason: FeedPlayNextUnavailableReason
+
+    func message(for current: FeedPlayNextContext?, presentationID: UUID) -> String? {
+        guard let current, context == current,
+              context.presentationID == presentationID else { return nil }
+        return reason.message
+    }
+}
+
 enum FeedPlayNextPolicy {
+    static func unavailableReason(originPresent: Bool, isLoading: Bool,
+                                  hasCursor: Bool, hasError: Bool) -> FeedPlayNextUnavailableReason {
+        if isLoading { return .loading }
+        if !originPresent { return .originUnavailable }
+        if hasError { return .pageFailed }
+        return hasCursor ? .moreAvailable : .noMoreMatches
+    }
+
     static func isCurrent(_ operation: FeedPlayNextOperation,
                           pending: FeedPlayNextOperation?,
                           current: FeedPlayNextContext?) -> Bool {
