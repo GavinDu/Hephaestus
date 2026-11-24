@@ -203,6 +203,20 @@ jobs:
       - name: Run iPad feed UI evaluator
         run: |
           set -o pipefail
+          # Keep real, privacy-scoped Comments host markers from the SAME
+          # simulator while strict XCTest taps run. A post-test log show alone
+          # may miss transient presenter events in an intermittent failure.
+          : > /tmp/ipad-comments-presenter-stream.log
+          xcrun simctl spawn "${{ steps.ipad.outputs.udid }}" log stream \
+            --level info --style compact \
+            --predicate 'subsystem == "ai.tinydream.Hephaestus" AND category == "ArcadePulseComments"' \
+            > /tmp/ipad-comments-presenter-stream.log 2>&1 &
+          comments_stream_pid=$!
+          stop_comments_stream() {
+            kill "$comments_stream_pid" 2>/dev/null || true
+            wait "$comments_stream_pid" 2>/dev/null || true
+          }
+          trap stop_comments_stream EXIT
           xcodebuild test -project Hephaestus.xcodeproj -scheme Hephaestus \
             -destination "platform=iOS Simulator,id=${{ steps.ipad.outputs.udid }}" \
             -only-testing:HephaestusUITests/PlayerSmokeTests/testDiscoverFeedUIEvaluationAndSwipe \
@@ -294,4 +308,5 @@ jobs:
             /tmp/ipad-feed-ui-review
             /tmp/test-feedback-ipad.json
             /tmp/ipad-comments-presenter.log
+            /tmp/ipad-comments-presenter-stream.log
           if-no-files-found: ignore
