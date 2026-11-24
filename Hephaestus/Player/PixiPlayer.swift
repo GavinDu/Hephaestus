@@ -457,6 +457,56 @@ enum PlayerFirstSceneWaitPolicy {
     }
 }
 
+/// Diagnostic-only fixed observations. No event here authorizes a scene,
+/// changes the watchdog, or contains a web-supplied string. Native nonce and
+/// lease are in-memory ownership keys only, never included in the summary.
+struct PlayerSceneLaunchTrace {
+    enum Stage: String, CaseIterable, Hashable {
+        case prepared, navigationStarted, receiverAttached, navigationFinished
+        case prewarmReceived, prewarmRejected, prewarmAccepted
+        case attachedReceived, bridgeRejected, bridgeAdmitted
+        case metricRejected, reducerAccepted, deliveryInvoked, timeout
+    }
+    struct Handle {
+        let nonce: String
+        let lease: UInt64
+    }
+    private var nonce: String?
+    private var lease: UInt64?
+    private var stages: Set<Stage> = []
+
+    mutating func begin(nonce: String, lease: UInt64?) {
+        self.nonce = nonce
+        self.lease = lease
+        stages = [.prepared]
+        if lease != nil { stages.insert(.receiverAttached) }
+    }
+    mutating func attach(nonce: String?, lease: UInt64) {
+        guard let nonce, self.nonce == nonce, lease != 0,
+              self.lease == nil || self.lease == lease,
+              !stages.contains(.timeout) else { return }
+        self.lease = lease
+        stages.insert(.receiverAttached)
+    }
+    mutating func record(_ stage: Stage, nonce: String?, lease: UInt64?) {
+        guard let nonce, self.nonce == nonce, self.lease == lease,
+              !stages.contains(.timeout) else { return }
+        stages.insert(stage)
+    }
+    mutating func finishTimeout(_ handle: Handle) -> String? {
+        guard nonce == handle.nonce, lease == handle.lease,
+              handle.lease != 0 else { return nil }
+        record(.timeout, nonce: handle.nonce, lease: handle.lease)
+        return Stage.allCases.filter { stages.contains($0) }
+            .map(\.rawValue).joined(separator: ",")
+    }
+    mutating func reset() {
+        nonce = nil
+        lease = nil
+        stages.removeAll()
+    }
+}
+
 /// Terminal no-scene recovery must unmount the current interactive WKWebView.
 /// SwiftUI dismantle then revokes the exact Coordinator lease, cancels its
 /// verification/metric work, stops loading and navigates to empty HTML.
@@ -1612,6 +1662,7 @@ enum PlayerWebViewPool {
     private static var attachedReceiverLease: UInt64?
     private static weak var attachedMessageReceiver: (any WKScriptMessageHandler)?
     private static var documentEpochGate = PlayerNativeDocumentEpochGate()
+    private static var sceneLaunchTrace = PlayerSceneLaunchTrace()
     private static var sessionFingerprint: String?
     private static let sessionObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
         forName: .hephaestusBackendSessionDidChange, object: nil, queue: .main
@@ -1684,6 +1735,8 @@ enum PlayerWebViewPool {
         sceneMilestoneLedger.invalidate()
         transferringLease = nil
         let nonce = documentEpochGate.prepareNavigation()
+        sceneLaunchTrace.begin(nonce: nonce, lease:
+            isAttached && attachedReceiverLease == attachmentLease ? attachmentLease : nil)
         // Only installed native code can issue a fresh current-document
         // challenge. Page code cannot derive future navigation epochs.
         // This app has no other WKUserScripts in this private pooled player.
@@ -1706,7 +1759,12 @@ enum PlayerWebViewPool {
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
         transferringLease = nil
-        _ = documentEpochGate.didStartNavigation()
+        if documentEpochGate.didStartNavigation() {
+            sceneLaunchTrace.record(.navigationStarted, nonce: documentEpochGate.currentNonce,
+                                    lease: isAttached && attachedReceiverLease == attachmentLease ? attachmentLease : nil)
+        } else {
+            sceneLaunchTrace.reset()
+        }
     }
 
     static func acceptsCurrentDocumentNonce(_ webView: WKWebView, nonce: String?) -> Bool {
@@ -1726,9 +1784,33 @@ enum PlayerWebViewPool {
         return documentEpochGate.currentNonce
     }
 
+    // Exact current native context only; the handle never crosses to JS,
+    // user-visible production text or any backend telemetry.
+    static func sceneTraceHandle(_ view: WKWebView, lease: UInt64) -> PlayerSceneLaunchTrace.Handle? {
+        guard sessionFingerprint == credentialFingerprint(),
+              let nonce = currentNativeDocumentNonce(view, lease: lease) else { return nil }
+        return .init(nonce: nonce, lease: lease)
+    }
+
+    static func recordSceneTrace(_ stage: PlayerSceneLaunchTrace.Stage,
+                                 handle: PlayerSceneLaunchTrace.Handle?) {
+        guard let handle, let view = pooledView,
+              let current = sceneTraceHandle(view, lease: handle.lease),
+              current.nonce == handle.nonce else { return }
+        sceneLaunchTrace.record(stage, nonce: handle.nonce, lease: handle.lease)
+    }
+
+    static func timeoutSceneTrace(_ handle: PlayerSceneLaunchTrace.Handle?) -> String? {
+        guard let handle, let view = pooledView,
+              let current = sceneTraceHandle(view, lease: handle.lease),
+              current.nonce == handle.nonce else { return nil }
+        return sceneLaunchTrace.finishTimeout(handle)
+    }
+
     static func revokeDocumentNonce(_ webView: WKWebView) {
         guard pooledView === webView else { return }
         documentEpochGate.invalidate()
+        sceneLaunchTrace.reset()
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
         transferringLease = nil
@@ -1852,6 +1934,8 @@ enum PlayerWebViewPool {
             expectedURL: currentURL, actualURL: webView.url
         ), let currentURL else { return }
         loadedURL = currentURL
+        sceneLaunchTrace.record(.navigationFinished, nonce: documentEpochGate.currentNonce,
+                                lease: isAttached && attachedReceiverLease == attachmentLease ? attachmentLease : nil)
     }
 
     static func markFailed(_ webView: WKWebView) {
@@ -1866,6 +1950,7 @@ enum PlayerWebViewPool {
         self.currentURL = nil
         transferringLease = nil
         documentEpochGate.invalidate()
+        sceneLaunchTrace.reset()
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
     }
@@ -1891,6 +1976,7 @@ enum PlayerWebViewPool {
         currentURL = nil
         loadedURL = nil
         documentEpochGate.invalidate()
+        sceneLaunchTrace.reset()
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
         webView.navigationDelegate = warmupDelegate
@@ -1935,6 +2021,7 @@ enum PlayerWebViewPool {
         loadedURL = nil
         isAttached = false
         documentEpochGate.invalidate()
+        sceneLaunchTrace.reset()
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
         sessionFingerprint = credentialFingerprint()
@@ -1962,6 +2049,7 @@ enum PlayerWebViewPool {
         currentURL = nil
         loadedURL = nil
         documentEpochGate.invalidate()
+        sceneLaunchTrace.reset()
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
         stale?.stopLoading()
@@ -1989,6 +2077,7 @@ enum PlayerWebViewPool {
         attachedMessageReceiver = receiver
         attachedReceiverLease = lease
         transferringLease = nil
+        sceneLaunchTrace.attach(nonce: documentEpochGate.currentNonce, lease: lease)
         return true
     }
 
@@ -2084,6 +2173,22 @@ enum PlayerWebViewPool {
             originScheme: source.protocol, originHost: source.host,
             originPort: source.port, backendURL: BackendConfig.baseURL
         )
+        // Only nonce-matched current main-frame scene claims are attributable.
+        // A legacy/unbound or stale message cannot contaminate this trace.
+        let diagnosticClaim = trustedProvenance &&
+            documentEpochGate.acceptsV2(body["documentNonce"] as? String) &&
+            body["type"] as? String == "player_metric" &&
+            body["metric"] as? String == "first_scene_render_submit"
+        if diagnosticClaim {
+            sceneLaunchTrace.record(.prewarmReceived, nonce: documentEpochGate.currentNonce, lease: nil)
+        }
+        var diagnosticAccepted = false
+        defer {
+            if diagnosticClaim {
+                sceneLaunchTrace.record(diagnosticAccepted ? .prewarmAccepted : .prewarmRejected,
+                                        nonce: documentEpochGate.currentNonce, lease: nil)
+            }
+        }
         guard trustedProvenance,
               let nonce = documentEpochGate.currentNonce,
               let fingerprint = sessionFingerprint,
@@ -2095,7 +2200,7 @@ enum PlayerWebViewPool {
         // WebKit frame/origin/URL and native document nonce were checked
         // before staging. Neither a JS run result nor a navigation finish
         // may become a scene milestone. A failed validation commits nothing.
-        _ = PlayerPrewarmSceneLedgerCapturePolicy.capture(
+        diagnosticAccepted = PlayerPrewarmSceneLedgerCapturePolicy.capture(
             body, identity: identity, currentDocumentNonce: nonce,
             isTrustedMainFrame: message.frameInfo.isMainFrame,
             isSameOrigin: trustedProvenance,
@@ -2269,6 +2374,18 @@ struct PixiPlayerSheet: View {
     // Terminal no-scene recovery unmounts this attempt's real PlayerWebView.
     // A subsequent manual Retry increments attempt and obtains a NEW lease.
     @State private var terminalNoSceneAttempt: Int?
+    @State private var sceneTraceOwner: (epoch: Int, handle: PlayerSceneLaunchTrace.Handle)?
+    @State private var terminalSceneTrace: (epoch: Int, value: String)?
+
+    private var sceneTraceAccessibilityValue: String {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-scene-trace"),
+           let trace = terminalSceneTrace, trace.epoch == attempt {
+            return trace.value
+        }
+        #endif
+        return ""
+    }
     @State private var didTrackGameplayStart = false
     @State private var verifiedResult: VerifiedRunResult?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
@@ -2448,6 +2565,13 @@ struct PixiPlayerSheet: View {
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             progress = value
+                        },
+                        onSceneTraceHandle: { handle in
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                                                         currentEpoch: attempt,
+                                                         sessionRevoked: sessionRevoked) else { return }
+                            sceneTraceOwner = handle.map { (epoch: callbackEpoch, handle: $0) }
                         },
                         onLoadFinish: {
                             guard terminalNoSceneAttempt != callbackEpoch,
@@ -2633,6 +2757,9 @@ struct PixiPlayerSheet: View {
                                 .font(.headline)
                             Text(loadError)
                                 .accessibilityIdentifier("player.error.message")
+                                #if DEBUG
+                                .accessibilityValue(sceneTraceAccessibilityValue)
+                                #endif
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
@@ -2912,6 +3039,12 @@ struct PixiPlayerSheet: View {
                 // SwiftUI calls PlayerWebView.dismantleUIView; the Coordinator
                 // stops its tasks and the pool revokes only the owned lease,
                 // then stops/parks the old document before fresh manual Retry.
+                let traceHandle = sceneTraceOwner.flatMap { owner in
+                    owner.epoch == watchdogAttempt ? owner.handle : nil
+                }
+                let trace = PlayerWebViewPool.timeoutSceneTrace(traceHandle) ?? "unattributed_timeout"
+                terminalSceneTrace = (epoch: watchdogAttempt, value: trace)
+                DevLog.info(.player, "first scene diagnostic: " + trace)
                 terminalNoSceneAttempt = watchdogAttempt
                 // No compositor or rendered-scene claims from didFinish.
                 // This is a stalled scene, NOT evidence of failed transport.
@@ -3080,6 +3213,7 @@ private struct PlayerWebView: UIViewRepresentable {
     let url: URL
     let gameID: String
     let onProgress: (Double) -> Void
+    let onSceneTraceHandle: (PlayerSceneLaunchTrace.Handle?) -> Void
     let onLoadFinish: () -> Void
     let onLoadFail: (Error) -> Void
     let onTerminate: () -> Void
@@ -3098,6 +3232,7 @@ private struct PlayerWebView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(gameID: gameID, expectedURL: url, onProgress: onProgress,
+                    onSceneTraceHandle: onSceneTraceHandle,
                     onLoadFinish: onLoadFinish, onLoadFail: onLoadFail,
                     onTerminate: onTerminate,
                     onFirstSceneRenderSubmit: onFirstSceneRenderSubmit,
@@ -3188,6 +3323,7 @@ private struct PlayerWebView: UIViewRepresentable {
         let expectedGameID: String
         let expectedURL: URL
         let onProgress: (Double) -> Void
+        let onSceneTraceHandle: (PlayerSceneLaunchTrace.Handle?) -> Void
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
@@ -3239,6 +3375,7 @@ private struct PlayerWebView: UIViewRepresentable {
 
         init(gameID: String, expectedURL: URL,
              onProgress: @escaping (Double) -> Void,
+             onSceneTraceHandle: @escaping (PlayerSceneLaunchTrace.Handle?) -> Void,
              onLoadFinish: @escaping () -> Void,
              onLoadFail: @escaping (Error) -> Void,
              onTerminate: @escaping () -> Void,
@@ -3248,6 +3385,7 @@ private struct PlayerWebView: UIViewRepresentable {
             self.expectedGameID = gameID
             self.expectedURL = expectedURL
             self.onProgress = onProgress
+            self.onSceneTraceHandle = onSceneTraceHandle
             self.onLoadFinish = onLoadFinish
             self.onLoadFail = onLoadFail
             self.onTerminate = onTerminate
@@ -3258,6 +3396,25 @@ private struct PlayerWebView: UIViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
+            let diagnosticHandle: PlayerSceneLaunchTrace.Handle? = {
+                guard acceptsCurrentHostCallbacks, message.name == PlayerWebView.messageName,
+                      message.frameInfo.isMainFrame, sameOrigin(message.frameInfo.securityOrigin),
+                      let view = attachedWebView, message.webView === view,
+                      let body = message.body as? [String: Any],
+                      body["type"] as? String == "player_metric",
+                      body["metric"] as? String == "first_scene_render_submit",
+                      let handle = PlayerWebViewPool.sceneTraceHandle(view, lease: attachmentLease),
+                      body["documentNonce"] as? String == handle.nonce
+                else { return nil }
+                return handle
+            }()
+            PlayerWebViewPool.recordSceneTrace(.attachedReceived, handle: diagnosticHandle)
+            var diagnosticBridgeAdmitted = false
+            defer {
+                if !diagnosticBridgeAdmitted {
+                    PlayerWebViewPool.recordSceneTrace(.bridgeRejected, handle: diagnosticHandle)
+                }
+            }
             // Reject retired attachments, wrong frame/origin, stale navigation
             // epochs and malformed schemas before binding the first session.
             guard acceptsCurrentHostCallbacks,
@@ -3293,8 +3450,10 @@ private struct PlayerWebView: UIViewRepresentable {
             guard (validMetric || validRun),
                   runtimeSessionGate.bind(runtimeSessionID) else { return }
             nativeBridgeVersionGate.didAccept(schema)
+            diagnosticBridgeAdmitted = true
+            PlayerWebViewPool.recordSceneTrace(.bridgeAdmitted, handle: diagnosticHandle)
             if type == "player_metric" {
-                handleMetric(body, runtimeSessionID: runtimeSessionID)
+                handleMetric(body, runtimeSessionID: runtimeSessionID, diagnosticHandle: diagnosticHandle)
                 return
             }
             guard let runID = body["runId"] as? String,
@@ -3405,6 +3564,11 @@ private struct PlayerWebView: UIViewRepresentable {
                   milestone.validatedRuntimeSessionID == runtimeSessionID,
                   milestone.stage == .rendererSubmitted ||
                       milestone.stage == .firstInputAdmitted else { return }
+            let traceHandle = attachedWebView.flatMap {
+                PlayerWebViewPool.sceneTraceHandle($0, lease: attachmentLease)
+            }
+            // This is observation of the existing reducer, not a new admission.
+            PlayerWebViewPool.recordSceneTrace(.reducerAccepted, handle: traceHandle)
             PlayerTelemetry.report(
                 gameID: expectedGameID, kind: "perf",
                 name: "FirstSceneRenderSubmitted",
@@ -3413,11 +3577,19 @@ private struct PlayerWebView: UIViewRepresentable {
             Task { @MainActor [weak self] in
                 guard let self, self.acceptsCurrentHostCallbacks,
                       self.runtimeSessionID == runtimeSessionID else { return }
+                PlayerWebViewPool.recordSceneTrace(.deliveryInvoked, handle: traceHandle)
                 self.onFirstSceneRenderSubmit(milliseconds)
             }
         }
 
-        private func handleMetric(_ body: [String: Any], runtimeSessionID: String) {
+        private func handleMetric(_ body: [String: Any], runtimeSessionID: String,
+                                  diagnosticHandle: PlayerSceneLaunchTrace.Handle?) {
+            var diagnosticMetricAccepted = false
+            defer {
+                if !diagnosticMetricAccepted {
+                    PlayerWebViewPool.recordSceneTrace(.metricRejected, handle: diagnosticHandle)
+                }
+            }
             // Never consume a per-kind sequence or a first-scene/input reducer
             // if the current attachment lacks a native nonce/session proof.
             guard PlayerCurrentHostMilestoneProjection.permitsMetricAdmission(
@@ -3434,6 +3606,7 @@ private struct PlayerWebView: UIViewRepresentable {
             case .firstSceneRenderSubmit(let ms):
                 guard firstSceneRenderSubmissionGate.accept(milliseconds: ms),
                       launchLifecycle.sceneSubmitted() else { return }
+                diagnosticMetricAccepted = true
                 // Both attached and prewarm-transfer paths report the same
                 // bounded renderer-submission milestone, never GPU-present.
                 reportAcceptedFirstSceneSubmission(
@@ -3558,6 +3731,11 @@ private struct PlayerWebView: UIViewRepresentable {
                   launchLifecycle.navigationFinished() else { return }
             disarmPrewarmRecovery()
             onProgress(1)
+            let handle = attachedWebView.flatMap {
+                PlayerWebViewPool.sceneTraceHandle($0, lease: attachmentLease)
+            }
+            PlayerWebViewPool.recordSceneTrace(.navigationFinished, handle: handle)
+            onSceneTraceHandle(handle)
             onLoadFinish()
         }
 

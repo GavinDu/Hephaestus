@@ -30,6 +30,22 @@ private func safePlayerSmokeFailureCode(_ message: String) -> String {
     }
 }
 
+// Only fixed finite stage names from the native debug witness. Never
+// interpolate an arbitrary AX value into an error or CI output.
+private func safePlayerSmokeSceneTrace(_ value: String?) -> String {
+    guard let value, value.utf8.count <= 300 else { return "unattributed_timeout" }
+    if value == "unattributed_timeout" { return value }
+    let allowed = Set(["prepared", "navigationStarted", "receiverAttached", "navigationFinished",
+                       "prewarmReceived", "prewarmRejected", "prewarmAccepted", "attachedReceived",
+                       "bridgeRejected", "bridgeAdmitted", "metricRejected", "reducerAccepted",
+                       "deliveryInvoked", "timeout"])
+    let stages = value.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+    guard stages.last == "timeout", stages.first == "prepared",
+          Set(stages).count == stages.count,
+          stages.allSatisfy({ allowed.contains($0) }) else { return "unattributed_timeout" }
+    return stages.joined(separator: ",")
+}
+
 final class PlayerSmokeTests: XCTestCase {
 
     private var app: XCUIApplication?
@@ -69,12 +85,20 @@ final class PlayerSmokeTests: XCTestCase {
             "https://private.example.test/?token=bearer&creator=secret"
         ), "unclassified")
         XCTAssertEqual(safePlayerSmokeFailureCode(""), "unclassified")
+        XCTAssertEqual(safePlayerSmokeSceneTrace("prepared,navigationFinished,timeout"),
+                       "prepared,navigationFinished,timeout")
+        XCTAssertEqual(safePlayerSmokeSceneTrace("prepared,private-secret,timeout"), "unattributed_timeout")
+        XCTAssertEqual(safePlayerSmokeSceneTrace("prepared,prepared,timeout"), "unattributed_timeout")
+        XCTAssertEqual(safePlayerSmokeSceneTrace("prepared,navigationFinished"), "unattributed_timeout")
+        XCTAssertEqual(safePlayerSmokeSceneTrace(String(repeating: "x", count: 301)), "unattributed_timeout")
+        XCTAssertEqual(safePlayerSmokeSceneTrace(nil), "unattributed_timeout")
     }
 
     @MainActor
     func testDiscoverLaunchesPlayer() throws {
         let app = XCUIApplication()
         self.app = app
+        app.launchArguments.append("--ui-test-scene-trace")
         app.launch()
         print("SMOKE: app launched")
 
@@ -182,7 +206,9 @@ final class PlayerSmokeTests: XCTestCase {
         let errorText = app.staticTexts["player.error.message"].firstMatch
         let safeReason = errorText.exists
             ? safePlayerSmokeFailureCode(errorText.label) : "no_error_text"
-        let evidence = "reason=\(safeReason) loading=\(loading.exists) retry=\(failed.exists) web=\(web.exists) done=\(done.exists)"
+        let sceneTrace = safeReason == "no_scene_timeout"
+            ? safePlayerSmokeSceneTrace(errorText.value as? String) : "not_applicable"
+        let evidence = "reason=\(safeReason) loading=\(loading.exists) retry=\(failed.exists) web=\(web.exists) done=\(done.exists) scene_trace=\(sceneTrace)"
         XCTAssertFalse(failed.exists,
                        "Player entered a recoverable failure instead of loading its game. \(evidence)")
         XCTAssertFalse(loading.exists,
