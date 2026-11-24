@@ -33,17 +33,28 @@ private func safePlayerSmokeFailureCode(_ message: String) -> String {
 // Only fixed finite stage names from the native debug witness. Never
 // interpolate an arbitrary AX value into an error or CI output.
 private func safePlayerSmokeSceneTrace(_ value: String?) -> String {
-    guard let value, value.utf8.count <= 300 else { return "unattributed_timeout" }
+    guard let value, value.utf8.count <= 512 else { return "unattributed_timeout" }
     if value == "unattributed_timeout" { return value }
+    let parts = value.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+    guard parts.count == 1 || parts.count == 2 else { return "unattributed_timeout" }
     let allowed = Set(["prepared", "navigationStarted", "receiverAttached", "navigationFinished",
                        "prewarmReceived", "prewarmRejected", "prewarmAccepted", "attachedReceived",
                        "bridgeRejected", "bridgeAdmitted", "metricRejected", "reducerAccepted",
                        "deliveryInvoked", "sheetAccepted", "sheetRejected", "timeout"])
-    let stages = value.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+    let stages = parts[0].split(separator: ",", omittingEmptySubsequences: false).map(String.init)
     guard stages.last == "timeout", stages.first == "prepared",
           Set(stages).count == stages.count,
           stages.allSatisfy({ allowed.contains($0) }) else { return "unattributed_timeout" }
-    return stages.joined(separator: ",")
+    guard parts.count == 2 else { return stages.joined(separator: ",") }
+    let prefix = "unbound_window="
+    guard parts[1].hasPrefix(prefix) else { return "unattributed_timeout" }
+    let labels = parts[1].dropFirst(prefix.count)
+        .split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+    let allowedUnbound = Set(["legacySchema", "invalidV2Nonce", "mismatchedV2Nonce", "unknownSchema"])
+    guard labels == ["none"] || (!labels.isEmpty &&
+          Set(labels).count == labels.count && labels.allSatisfy({ allowedUnbound.contains($0) }))
+    else { return "unattributed_timeout" }
+    return stages.joined(separator: ",") + "|" + prefix + labels.joined(separator: ",")
 }
 
 final class PlayerSmokeTests: XCTestCase {

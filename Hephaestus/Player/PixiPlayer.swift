@@ -518,6 +518,45 @@ enum PlayerTerminalNoSceneMountPolicy {
     }
 }
 
+/// Observations of unbound claims in the current native observation window.
+/// These claims are NOT associated with the current document, even when
+/// the pool, URL, credential, game, main frame and origin match.
+struct PlayerUnboundSceneObservationWindow {
+    enum Kind: String, CaseIterable, Hashable {
+        case legacySchema, invalidV2Nonce, mismatchedV2Nonce, unknownSchema
+    }
+    private var observed: Set<Kind> = []
+    private var frozen = false
+
+    mutating func observe(schema: Int?, nonce: String?, currentNonce: String?) {
+        guard !frozen, PlayerNativeDocumentEpochGate.isWellFormed(currentNonce) else { return }
+        let kind: Kind
+        switch schema {
+        case 1: kind = .legacySchema
+        case 2:
+            guard PlayerNativeDocumentEpochGate.isWellFormed(nonce) else {
+                observed.insert(.invalidV2Nonce)
+                return
+            }
+            guard nonce != currentNonce else { return }
+            kind = .mismatchedV2Nonce
+        default: kind = .unknownSchema
+        }
+        observed.insert(kind)
+    }
+
+    mutating func freeze() -> String {
+        frozen = true
+        let labels = Kind.allCases.filter { observed.contains($0) }.map(\.rawValue)
+        return labels.isEmpty ? "none" : labels.joined(separator: ",")
+    }
+
+    mutating func reset() {
+        observed.removeAll(keepingCapacity: true)
+        frozen = false
+    }
+}
+
 /// Source-only terminal revocation decision. The native handle must still
 /// match the current view's credential-bound nonce and nonzero lease.
 enum PlayerTerminalSceneRevocationPolicy {
@@ -1719,6 +1758,7 @@ enum PlayerWebViewPool {
     private static var documentEpochGate = PlayerNativeDocumentEpochGate()
     private static var mainDocumentResponseObservations = PlayerMainDocumentResponseObservations()
     private static var sceneLaunchTrace = PlayerSceneLaunchTrace()
+    private static var unboundSceneWindow = PlayerUnboundSceneObservationWindow()
     private static var sessionFingerprint: String?
     private static let sessionObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
         forName: .hephaestusBackendSessionDidChange, object: nil, queue: .main
@@ -1792,6 +1832,7 @@ enum PlayerWebViewPool {
         transferringLease = nil
         let nonce = documentEpochGate.prepareNavigation()
         mainDocumentResponseObservations.reset()
+        unboundSceneWindow.reset()
         sceneLaunchTrace.begin(nonce: nonce, lease:
             isAttached && attachedReceiverLease == attachmentLease ? attachmentLease : nil)
         // Only installed native code can issue a fresh current-document
@@ -1821,6 +1862,7 @@ enum PlayerWebViewPool {
                                     lease: isAttached && attachedReceiverLease == attachmentLease ? attachmentLease : nil)
         } else {
             sceneLaunchTrace.reset()
+            unboundSceneWindow.reset()
         }
     }
 
@@ -1861,7 +1903,8 @@ enum PlayerWebViewPool {
         guard let handle, let view = pooledView,
               let current = sceneTraceHandle(view, lease: handle.lease),
               current.nonce == handle.nonce else { return nil }
-        return sceneLaunchTrace.finishTimeout(handle)
+        guard let trace = sceneLaunchTrace.finishTimeout(handle) else { return nil }
+        return trace + "|unbound_window=" + unboundSceneWindow.freeze()
     }
 
     /// Diagnostic only: the current native navigation context is not a
@@ -1916,6 +1959,7 @@ enum PlayerWebViewPool {
         guard pooledView === webView else { return }
         documentEpochGate.invalidate()
         sceneLaunchTrace.reset()
+        unboundSceneWindow.reset()
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
         transferringLease = nil
@@ -2057,6 +2101,7 @@ enum PlayerWebViewPool {
         transferringLease = nil
         documentEpochGate.invalidate()
         sceneLaunchTrace.reset()
+        unboundSceneWindow.reset()
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
     }
@@ -2084,6 +2129,7 @@ enum PlayerWebViewPool {
         loadedURL = nil
         documentEpochGate.invalidate()
         sceneLaunchTrace.reset()
+        unboundSceneWindow.reset()
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
         webView.navigationDelegate = warmupDelegate
@@ -2130,6 +2176,7 @@ enum PlayerWebViewPool {
         isAttached = false
         documentEpochGate.invalidate()
         sceneLaunchTrace.reset()
+        unboundSceneWindow.reset()
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
         sessionFingerprint = credentialFingerprint()
@@ -2159,6 +2206,7 @@ enum PlayerWebViewPool {
         loadedURL = nil
         documentEpochGate.invalidate()
         sceneLaunchTrace.reset()
+        unboundSceneWindow.reset()
         prewarmSceneGate.reset()
         sceneMilestoneLedger.invalidate()
         stale?.stopLoading()
@@ -2234,6 +2282,33 @@ enum PlayerWebViewPool {
     /// Reject all callbacks from retired views/credential epochs. Untrusted
     /// attached messages still run through the original Coordinator's full
     /// native main-frame/origin/nonce/session/game/typed-metric admission.
+    /// Observe only the shape of scene claims from the trusted origin and
+    /// current pooled view. A legacy/wrong nonce may belong to an earlier
+    /// same-origin document: never add it to sceneLaunchTrace or authorize
+    /// readiness, session binding, score, or native delivery.
+    private static func observeUnboundSceneClaim(_ message: WKScriptMessage, view: WKWebView) {
+        guard message.name == prewarmMetricName,
+              message.webView === view, pooledView === view,
+              documentEpochGate.navigationStarted,
+              let url = currentURL, view.url == url,
+              let expectedGameID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                  .queryItems?.first(where: { $0.name == "game" })?.value,
+              message.frameInfo.isMainFrame,
+              let body = message.body as? [String: Any],
+              body["gameId"] as? String == expectedGameID,
+              body["type"] as? String == "player_metric",
+              body["metric"] as? String == "first_scene_render_submit" else { return }
+        let source = message.frameInfo.securityOrigin
+        guard PlayerWebKitOriginPolicy.matches(
+            backendURL: BackendConfig.baseURL, originScheme: source.protocol,
+            originHost: source.host, originPort: source.port
+        ) else { return }
+        unboundSceneWindow.observe(
+            schema: PlayerNativeMetricPayload.strictInt(body["schema"]),
+            nonce: body["documentNonce"] as? String, currentNonce: documentEpochGate.currentNonce
+        )
+    }
+
     private static func routeWebKitMessage(
         _ controller: WKUserContentController, message: WKScriptMessage
     ) {
@@ -2249,10 +2324,12 @@ enum PlayerWebViewPool {
             credentialScopeCurrent: scopeIsCurrent
         ) {
         case .speculative:
+            observeUnboundSceneClaim(message, view: view)
             collectPrewarmMetric(message)
         case .attached:
             guard let lease = attachedReceiverLease,
                   ownsActiveAttachment(view, lease: lease) else { return }
+            observeUnboundSceneClaim(message, view: view)
             attachedMessageReceiver?.userContentController(
                 controller, didReceive: message
             )
