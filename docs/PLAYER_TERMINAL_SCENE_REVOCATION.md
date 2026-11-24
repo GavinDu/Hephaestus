@@ -1,0 +1,5 @@
+# Terminal no-scene synchronous revocation candidate (#770)
+
+Based on #781 exact head 7de89aa, pending its native checks. At the existing terminal watchdog, freeze fixed #805 trace, use the exact native nonce/lease and registered weak Coordinator stop, consume stop once, revoke reducer and cancel tasks, recycle exact view then discard its pooled instance before showing manual recovery. A stale/missing native handle must never stop a newer lease; existing SwiftUI dismantle remains fallback. No synthetic readiness, change to 12s timer, network retry or schema. Pure policy tests 160 schedules and source guards. No proof of actual process destruction, audio/GPU release, physical thermal behavior, or task network cancellation beyond issuing cancellation. Missing-handle synchronous revocation and genuine native evidence remain open; no closure yet.
+
+This is a detached review candidate only; do not supersede running exact-head #781 CI. After branch availability or explicit integration, revalidate exact main/head and every required check, with actual iPhone/iPad smoke. Rollback only this delta.

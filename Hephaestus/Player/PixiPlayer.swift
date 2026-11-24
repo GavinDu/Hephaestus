@@ -518,6 +518,20 @@ enum PlayerTerminalNoSceneMountPolicy {
     }
 }
 
+/// Source-only terminal revocation decision. The native handle must still
+/// match the current view's credential-bound nonce and nonzero lease.
+enum PlayerTerminalSceneRevocationPolicy {
+    static func mayRetire(
+        expected: PlayerSceneLaunchTrace.Handle?, current: PlayerSceneLaunchTrace.Handle?,
+        ownsCurrentAttachment: Bool, hasCurrentStop: Bool
+    ) -> Bool {
+        guard ownsCurrentAttachment, hasCurrentStop,
+              let expected, let current, expected.lease != 0,
+              PlayerNativeDocumentEpochGate.isWellFormed(expected.nonce) else { return false }
+        return expected.lease == current.lease && expected.nonce == current.nonce
+    }
+}
+
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
@@ -1700,6 +1714,7 @@ enum PlayerWebViewPool {
     // Transfer holds one exact native lease until the Coordinator mounts.
     private static var transferringLease: UInt64?
     private static var attachedReceiverLease: UInt64?
+    private static var attachedTerminalStop: (() -> Void)?
     private static weak var attachedMessageReceiver: (any WKScriptMessageHandler)?
     private static var documentEpochGate = PlayerNativeDocumentEpochGate()
     private static var mainDocumentResponseObservations = PlayerMainDocumentResponseObservations()
@@ -1869,6 +1884,34 @@ enum PlayerWebViewPool {
         }
     }
 
+    /// MainActor, no suspension: stop the exact current Coordinator and
+    /// retire the old instance before the terminal card can be presented.
+    /// Missing/stale handles never revoke a successor; ordinary dismantle
+    /// remains the fail-safe for an unattributed timeout.
+    @discardableResult
+    static func retireTerminalSceneAttachment(_ handle: PlayerSceneLaunchTrace.Handle?) -> Bool {
+        guard let handle, let view = pooledView,
+              PlayerTerminalSceneRevocationPolicy.mayRetire(
+                expected: handle, current: sceneTraceHandle(view, lease: handle.lease),
+                ownsCurrentAttachment: ownsActiveAttachment(view, lease: handle.lease),
+                hasCurrentStop: attachedReceiverLease == handle.lease && attachedTerminalStop != nil
+              ), let stop = attachedTerminalStop else { return false }
+
+        // Consume the weak stop callback before calling it; stopObserving
+        // detaches the reducer, cancels tasks and clears Coordinator ownership.
+        attachedTerminalStop = nil
+        stop()
+        // Recycle invalidates the document nonce/lease and parks the page.
+        recycle(view, lease: handle.lease)
+        // Never reuse the stopped instance on Retry: delayed WebKit callbacks
+        // from its empty-document navigation cannot reach the successor.
+        if pooledView === view && !isAttached {
+            pooledView = nil
+            view.navigationDelegate = nil
+        }
+        return true
+    }
+
     static func revokeDocumentNonce(_ webView: WKWebView) {
         guard pooledView === webView else { return }
         documentEpochGate.invalidate()
@@ -1956,6 +1999,7 @@ enum PlayerWebViewPool {
         attachmentLease &+= 1
         attachedMessageReceiver = nil
         attachedReceiverLease = nil
+        attachedTerminalStop = nil
         // The pool owns callbacks from a still-loading or already-warm page
         // until the new Coordinator acknowledges this exact lease.
         transferringLease = shouldLoad ? nil : attachmentLease
@@ -2035,6 +2079,7 @@ enum PlayerWebViewPool {
         transferringLease = nil
         attachedMessageReceiver = nil
         attachedReceiverLease = nil
+        attachedTerminalStop = nil
         currentURL = nil
         loadedURL = nil
         documentEpochGate.invalidate()
@@ -2079,6 +2124,7 @@ enum PlayerWebViewPool {
         transferringLease = nil
         attachedMessageReceiver = nil
         attachedReceiverLease = nil
+        attachedTerminalStop = nil
         currentURL = nil
         loadedURL = nil
         isAttached = false
@@ -2108,6 +2154,7 @@ enum PlayerWebViewPool {
         transferringLease = nil
         attachedMessageReceiver = nil
         attachedReceiverLease = nil
+        attachedTerminalStop = nil
         currentURL = nil
         loadedURL = nil
         documentEpochGate.invalidate()
@@ -2130,7 +2177,7 @@ enum PlayerWebViewPool {
     @discardableResult
     static func attachMessageReceiver(
         _ receiver: WKScriptMessageHandler, webView: WKWebView,
-        url: URL, lease: UInt64
+        url: URL, lease: UInt64, terminalStop: @escaping () -> Void
     ) -> Bool {
         ensureCurrentCredentialScope()
         guard lease != 0,
@@ -2138,6 +2185,7 @@ enum PlayerWebViewPool {
         else { return false }
         attachedMessageReceiver = receiver
         attachedReceiverLease = lease
+        attachedTerminalStop = terminalStop
         transferringLease = nil
         sceneLaunchTrace.attach(nonce: documentEpochGate.currentNonce, lease: lease)
         return true
@@ -3111,15 +3159,16 @@ struct PixiPlayerSheet: View {
                         isForeground: scenePhase == .active
                       ) else { return }
                 // Retire only this terminal attempt's mounted WebView.
-                // SwiftUI calls PlayerWebView.dismantleUIView; the Coordinator
-                // stops its tasks and the pool revokes only the owned lease,
-                // then stops/parks the old document before fresh manual Retry.
+                // Freeze the fixed diagnostic, then stop the exact native
+                // owner before the terminal marker presents recovery. SwiftUI
+                // dismantle remains an idempotent fallback for stale/missing handles.
                 let traceHandle = sceneTraceOwner.flatMap { owner in
                     owner.epoch == watchdogAttempt ? owner.handle : nil
                 }
                 let trace = PlayerWebViewPool.timeoutSceneTrace(traceHandle) ?? "unattributed_timeout"
                 terminalSceneTrace = (epoch: watchdogAttempt, value: trace)
                 DevLog.info(.player, "first scene diagnostic: " + trace)
+                PlayerWebViewPool.retireTerminalSceneAttachment(traceHandle)
                 terminalNoSceneAttempt = watchdogAttempt
                 // No compositor or rendered-scene claims from didFinish.
                 // This is a stalled scene, NOT evidence of failed transport.
@@ -3323,7 +3372,10 @@ private struct PlayerWebView: UIViewRepresentable {
         // An old Coordinator can never displace this lease's receiver.
         guard PlayerWebViewPool.attachMessageReceiver(
             context.coordinator.messageProxy, webView: webView,
-            url: url, lease: handoff.lease
+            url: url, lease: handoff.lease,
+            terminalStop: { [weak coordinator = context.coordinator] in
+                coordinator?.stopObserving()
+            }
         ) else {
             // A credential rotation may have retired this exact WKWebView,
             // but a newer sheet may also have RETAKEN the same pooled view
