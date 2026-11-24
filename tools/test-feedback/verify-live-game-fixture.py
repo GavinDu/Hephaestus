@@ -18,6 +18,7 @@ from collections import Counter
 from urllib import error, parse, request
 
 MAX_JSON_BYTES = 2_000_000
+MAX_JSON_NESTING = 64
 SAFE_GAME_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 # Fixed allowlist ONLY. Deployed package shape can be stale, but logging
@@ -69,6 +70,34 @@ def finite_json_float(value):
     return result
 
 
+def enforce_json_nesting(raw):
+    # Explicit bound before decoding; Python versions have different
+    # recursion thresholds. Ignore quoted brackets and escaped quotes.
+    value = raw.decode("utf-8")
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in value:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > MAX_JSON_NESTING:
+                raise ValueError("JSON nesting exceeds bound")
+        elif char in "]}":
+            depth -= 1
+            if depth < 0:
+                raise ValueError("unbalanced JSON nesting")
+    return value
+
+
 def read_public_json(opener, url, timeout):
     try:
         req = request.Request(url, headers={"Accept": "application/json"})
@@ -88,7 +117,7 @@ def read_public_json(opener, url, timeout):
     if len(raw) > MAX_JSON_BYTES:
         raise FixtureError("public fixture JSON exceeds 2 MB bound")
     try:
-        value = json.loads(raw, object_pairs_hook=unique_json_object,
+        value = json.loads(enforce_json_nesting(raw), object_pairs_hook=unique_json_object,
                            parse_constant=reject_non_json_constant,
                            parse_float=finite_json_float)
     except (ValueError, UnicodeDecodeError, RecursionError) as exc:

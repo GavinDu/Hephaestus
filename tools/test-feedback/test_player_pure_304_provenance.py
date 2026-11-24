@@ -12,7 +12,15 @@ class PurePlayerRevalidationContractTests(unittest.TestCase):
         )[0]
         # No misleading claim that unconnected helper already enforces 304.
         self.assertIn("static func shouldCacheResponse(statusCode: Int)", shipping)
-        self.assertIn("statusCode < 400", shipping)
+        # #691 intentionally tightens final-document admission, but retains
+        # 304 as provisional compatibility until #726 wires actual provenance.
+        self.assertIn("PlayerMainDocumentHTTPPolicy.permitsMainDocument(statusCode: statusCode)", shipping)
+        gate = src.split("enum PlayerMainDocumentHTTPPolicy {", 1)[1].split(
+            "/// Compatibility façade", 1
+        )[0]
+        self.assertIn("(200...299).contains(statusCode) || statusCode == 304", gate)
+        self.assertNotIn("statusCode < 400", gate)
+        self.assertNotIn("PlayerAuthorizedDocumentRevalidationPolicy", gate)
         self.assertNotIn("PlayerAuthorizedDocumentRevalidationPolicy", shipping)
 
         pure = src.split("enum PlayerAuthorizedDocumentRevalidationPolicy {", 1)[1].split(

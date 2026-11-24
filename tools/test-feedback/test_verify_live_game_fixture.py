@@ -275,6 +275,20 @@ class LiveGameFixtureTests(unittest.TestCase):
                 with self.assertRaisesRegex(fixture.FixtureError, "feed_failure=invalid_json"):
                     fixture.check_once(FakeOpener({self.FEED: (raw, "application/json")}), self.FEED, 1)
 
+    def test_explicit_depth_limit_is_decoder_independent_and_string_aware(self):
+        depth = fixture.MAX_JSON_NESTING
+        safe_string = '[{' * 100 + '"\\' + ']}' * 100
+        safe = {"games": [], "text": safe_string}
+        self.assertEqual(json.loads(fixture.enforce_json_nesting(json.dumps(safe).encode())), safe)
+        allowed = b'[' * depth + b'0' + b']' * depth
+        self.assertEqual(fixture.enforce_json_nesting(allowed), allowed.decode())
+        for raw in (b'[' * (depth + 1) + b'0' + b']' * (depth + 1),
+                    b'{"games":[],"extra":' + b'[' * depth + b'0' + b']' * depth + b'}',
+                    '{"games":[]}'.encode("utf-16")):
+            with self.subTest(raw_length=len(raw)):
+                with self.assertRaisesRegex(fixture.FixtureError, "feed_failure=invalid_json"):
+                    fixture.check_once(FakeOpener({self.FEED: (raw, "application/json")}), self.FEED, 1)
+
     def test_transport_errors_are_redacted_even_if_protocol_parser_has_private_text(self):
         for error in (http.client.BadStatusLine("private-wire-value"),
                       http.client.IncompleteRead(b"private-wire-value", 9),
