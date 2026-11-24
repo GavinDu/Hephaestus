@@ -80,6 +80,43 @@ enum ArcadePulseTheme {
     }
 }
 
+/// Approved Store feed chrome. UI decoration only, never gameplay artwork.
+enum ArcadePulseImmersiveFeedStyle {
+    static let violetStartRGB = (red: 0.29, green: 0.20, blue: 0.74)
+    static let violetEndRGB = (red: 0.45, green: 0.19, blue: 0.66)
+    static let navy = Color(red: 0.045, green: 0.065, blue: 0.13)
+    static let cyan = Color(red: 0.32, green: 0.88, blue: 0.98)
+    private static func color(_ rgb: (red: Double, green: Double, blue: Double)) -> Color {
+        Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
+    }
+
+    static func playGradient(highContrast: Bool) -> LinearGradient {
+        LinearGradient(
+            colors: [color(violetStartRGB), color(highContrast ? violetStartRGB : violetEndRGB)],
+            startPoint: .leading, endPoint: .trailing
+        )
+    }
+
+    /// Reject missing or invalid metrics. Full localized counts are exposed
+    /// in the action's accessible value; no view/comment estimates.
+    static func metric(_ count: Int?) -> String? {
+        guard let count, count >= 0 else { return nil }
+        return count.formatted()
+    }
+
+    static func caption(_ title: String, count: Int?) -> String {
+        guard let count = metric(count) else { return title }
+        return count
+    }
+
+    static func whiteContrast(red: Double, green: Double, blue: Double) -> Double {
+        func linear(_ v: Double) -> Double {
+            v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        return 1.05 / (0.05 + 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue))
+    }
+}
+
 // The legacy platform-neutral tokens are retained for List, form, library
 // and system-sheet presentation. Arcade Pulse tokens above intentionally
 // apply only where a dark, media-dominant context is actually being used.
@@ -138,6 +175,7 @@ struct ArcadePulseRecoveryButtonStyle: ButtonStyle {
 /// swipe-to-browse feed that would steal the pager's vertical contact.
 struct ArcadePulsePlayCTA: View {
     @Environment(\.colorSchemeContrast) private var contrast
+    var immersiveFeed = false
     let action: () -> Void
 
     var body: some View {
@@ -150,15 +188,17 @@ struct ArcadePulsePlayCTA: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .padding(.vertical, 8)
-                .foregroundStyle(.black)
+                .foregroundStyle(immersiveFeed ? Color.white : Color.black)
                 .frame(maxWidth: .infinity, minHeight: ArcadePulseTheme.playHeight)
                 .background(
-                    ArcadePulseTheme.playGradient(highContrast: contrast == .increased),
+                    immersiveFeed
+                        ? ArcadePulseImmersiveFeedStyle.playGradient(highContrast: contrast == .increased)
+                        : ArcadePulseTheme.playGradient(highContrast: contrast == .increased),
                     in: RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius, style: .continuous)
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius, style: .continuous)
-                        .strokeBorder(contrast == .increased ? .black : .clear, lineWidth: 2)
+                        .strokeBorder(contrast == .increased ? (immersiveFeed ? Color.white : Color.black) : Color.clear, lineWidth: 2)
                 }
                 .contentShape(RoundedRectangle(cornerRadius: ArcadePulseTheme.pillRadius))
         }
