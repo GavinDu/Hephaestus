@@ -2506,6 +2506,102 @@ final class PlayerSmokeTests: XCTestCase {
         add(menuEvidence)
     }
 
+    /// Independent #801: exercise the real explicit Apply action, not
+    /// the existing native keyboard Search test or a simulated submission.
+    @MainActor
+    func testArcadePulseRealExplicitApplySearchRetainsPublishedTitle() throws {
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = XCUIApplication()
+        self.app = app
+        app.launch()
+
+        let realTitle = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title.")
+        ).firstMatch
+        let retry = app.buttons["Try again"].firstMatch
+        let deadline = Date().addingTimeInterval(90)
+        var lastRetry = Date.distantPast
+        while !realTitle.exists && Date() < deadline {
+            if retry.exists && retry.isHittable &&
+                Date().timeIntervalSince(lastRetry) >= 20 {
+                retry.tap()
+                lastRetry = Date()
+            }
+            _ = realTitle.waitForExistence(timeout: 3)
+        }
+        guard realTitle.exists else {
+            XCTFail("Real published feed required for explicit Apply Search.")
+            return
+        }
+        let title = realTitle.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertFalse(title.isEmpty)
+        let search = app.searchFields.firstMatch
+        if !search.exists { app.swipeDown() }
+        XCTAssertTrue(search.waitForExistence(timeout: 10) && search.isHittable)
+        search.tap()
+        search.typeText(title)
+        XCTAssertEqual(search.value as? String, title,
+                       "The actual mixed-script draft must survive typing.")
+        let apply = app.buttons["feed.grid.applySearch"].firstMatch
+        let clear = app.buttons["feed.grid.clearSearch"].firstMatch
+        let grid = app.scrollViews["feed.grid.scroll"].firstMatch
+        XCTAssertTrue(apply.waitForExistence(timeout: 8) && apply.isHittable,
+                      "Explicit Apply must be reachable while editing the draft.")
+        XCTAssertTrue(app.keyboards.firstMatch.exists,
+                      "Do not substitute keyboard Search or dismiss before Apply.")
+        XCTAssertGreaterThanOrEqual(apply.frame.width + 0.000001, 44)
+        XCTAssertGreaterThanOrEqual(apply.frame.height + 0.000001, 44)
+
+        func capture(_ name: String) {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = name
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        capture("arcade-pulse-explicit-apply-before")
+        apply.tap()
+        let committed = NSPredicate { _, _ in
+            !app.keyboards.firstMatch.exists && !apply.exists && clear.exists
+        }
+        let commitExpectation = XCTNSPredicateExpectation(predicate: committed, object: nil)
+        let committedResult = XCTWaiter.wait(for: [commitExpectation], timeout: 10)
+        capture("arcade-pulse-explicit-apply-after")
+        XCTAssertEqual(committedResult, .completed,
+                       "Apply must commit the draft and dismiss the real keyboard.")
+        XCTAssertTrue(grid.waitForExistence(timeout: 10))
+        let matchingTitle = grid.staticTexts.matching(
+            NSPredicate(format: "label == %@", title)).firstMatch
+        for _ in 0..<8 {
+            if matchingTitle.exists && matchingTitle.isHittable { break }
+            grid.swipeUp()
+        }
+        XCTAssertTrue(matchingTitle.exists && matchingTitle.isHittable,
+                      "Committed grid must retain the genuine title, not an unrelated card.")
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let window = app.windows.firstMatch
+        let rotate = NSPredicate { _, _ in window.frame.width > window.frame.height }
+        let rotation = XCTNSPredicateExpectation(predicate: rotate, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [rotation], timeout: 10), .completed)
+        XCTAssertTrue(grid.waitForExistence(timeout: 10))
+        for _ in 0..<8 {
+            if clear.exists && clear.isHittable { break }
+            grid.swipeDown()
+        }
+        XCTAssertTrue(clear.exists && clear.isHittable,
+                      "The explicitly committed query must survive rotation.")
+        XCTAssertFalse(apply.exists)
+        XCTAssertGreaterThanOrEqual(clear.frame.width + 0.000001, 44)
+        XCTAssertGreaterThanOrEqual(clear.frame.height + 0.000001, 44)
+        capture("arcade-pulse-explicit-apply-rotated")
+        clear.tap()
+        XCTAssertTrue(realTitle.waitForExistence(timeout: 12),
+                      "Explicit Clear must return to a genuine published feed.")
+        XCTAssertFalse(clear.exists)
+        capture("arcade-pulse-explicit-apply-cleared")
+    }
+
     @MainActor
     func testArcadePulseGameGridSocialActionsHaveTrue44ptTargets() throws {
         XCUIDevice.shared.orientation = .portrait
