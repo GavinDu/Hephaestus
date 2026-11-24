@@ -18,14 +18,15 @@ class TerminalNoSceneMountedViewContract(unittest.TestCase):
         callback_block = src.split("private var playerContent: some View {", 1)[1].split(
             "\n                    .id(attempt)", 1
         )[0]
-        for callback in ("onProgress", "onLoadFinish", "onLoadFail", "onTerminate",
+        for callback in ("onProgress", "onSceneTraceHandle", "onLoadFinish", "onLoadFail", "onTerminate",
                          "onPrewarmHit", "onFirstSceneRenderSubmit", "onFirstInput",
                          "onVerifiedRun"):
             with self.subTest(callback=callback):
                 closure = callback_block.split(callback + ": {", 1)[1]
-                self.assertIn("guard terminalNoSceneAttempt != callbackEpoch,", closure.split("else { return }", 1)[0])
-                self.assertIn("PlayerLaunchCallbackGate.accepts(", closure.split("else { return }", 1)[0])
-        self.assertEqual(callback_block.count("guard terminalNoSceneAttempt != callbackEpoch,"), 8)
+                gate = closure.split("else { return false }" if callback == "onFirstSceneRenderSubmit" else "else { return }", 1)[0]
+                self.assertIn("guard terminalNoSceneAttempt != callbackEpoch,", gate)
+                self.assertIn("PlayerLaunchCallbackGate.accepts(", gate)
+        self.assertEqual(callback_block.count("guard terminalNoSceneAttempt != callbackEpoch,"), 9)
         self.assertIn("loadFailureCategory = .unknown", src)
 
     def test_real_dismantle_uses_old_coordinator_lease_not_new_sheet(self):

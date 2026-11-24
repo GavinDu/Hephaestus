@@ -465,7 +465,7 @@ struct PlayerSceneLaunchTrace {
         case prepared, navigationStarted, receiverAttached, navigationFinished
         case prewarmReceived, prewarmRejected, prewarmAccepted
         case attachedReceived, bridgeRejected, bridgeAdmitted
-        case metricRejected, reducerAccepted, deliveryInvoked, timeout
+        case metricRejected, reducerAccepted, deliveryInvoked, sheetAccepted, sheetRejected, timeout
     }
     struct Handle {
         let nonce: String
@@ -2659,11 +2659,12 @@ struct PixiPlayerSheet: View {
                                   PlayerLaunchCallbackGate.accepts(
                                 expectedEpoch: callbackEpoch, currentEpoch: attempt,
                                 sessionRevoked: sessionRevoked
-                            ) else { return }
+                            ) else { return false }
                             firstSceneSubmittedForAttempt = (
                                 epoch: callbackEpoch, milliseconds: ms
                             )
                             fadeHoldPosterAfterCurrentScene()
+                            return true
                         },
                         onFirstInput: {
                             guard terminalNoSceneAttempt != callbackEpoch,
@@ -3222,7 +3223,7 @@ private struct PlayerWebView: UIViewRepresentable {
     /// Declared between onTerminate and onVerifiedRun to match the
     /// call-site argument order (Swift requires the same order).
     var onPrewarmHit: () -> Void = {}
-    let onFirstSceneRenderSubmit: (Int) -> Void
+    let onFirstSceneRenderSubmit: (Int) -> Bool
     let onFirstInput: () -> Void
     let onVerifiedRun: (VerifiedRunResult) -> Void
 
@@ -3327,7 +3328,7 @@ private struct PlayerWebView: UIViewRepresentable {
         let onLoadFinish: () -> Void
         let onLoadFail: (Error) -> Void
         let onTerminate: () -> Void
-        let onFirstSceneRenderSubmit: (Int) -> Void
+        let onFirstSceneRenderSubmit: (Int) -> Bool
         let onFirstInput: () -> Void
         let onVerifiedRun: (VerifiedRunResult) -> Void
         private var progressObservation: NSKeyValueObservation?
@@ -3379,7 +3380,7 @@ private struct PlayerWebView: UIViewRepresentable {
              onLoadFinish: @escaping () -> Void,
              onLoadFail: @escaping (Error) -> Void,
              onTerminate: @escaping () -> Void,
-             onFirstSceneRenderSubmit: @escaping (Int) -> Void,
+             onFirstSceneRenderSubmit: @escaping (Int) -> Bool,
              onFirstInput: @escaping () -> Void,
              onVerifiedRun: @escaping (VerifiedRunResult) -> Void) {
             self.expectedGameID = gameID
@@ -3550,12 +3551,14 @@ private struct PlayerWebView: UIViewRepresentable {
             nativeBridgeVersionGate.didAccept(2)
             reportAcceptedFirstSceneSubmission(
                 milliseconds: scene.milliseconds,
-                runtimeSessionID: identity.runtimeSessionID
+                runtimeSessionID: identity.runtimeSessionID,
+                diagnosticHandle: PlayerWebViewPool.sceneTraceHandle(view, lease: attachmentLease)
             )
         }
 
         private func reportAcceptedFirstSceneSubmission(
-            milliseconds: Int, runtimeSessionID: String
+            milliseconds: Int, runtimeSessionID: String,
+            diagnosticHandle: PlayerSceneLaunchTrace.Handle?
         ) {
             // Before any host-visible milestone, prove the current native
             // lease/nonce/session projection. A scene may arrive after the
@@ -3564,11 +3567,10 @@ private struct PlayerWebView: UIViewRepresentable {
                   milestone.validatedRuntimeSessionID == runtimeSessionID,
                   milestone.stage == .rendererSubmitted ||
                       milestone.stage == .firstInputAdmitted else { return }
-            let traceHandle = attachedWebView.flatMap {
-                PlayerWebViewPool.sceneTraceHandle($0, lease: attachmentLease)
-            }
-            // This is observation of the existing reducer, not a new admission.
-            PlayerWebViewPool.recordSceneTrace(.reducerAccepted, handle: traceHandle)
+            // Attribute only a nonce-matched callback or authenticated
+            // prewarm transfer, never an unbound compatibility message.
+            // Existing gameplay acceptance is unchanged even if unobserved.
+            PlayerWebViewPool.recordSceneTrace(.reducerAccepted, handle: diagnosticHandle)
             PlayerTelemetry.report(
                 gameID: expectedGameID, kind: "perf",
                 name: "FirstSceneRenderSubmitted",
@@ -3577,8 +3579,10 @@ private struct PlayerWebView: UIViewRepresentable {
             Task { @MainActor [weak self] in
                 guard let self, self.acceptsCurrentHostCallbacks,
                       self.runtimeSessionID == runtimeSessionID else { return }
-                PlayerWebViewPool.recordSceneTrace(.deliveryInvoked, handle: traceHandle)
-                self.onFirstSceneRenderSubmit(milliseconds)
+                PlayerWebViewPool.recordSceneTrace(.deliveryInvoked, handle: diagnosticHandle)
+                let accepted = self.onFirstSceneRenderSubmit(milliseconds)
+                PlayerWebViewPool.recordSceneTrace(accepted ? .sheetAccepted : .sheetRejected,
+                                                   handle: diagnosticHandle)
             }
         }
 
@@ -3610,7 +3614,8 @@ private struct PlayerWebView: UIViewRepresentable {
                 // Both attached and prewarm-transfer paths report the same
                 // bounded renderer-submission milestone, never GPU-present.
                 reportAcceptedFirstSceneSubmission(
-                    milliseconds: ms, runtimeSessionID: runtimeSessionID
+                    milliseconds: ms, runtimeSessionID: runtimeSessionID,
+                    diagnosticHandle: diagnosticHandle
                 )
             case .firstInput(let ms):
                 guard launchLifecycle.firstInput(milliseconds: ms),

@@ -38,7 +38,7 @@ private func safePlayerSmokeSceneTrace(_ value: String?) -> String {
     let allowed = Set(["prepared", "navigationStarted", "receiverAttached", "navigationFinished",
                        "prewarmReceived", "prewarmRejected", "prewarmAccepted", "attachedReceived",
                        "bridgeRejected", "bridgeAdmitted", "metricRejected", "reducerAccepted",
-                       "deliveryInvoked", "timeout"])
+                       "deliveryInvoked", "sheetAccepted", "sheetRejected", "timeout"])
     let stages = value.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
     guard stages.last == "timeout", stages.first == "prepared",
           Set(stages).count == stages.count,
@@ -63,6 +63,21 @@ final class PlayerSmokeTests: XCTestCase {
     override func tearDownWithError() throws {
         XCUIDevice.shared.orientation = .portrait
         if let run = testRun, run.totalFailureCount > 0, let app {
+            // Earlier WebView existence/hit-test failures may abort before
+            // the main readiness assertion. Retain the same fixed witness
+            // when an actual terminal error is already present, without
+            // adding a wait, changing an assertion or copying arbitrary AX.
+            if app.launchArguments.contains("--ui-test-scene-trace") {
+                let error = app.staticTexts["player.error.message"].firstMatch
+                if error.exists && safePlayerSmokeFailureCode(error.label) == "no_scene_timeout" {
+                    let trace = safePlayerSmokeSceneTrace(error.value as? String)
+                    let evidence = XCTAttachment(string: "scene_trace=" + trace)
+                    evidence.name = "player-first-scene-fixed-diagnostic"
+                    evidence.lifetime = .keepAlways
+                    add(evidence)
+                    print("PLAYER_SCENE_DIAGNOSTIC " + trace)
+                }
+            }
             let shot = XCTAttachment(screenshot: app.screenshot())
             shot.name = "player-on-failure"
             shot.lifetime = .keepAlways
