@@ -656,6 +656,27 @@ enum PlayerPrewarmAttachedSceneIdentityPolicy {
     }
 }
 
+/// A completed speculative navigation can be reused only when its one
+/// current renderer-submission candidate can actually transfer. An in-flight
+/// navigation may still emit that candidate after attachment.
+enum PlayerCompletedPrewarmReusePolicy {
+    static func permitsWarmHit(
+        _ candidate: PlayerPrewarmSceneMilestoneLedger.Submission?,
+        expectedURL: URL, currentNonce: String?, credentialFingerprint: String?,
+        navigationStarted: Bool, isSpeculative: Bool, hasTransferred: Bool
+    ) -> Bool {
+        guard isSpeculative, navigationStarted, !hasTransferred,
+              let candidate, candidate.identity.isValid,
+              candidate.identity.playerURL == expectedURL,
+              candidate.identity.documentNonce == currentNonce,
+              candidate.identity.credentialFingerprint == credentialFingerprint,
+              (0...100_000).contains(candidate.sequence),
+              (0...3_600_000).contains(candidate.milliseconds)
+        else { return false }
+        return true
+    }
+}
+
 /// One live, cryptographically unpredictable challenge per attempted main-frame
 /// WK document. The pool (not a JS session ID or SwiftUI Coordinator) owns it.
 /// No historical-ID list is needed: late messages must match this exact nonce.
@@ -1764,10 +1785,34 @@ enum PlayerWebViewPool {
         prewarmExpiryTask?.cancel()
         prewarmExpiryTask = nil
         prewarmEpoch &+= 1
-        let view = pooledView ?? makeWebView()
+        var view = pooledView ?? makeWebView()
+        let completedSpeculativeNavigation = currentURL == url && loadedURL == url && view.url == url
+        let didFinish = completedSpeculativeNavigation &&
+            PlayerCompletedPrewarmReusePolicy.permitsWarmHit(
+                sceneMilestoneLedger.candidate, expectedURL: url,
+                currentNonce: documentEpochGate.currentNonce,
+                credentialFingerprint: sessionFingerprint,
+                navigationStarted: documentEpochGate.navigationStarted,
+                isSpeculative: !isAttached,
+                hasTransferred: sceneMilestoneLedger.hasTransferred
+            )
+        if completedSpeculativeNavigation && !didFinish && !isAttached {
+            // A one-shot prewarm scene might already have been dropped (e.g.
+            // legacy bridge). Start this Play with a fresh view and receiver,
+            // not an automatic retry after timeout. Old callbacks cannot
+            // affect the successor through pooled instance equality.
+            let retired = view
+            view = makeWebView()
+            pooledView = view
+            retired.navigationDelegate = nil
+            retired.stopLoading()
+            retired.loadHTMLString("", baseURL: nil)
+            currentURL = nil
+            loadedURL = nil
+            DevLog.info(.player, "completed speculative player lacked transferable scene; cold attach")
+        }
         pooledView = view
-        let didFinish = currentURL == url && loadedURL == url && view.url == url
-        let alreadyLoading = currentURL == url && view.isLoading
+        let alreadyLoading = !completedSpeculativeNavigation && currentURL == url && view.isLoading
         let shouldLoad = !didFinish && !alreadyLoading
         isAttached = true
         // Every distinct interactive SwiftUI Coordinator owns a new lease,
