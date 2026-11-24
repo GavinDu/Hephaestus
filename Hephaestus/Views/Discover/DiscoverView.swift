@@ -1716,6 +1716,8 @@ private struct ForYouGamePage: View {
 
     let scope: SocialFeedScope
     let game: FeedGame
+    let storefrontGames: [FeedGame]
+    let onSelectStorefrontGame: (String) -> Void
     let isSaved: Bool
     let isLiked: Bool
     let isFollowingCreator: Bool
@@ -2296,6 +2298,89 @@ private struct ForYouGamePage: View {
         .accessibilityIdentifier("feed.ipad.context")
     }
 
+    /// Genuine public games already admitted by the current For You pager.
+    /// The panel is non-scrolling because the pager owns vertical gestures.
+    private var ipadStorefrontPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Storefront", systemImage: "square.grid.2x2")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(ArcadePulseImmersiveFeedStyle.cyan)
+                .accessibilityAddTraits(.isHeader)
+
+            if storefrontGames.isEmpty {
+                Text("No other games loaded yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(ArcadePulseTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(storefrontGames) { item in
+                    Button {
+                        onSelectStorefrontGame(item.id)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Group {
+                                if let raw = item.previewPosterURL, let url = URL(string: raw) {
+                                    AsyncImage(url: url) { phase in
+                                        if let image = phase.image {
+                                            image.resizable().scaledToFit()
+                                        } else {
+                                            Image(systemName: "gamecontroller")
+                                                .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                        }
+                                    }
+                                } else {
+                                    Image(systemName: "gamecontroller")
+                                        .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                }
+                            }
+                            .frame(width: 48, height: 48)
+                            .background(ArcadePulseImmersiveFeedStyle.navy,
+                                        in: RoundedRectangle(cornerRadius: 8))
+                            .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(2)
+                                    .foregroundStyle(ArcadePulseTheme.textPrimary)
+                                if let plays = ArcadePulseImmersiveFeedStyle.metric(item.playStarts) {
+                                    Text(plays + " plays started")
+                                        .font(.caption)
+                                        .foregroundStyle(ArcadePulseTheme.textSecondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Browse " + item.title)
+                    .accessibilityValue(ArcadePulseImmersiveFeedStyle.metric(item.playStarts)
+                                        .map { $0 + " plays started" } ?? "")
+                    .accessibilityIdentifier("feed.storefront.game." + item.id)
+                }
+            }
+            Text("Games in your current For You feed")
+                .font(.caption)
+                .foregroundStyle(ArcadePulseTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(ArcadePulseTheme.surface,
+                    in: RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: ArcadePulseTheme.surfaceRadius)
+                .strokeBorder(ArcadePulseTheme.subtleBorder, lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("feed.ipad.storefront")
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let isRegular = horizontalSizeClass == .regular
@@ -2304,9 +2389,15 @@ private struct ForYouGamePage: View {
                 width: proxy.size.width, height: proxy.size.height,
                 isRegular: isRegular, isAccessibilityText: dynamicTypeSize.isAccessibilitySize,
                 isLargeText: dynamicTypeSize >= .xxLarge)
-            let pageWidth = showsContext
-                ? ForYouPageLayout.adaptiveLandscapeStageWidth(containerWidth: proxy.size.width)
-                : ForYouPageLayout.stageWidth(containerWidth: proxy.size.width, containerHeight: proxy.size.height, isRegular: isRegular, isLandscape: isLandscape)
+            let showsStorefront = ForYouPageLayout.showsIPadStorefront(
+                width: proxy.size.width, height: proxy.size.height,
+                isIPad: UIDevice.current.userInterfaceIdiom == .pad,
+                isRegular: isRegular, isLargeText: dynamicTypeSize >= .xxLarge, scope: scope)
+            let pageWidth = showsStorefront
+                ? ForYouPageLayout.storefrontStageWidth(containerWidth: proxy.size.width)
+                : (showsContext
+                    ? ForYouPageLayout.adaptiveLandscapeStageWidth(containerWidth: proxy.size.width)
+                    : ForYouPageLayout.stageWidth(containerWidth: proxy.size.width, containerHeight: proxy.size.height, isRegular: isRegular, isLandscape: isLandscape))
             ZStack {
                 // The centered portrait stage is intentional on iPad, but
                 // an empty white surround looks like a broken phone layout.
@@ -2323,8 +2414,13 @@ private struct ForYouGamePage: View {
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
-                HStack(spacing: showsContext ? 12 : 0) {
+                HStack(spacing: showsContext || showsStorefront ? 12 : 0) {
                     Spacer(minLength: 0)
+                    if showsStorefront {
+                        ipadContextPanel
+                            .frame(width: ForYouPageLayout.storefrontPanelWidth(containerWidth: proxy.size.width),
+                                   height: proxy.size.height)
+                    }
                     ZStack(alignment: .bottom) {
                         mediaLayer
                         VStack {
@@ -2392,7 +2488,11 @@ private struct ForYouGamePage: View {
                     }
                     .frame(width: pageWidth, height: proxy.size.height)
                     .clipShape(RoundedRectangle(cornerRadius: isRegular ? 24 : 0, style: .continuous))
-                    if showsContext {
+                    if showsStorefront {
+                        ipadStorefrontPanel
+                            .frame(width: ForYouPageLayout.storefrontPanelWidth(containerWidth: proxy.size.width),
+                                   height: proxy.size.height)
+                    } else if showsContext {
                         ipadContextPanel
                             .frame(width: ForYouPageLayout.contextPanelWidth(
                                 containerWidth: proxy.size.width),
@@ -2525,6 +2625,14 @@ private struct ForYouPagerView: View {
         ForYouGamePage(
             scope: scope,
             game: game,
+            storefrontGames: ForYouPageLayout.storefrontIDs(
+                scope: scope, selectedID: game.id, loadedIDs: games.map(\.id)
+            ).compactMap { id in games.first { $0.id == id } },
+            onSelectStorefrontGame: { id in
+                guard scope == .forYou, selectedGame?.id == game.id,
+                      id != game.id, games.contains(where: { $0.id == id }) else { return }
+                withTransaction(Transaction(animation: nil)) { settledGameID = id }
+            },
             isSaved: savedGameIDs.contains(game.id),
             isLiked: likedGameIDs.contains(game.id),
             isFollowingCreator: game.ownerID.map { followedCreatorIDs.contains($0) } ?? false,

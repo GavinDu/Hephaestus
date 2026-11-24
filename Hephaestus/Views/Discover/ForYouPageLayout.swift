@@ -214,6 +214,43 @@ enum ForYouPageLayout {
         return usable * 0.55
     }
 
+    /// Three columns only on a spacious regular iPad's actual viewport.
+    /// Keep the media stage >=55% of the pager, including panel spacing.
+    /// The private Following/Friends feeds must not become a public store.
+    static func showsIPadStorefront(
+        width: CGFloat, height: CGFloat, isIPad: Bool, isRegular: Bool,
+        isLargeText: Bool, scope: SocialFeedScope
+    ) -> Bool {
+        isIPad && scope == .forYou && width >= 1_240 && width > height &&
+            height >= minimumContextPanelHeight && isRegular && !isLargeText
+    }
+
+    static func storefrontPanelWidth(containerWidth: CGFloat) -> CGFloat {
+        min(250, max(0, containerWidth * 0.18))
+    }
+
+    static func storefrontStageWidth(containerWidth: CGFloat) -> CGFloat {
+        max(0, containerWidth - 2 * storefrontPanelWidth(containerWidth: containerWidth) - 48)
+    }
+
+    /// The pager's already-admitted public For You page is the sole source.
+    /// No new request, private scope, synthetic rank or inferred engagement.
+    static func storefrontIDs(scope: SocialFeedScope, selectedID: String,
+                              loadedIDs: [String]) -> [String] {
+        guard scope == .forYou else { return [] }
+        var seen = Set([selectedID])
+        var admitted: [String] = []
+        // Do not mutate a set in a lazy filter predicate; a collection may
+        // evaluate the same predicate multiple times while finding indices.
+        for id in loadedIDs where !id.isEmpty {
+            if seen.insert(id).inserted {
+                admitted.append(id)
+                if admitted.count == 3 { break }
+            }
+        }
+        return admitted
+    }
+
     static func contextPanelWidth(containerWidth: CGFloat) -> CGFloat {
         min(300, containerWidth * 0.27)
     }
