@@ -26,6 +26,36 @@ struct ArcadePulseIPadStorefrontPolicyTests {
         }
     }
 
+    @Test func invalidPublishedIDsAreNeverExposedOrSelected() {
+        let invalid = ["", " ", " bad", "bad ", "bad/id", "bad\nID", "bad\u{0000}id"]
+        let loaded = ["a"] + invalid + ["b", "c", "d", "e"]
+        #expect(ForYouPageLayout.storefrontIDs(scope: .forYou, selectedID: "a",
+                    loadedIDs: loaded) == ["b", "c", "d"])
+        for id in invalid {
+            #expect(!ForYouPageLayout.canSelectStorefrontGame(
+                scope: .forYou, displayedID: "a", currentSelectedID: "a",
+                targetID: id, loadedIDs: loaded))
+        }
+    }
+
+    @Test func selectionRequiresCurrentPageAndCurrentBoundedSubset() {
+        let loaded = ["a", "b", "c", "d", "e"]
+        #expect(ForYouPageLayout.canSelectStorefrontGame(
+            scope: .forYou, displayedID: "a", currentSelectedID: "a",
+            targetID: "b", loadedIDs: loaded))
+        #expect(!ForYouPageLayout.canSelectStorefrontGame(
+            scope: .forYou, displayedID: "a", currentSelectedID: "c",
+            targetID: "b", loadedIDs: loaded))
+        for id in ["a", "e", "missing"] {
+            #expect(!ForYouPageLayout.canSelectStorefrontGame(
+                scope: .forYou, displayedID: "a", currentSelectedID: "a",
+                targetID: id, loadedIDs: loaded))
+        }
+        #expect(!ForYouPageLayout.canSelectStorefrontGame(
+            scope: .friends, displayedID: "a", currentSelectedID: "a",
+            targetID: "b", loadedIDs: loaded))
+    }
+
     @Test func loadedPublicIDsOnlyInOrderNoDuplicatesOrActivePage() {
         #expect(ForYouPageLayout.storefrontIDs(scope: .forYou, selectedID: "a",
                     loadedIDs: ["a", "b", "", "b", "c", "d", "e"]) == ["b", "c", "d"])

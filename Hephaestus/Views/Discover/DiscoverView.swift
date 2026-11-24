@@ -2629,8 +2629,11 @@ private struct ForYouPagerView: View {
                 scope: scope, selectedID: game.id, loadedIDs: games.map(\.id)
             ).compactMap { id in games.first { $0.id == id } },
             onSelectStorefrontGame: { id in
-                guard scope == .forYou, selectedGame?.id == game.id,
-                      id != game.id, games.contains(where: { $0.id == id }) else { return }
+                guard ForYouPageLayout.canSelectStorefrontGame(
+                    scope: scope, displayedID: game.id,
+                    currentSelectedID: selectedGame?.id, targetID: id,
+                    loadedIDs: games.map(\.id)
+                ) else { return }
                 withTransaction(Transaction(animation: nil)) { settledGameID = id }
             },
             isSaved: savedGameIDs.contains(game.id),

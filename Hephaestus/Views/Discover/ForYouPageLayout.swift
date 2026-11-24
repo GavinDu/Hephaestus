@@ -242,13 +242,26 @@ enum ForYouPageLayout {
         var admitted: [String] = []
         // Do not mutate a set in a lazy filter predicate; a collection may
         // evaluate the same predicate multiple times while finding indices.
-        for id in loadedIDs where !id.isEmpty {
+        for id in loadedIDs where PublishedGameIDPolicy.valid(id) {
             if seen.insert(id).inserted {
                 admitted.append(id)
                 if admitted.count == 3 { break }
             }
         }
         return admitted
+    }
+
+    /// Revalidate the currently displayed page and the actual bounded
+    /// storefront subset at the point of selection. A stale row may not
+    /// navigate to a different or no-longer-admitted game.
+    static func canSelectStorefrontGame(
+        scope: SocialFeedScope, displayedID: String,
+        currentSelectedID: String?, targetID: String, loadedIDs: [String]
+    ) -> Bool {
+        guard currentSelectedID == displayedID,
+              PublishedGameIDPolicy.valid(targetID) else { return false }
+        return storefrontIDs(scope: scope, selectedID: displayedID,
+                             loadedIDs: loadedIDs).contains(targetID)
     }
 
     static func contextPanelWidth(containerWidth: CGFloat) -> CGFloat {
