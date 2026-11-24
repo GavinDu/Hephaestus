@@ -503,10 +503,32 @@ final class PlayerSmokeTests: XCTestCase {
         before.lifetime = .keepAlways
         add(before)
 
+        // A previous exact-head failure read "p" immediately after the
+        // combined type/Return event, but its original later screenshot
+        // showed "puzzle". Separate editing and submission observations
+        // rather than accepting a truncated query or adding a blind sleep.
+        func requireCompleteTopic(_ stage: String) {
+            let fullValue = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == %@", "puzzle"),
+                object: topic)
+            let result = XCTWaiter.wait(for: [fullValue], timeout: 5)
+            let original = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            original.name = "arcade-pulse-creator-topic-" + stage
+            original.lifetime = .keepAlways
+            add(original)
+            XCTAssertEqual(result, .completed,
+                           "Native topic must settle to the complete query at " + stage)
+            XCTAssertEqual(topic.value as? String, "puzzle",
+                           "The actual topic input must preserve the complete typed query at " + stage)
+        }
+
         topic.tap()
-        topic.typeText("puzzle\n")
-        XCTAssertEqual(topic.value as? String, "puzzle",
-                       "The actual topic input must preserve the typed query.")
+        topic.typeText("puzzle")
+        requireCompleteTopic("before-submit")
+        // Use the real focused keyboard Return/Search action, not the
+        // visible Apply fallback, so this path still tests native submit.
+        topic.typeText("\n")
+        requireCompleteTopic("after-submit")
         let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         after.name = "arcade-pulse-creator-topic-search-portrait"
         after.lifetime = .keepAlways
@@ -2423,7 +2445,18 @@ final class PlayerSmokeTests: XCTestCase {
         while app.keyboards.firstMatch.exists && Date() < keyboardDeadline {
             Thread.sleep(forTimeInterval: 0.2)
         }
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        if app.keyboards.firstMatch.exists {
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "arcade-pulse-real-grid-native-search-keyboard-remained"
+            failure.lifetime = .keepAlways
+            add(failure)
+        }
+        XCTAssertFalse(app.keyboards.firstMatch.exists,
+                       "Native Search must release keyboard focus before real grid More.")
+        let apply = app.buttons["feed.grid.applySearch"].firstMatch
+        XCTAssertFalse(apply.exists,
+                       "Native Search must commit the genuine draft, not just hide the keyboard.")
+        XCTAssertTrue(app.buttons["feed.grid.clearSearch"].firstMatch.waitForExistence(timeout: 8))
 
         let grid = app.scrollViews["feed.grid.scroll"].firstMatch
         let more = app.buttons["grid.game.social.more"].firstMatch

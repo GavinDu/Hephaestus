@@ -150,6 +150,15 @@ enum ForYouPageLayout {
             })
     }
 
+    /// Reuse the exact same admitted real publisher name in immersive For You,
+    /// iPad Spotlight and read-only Game Details as in the public grid.
+    /// Unnavigable backend owner IDs never become fake Profile actions.
+    static func publicCreatorName(ownerID: String?, displayName: String?) -> String? {
+        GameFeedCardCreatorIdentityPolicy.publicName(
+            ownerID: ownerID, displayName: displayName
+        )
+    }
+
     /// Never offer a destructive Block action against the signed-in
     /// publisher's own identity. The backend still authorizes writes.
     static func canOfferCreatorBlock(ownerID: String?, viewerID: String) -> Bool {
