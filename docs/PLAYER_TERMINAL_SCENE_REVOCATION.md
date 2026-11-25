@@ -1,5 +1,0 @@
-# Terminal no-scene synchronous revocation (#770)
-
-Based on #781 head 7de89aa; all three genuine player smoke jobs subsequently failed with identical no-scene traces. At the existing terminal watchdog, freeze fixed #805 trace, use the exact native nonce/lease and registered weak Coordinator stop, consume stop once, revoke reducer and cancel tasks, recycle exact view then discard its pooled instance before showing manual recovery. A stale/missing native handle must never stop a newer lease; existing SwiftUI dismantle remains fallback. No synthetic readiness, change to 12s timer, network retry or schema. Pure policy tests 160 schedules and source guards. No proof of actual process destruction, audio/GPU release, physical thermal behavior, or task network cancellation beyond issuing cancellation. Missing-handle synchronous revocation and genuine native evidence remain open; no closure yet.
-
-Integrated candidate 772a008 into the existing #781 branch after previous required checks completed red. Require fresh all-eight exact-head checks and actual iPhone/iPad smoke. Rollback only this delta; do not infer missing-handle or physical resource reclamation proof.

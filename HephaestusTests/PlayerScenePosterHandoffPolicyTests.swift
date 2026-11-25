@@ -20,35 +20,22 @@ struct PlayerScenePosterHandoffPolicyTests {
         )
     }
 
-    private func readiness(
-        expected: Int = 8, scene: Int? = nil, terminal: Int? = nil,
-        valid: Bool = true, loaded: Bool = true,
-        hasError: Bool = false, revoked: Bool = false
-    ) -> PlayerFirstSceneWaitPolicy.State {
-        PlayerFirstSceneWaitPolicy.state(
-            currentAttempt: expected, acceptedSceneAttempt: scene,
-            terminalAttempt: terminal, hasValidPlayerRequest: valid,
-            navigationFinished: loaded, hasLoadError: hasError,
-            sessionRevoked: revoked
-        )
-    }
-
     private func recover(
-        expected: Int = 8, scene: Int? = nil, terminal: Int? = nil,
-        valid: Bool = true, loaded: Bool = true,
+        expected: Int = 8, scene: Int? = nil,
+        poster: Bool = true, visible: Bool = true, loaded: Bool = true,
         hasError: Bool = false, revoked: Bool = false,
         foreground: Bool = true
     ) -> Bool {
-        PlayerFirstSceneWaitPolicy.shouldOfferNoSceneRecovery(
-            state: readiness(expected: expected, scene: scene, terminal: terminal,
-                             valid: valid, loaded: loaded,
-                             hasError: hasError, revoked: revoked),
-            navigationFinished: loaded, isForeground: foreground
+        Policy.shouldOfferNoSceneRecovery(
+            expectedAttempt: expected, acceptedSceneAttempt: scene,
+            hasHoldPoster: poster, holdVisible: visible,
+            navigationFinished: loaded, hasLoadError: hasError,
+            sessionRevoked: revoked, isForeground: foreground
         )
     }
 
     @Test func navigationFinishAloneCannotReleasePoster() {
-        #expect(PlayerFirstSceneWaitPolicy.noSceneTimeoutMilliseconds == 12_000)
+        #expect(Policy.noSceneTimeoutMilliseconds == 12_000)
         #expect(!fade(scene: nil))
         #expect(!fade(scene: 7))
         #expect(fade())
@@ -68,32 +55,12 @@ struct PlayerScenePosterHandoffPolicyTests {
         #expect(!recover(hasError: true))
         #expect(!recover(revoked: true))
         #expect(!recover(foreground: false))
-        #expect(!recover(valid: false))
-        #expect(!recover(terminal: 8))
-        #expect(recover(terminal: 7))
+        #expect(!recover(poster: false))
+        #expect(!recover(visible: false))
         #expect(!recover(loaded: false))
         #expect(!recover(scene: 8))
         #expect(recover(scene: nil))
         #expect(recover(scene: 7))
-    }
-
-    @Test func optionalPosterNeverControlsReadinessOrTimeout() {
-        // No poster state is passed to the independent launch policy.
-        #expect(readiness() == .waiting)
-        #expect(readiness(loaded: false) == .waiting)
-        #expect(readiness(scene: 8, loaded: false) == .waiting)
-        #expect(readiness(scene: 8) == .ready)
-        #expect(readiness(scene: 7) == .waiting)
-        #expect(readiness(scene: 9) == .waiting)
-        #expect(readiness(scene: 8, terminal: 8) == .unavailable)
-        #expect(readiness(scene: 8, terminal: 7) == .ready)
-        #expect(readiness(scene: 8, valid: false) == .unavailable)
-        #expect(readiness(scene: 8, hasError: true) == .unavailable)
-        #expect(readiness(scene: 8, revoked: true) == .unavailable)
-        #expect(recover())
-        #expect(!recover(loaded: false))
-        #expect(!recover(foreground: false))
-        #expect(!recover(scene: 8))
     }
 
     @Test func missingSceneTimeoutMustNotTriggerNetworkAutoReload() {
@@ -126,13 +93,6 @@ struct PlayerScenePosterHandoffPolicyTests {
                             loaded: false))
             #expect(!fade(expected: attempt, scene: attempt, revoked: true))
             #expect(!recover(expected: attempt, scene: nil, revoked: true))
-            #expect(readiness(expected: attempt, scene: attempt - 1) == .waiting)
-            #expect(readiness(expected: attempt, scene: attempt, loaded: false) == .waiting)
-            #expect(readiness(expected: attempt, scene: attempt) == .ready)
-            #expect(readiness(expected: attempt, scene: attempt, terminal: attempt) == .unavailable)
-            #expect(!recover(expected: attempt, terminal: attempt))
-            #expect(recover(expected: attempt, terminal: attempt - 1))
-            #expect(!recover(expected: attempt, valid: false))
         }
     }
 }

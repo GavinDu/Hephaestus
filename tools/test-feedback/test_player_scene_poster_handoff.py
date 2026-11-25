@@ -30,20 +30,13 @@ class CurrentScenePosterSourceContract(unittest.TestCase):
         self.assertIn("acceptedSceneAttempt == expectedAttempt", guard)
         self.assertIn("navigationFinished && !hasLoadError", guard)
         self.assertIn("!hasLoadError && !sessionRevoked", guard)
-        policy = src.split("enum PlayerFirstSceneWaitPolicy {", 1)[1].split(
-            "/// Terminal no-scene recovery", 1
-        )[0]
-        self.assertIn("noSceneTimeoutMilliseconds: Int64 = 12_000", policy)
-        self.assertIn("terminalAttempt != currentAttempt", policy)
-        self.assertIn("navigationFinished && acceptedSceneAttempt == currentAttempt", policy)
-        self.assertNotIn("hasHoldPoster", policy)
-        self.assertNotIn("holdVisible", policy)
+        self.assertIn("noSceneTimeoutMilliseconds: Int64 = 12_000", guard)
 
     def test_bounded_real_swiftui_timer_and_true_error_are_preserved(self):
         src = (ROOT / "Hephaestus/Player/PixiPlayer.swift").read_text()
         self.assertIn(".task(id: noSceneWatchdogIdentity) {", src)
         identity = src.split("private var noSceneWatchdogIdentity: String {", 1)[1].split("private var playerURL", 1)[0]
-        for key in ("attempt", "isLoading", "scenePhase", "firstSceneSubmittedForAttempt?.epoch", "sessionRevoked", "loadError != nil", "terminalNoSceneAttempt", "playerURL != nil"):
+        for key in ("attempt", "isLoading", "scenePhase", "firstSceneSubmittedForAttempt?.epoch", "sessionRevoked", "loadError != nil", "holdVisible"):
             self.assertIn(key, identity)
         timer = src.split('.task(id: noSceneWatchdogIdentity) {', 1)[1].split(
             ".task(id: attempt)", 1
@@ -54,10 +47,7 @@ class CurrentScenePosterSourceContract(unittest.TestCase):
         self.assertIn("watchdogAttempt == attempt", timer)
         self.assertIn("scenePhase == .active", timer)
         self.assertIn("isForeground: scenePhase == .active", timer)
-        self.assertEqual(timer.count("PlayerFirstSceneWaitPolicy.shouldOfferNoSceneRecovery"), 2)
-        self.assertNotIn("admittedHoldPosterURL", timer)
-        self.assertNotIn("holdVisible else", timer)
-        self.assertIn("terminalNoSceneAttempt = watchdogAttempt", timer)
+        self.assertIn("PlayerScenePosterHandoffPolicy.shouldOfferNoSceneRecovery", timer)
         self.assertIn("loadFailureCategory = .unknown", timer)
         self.assertNotIn("loadFailureCategory = .network", timer)
         self.assertIn(
@@ -66,27 +56,6 @@ class CurrentScenePosterSourceContract(unittest.TestCase):
         )
         self.assertNotIn("firstGPUFrame", timer)
         self.assertNotIn("PlayerLaunchCoordinator(", timer)
-
-    def test_missing_or_rejected_poster_still_has_native_holding_surface(self):
-        src = (ROOT / "Hephaestus/Player/PixiPlayer.swift").read_text()
-        sheet = src.split("struct PixiPlayerSheet: View {", 1)[1]
-        readiness = sheet.split("private var firstSceneReadiness:", 1)[1].split(
-            "private var noSceneWatchdogIdentity", 1
-        )[0]
-        for proof in ("currentAttempt: attempt", "acceptedSceneAttempt: firstSceneSubmittedForAttempt?.epoch",
-                      "terminalAttempt: terminalNoSceneAttempt", "hasValidPlayerRequest: playerURL != nil",
-                      "navigationFinished: !isLoading", "hasLoadError: loadError != nil",
-                      "sessionRevoked: sessionRevoked"):
-            self.assertIn(proof, readiness)
-        self.assertNotIn("holdVisible", readiness)
-        self.assertIn(".allowsHitTesting(firstSceneReadiness == .ready)", sheet)
-        self.assertIn(".accessibilityHidden(firstSceneReadiness != .ready)", sheet)
-        fallback = sheet.split("if firstSceneReadiness == .waiting,", 1)[1].split(
-            "if PlayerLoadingPolicy.shouldShowOfflineOverlay", 1
-        )[0]
-        for proof in ("admittedHoldPosterURL == nil || !holdVisible", "PlayerStateCard",
-                      "ProgressView()", "player.loading", "Preparing"):
-            self.assertIn(proof, fallback)
 
 if __name__ == "__main__":
     unittest.main()
