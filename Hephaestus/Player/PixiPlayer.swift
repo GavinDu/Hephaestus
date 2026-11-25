@@ -1098,12 +1098,52 @@ enum PlayerMainFrameNavigationPolicy {
     }
 }
 
+/// One production status gate for BOTH prewarmed and attached main-frame
+/// documents. A URL-matched 302 login, 1xx or nonfinal 3xx is never a game.
+/// 304 remains a *legacy cache-compatibility exception*, not independently
+/// authenticated cached bytes, scene readiness, or a compositor present.
+enum PlayerMainDocumentHTTPPolicy {
+    static func permitsMainDocument(statusCode: Int) -> Bool {
+        (200...299).contains(statusCode) || statusCode == 304
+    }
+}
+
+/// Fixed diagnostic categories only. At most four observations per native
+/// prepared navigation, shared across speculative and attached owners.
+/// A WKNavigationResponse has no nonce receipt; this is NOT authorization.
+struct PlayerMainDocumentResponseObservations {
+    private enum Kind: Hashable {
+        case prewarm200, prewarm304, attached200, attached304
+    }
+    private var observed: Set<Kind> = []
+
+    mutating func record(statusCode: Int, isAttached: Bool) -> String? {
+        let kind: Kind
+        switch (isAttached, statusCode) {
+        case (false, 200): kind = .prewarm200
+        case (false, 304): kind = .prewarm304
+        case (true, 200): kind = .attached200
+        case (true, 304): kind = .attached304
+        default: return nil
+        }
+        guard observed.insert(kind).inserted else { return nil }
+        switch kind {
+        case .prewarm200: return "player HTTP observation: prewarm 200"
+        case .prewarm304: return "player HTTP observation: prewarm 304"
+        case .attached200: return "player HTTP observation: attached 200"
+        case .attached304: return "player HTTP observation: attached 304"
+        }
+    }
+
+    mutating func reset() {
+        observed.removeAll(keepingCapacity: true)
+    }
+}
+
+/// Compatibility façade for existing prewarm policy callers and tests.
 enum PlayerPrewarmResponsePolicy {
-    /// A prewarmed page is reusable only when the main document did not
-    /// return an HTTP error. Otherwise the attached player must retry and
-    /// surface the normal actionable load-failure state.
     static func shouldCacheResponse(statusCode: Int) -> Bool {
-        statusCode < 400
+        PlayerMainDocumentHTTPPolicy.permitsMainDocument(statusCode: statusCode)
     }
 }
 
@@ -1567,6 +1607,7 @@ enum PlayerWebViewPool {
     private static var attachedReceiverLease: UInt64?
     private static weak var attachedMessageReceiver: (any WKScriptMessageHandler)?
     private static var documentEpochGate = PlayerNativeDocumentEpochGate()
+    private static var mainDocumentResponseObservations = PlayerMainDocumentResponseObservations()
     private static var sessionFingerprint: String?
     private static let sessionObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
         forName: .hephaestusBackendSessionDidChange, object: nil, queue: .main
@@ -1639,6 +1680,7 @@ enum PlayerWebViewPool {
         sceneMilestoneLedger.invalidate()
         transferringLease = nil
         let nonce = documentEpochGate.prepareNavigation()
+        mainDocumentResponseObservations.reset()
         // Only installed native code can issue a fresh current-document
         // challenge. Page code cannot derive future navigation epochs.
         // This app has no other WKUserScripts in this private pooled player.
@@ -1679,6 +1721,26 @@ enum PlayerWebViewPool {
         guard ownsActiveAttachment(webView, lease: lease),
               documentEpochGate.navigationStarted else { return nil }
         return documentEpochGate.currentNonce
+    }
+
+    /// Diagnostic only: the current native navigation context is not a
+    /// cryptographic association of the response with its cached body.
+    static func observeMainDocumentResponse(
+        _ webView: WKWebView, response: HTTPURLResponse, lease: UInt64?
+    ) {
+        guard pooledView === webView, let currentURL,
+              response.url == currentURL, documentEpochGate.navigationStarted,
+              documentEpochGate.currentNonce != nil else { return }
+        if let lease {
+            guard ownsActiveAttachment(webView, lease: lease) else { return }
+        } else {
+            guard !isAttached else { return }
+        }
+        if let message = mainDocumentResponseObservations.record(
+            statusCode: response.statusCode, isAttached: lease != nil
+        ) {
+            DevLog.info(.player, message)
+        }
     }
 
     static func revokeDocumentNonce(_ webView: WKWebView) {
@@ -2088,17 +2150,29 @@ enum PlayerWebViewPool {
                 decisionHandler(.cancel)
                 return
             }
-            guard navigationResponse.isForMainFrame,
-                  let response = navigationResponse.response as? HTTPURLResponse,
-                  !PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: response.statusCode) else {
+            guard navigationResponse.isForMainFrame else {
+                // Keep existing subresource policy; only the main document
+                // may authorize a successful game page handoff.
                 decisionHandler(.allow)
                 return
             }
-            // A 4xx/5xx HTML error page is not a successfully prewarmed
-            // game. Clear the pool entry before cancelling so take(url:)
-            // starts a fresh attached navigation and can show its error UI.
-            PlayerWebViewPool.markFailed(webView, responseURL: response.url)
-            decisionHandler(.cancel)
+            guard let response = navigationResponse.response as? HTTPURLResponse,
+                  PlayerMainDocumentHTTPPolicy.permitsMainDocument(
+                    statusCode: response.statusCode
+                  ) else {
+                // Reject 1xx, nonfinal redirect/login, 4xx/5xx and non-HTTP
+                // main documents. Do not cache a stalled/no-body page as warm.
+                // This invalidates only the same expected pooled URL.
+                PlayerWebViewPool.markFailed(
+                    webView, responseURL: navigationResponse.response.url
+                )
+                decisionHandler(.cancel)
+                return
+            }
+            PlayerWebViewPool.observeMainDocumentResponse(
+                webView, response: response, lease: nil
+            )
+            decisionHandler(.allow)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -3539,14 +3613,29 @@ private struct PlayerWebView: UIViewRepresentable {
                 decisionHandler(.cancel)
                 return
             }
-            guard navigationResponse.isForMainFrame,
-                  let response = navigationResponse.response as? HTTPURLResponse,
-                  response.statusCode >= 400 else {
+            guard navigationResponse.isForMainFrame else {
                 decisionHandler(.allow)
                 return
             }
-            reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: response.statusCode))
-            decisionHandler(.cancel)
+            guard let response = navigationResponse.response as? HTTPURLResponse else {
+                // Non-HTTP main-document response is not a usable player.
+                // Reuse a bounded generic category, never log raw Location.
+                reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: 0))
+                decisionHandler(.cancel)
+                return
+            }
+            guard PlayerMainDocumentHTTPPolicy.permitsMainDocument(
+                statusCode: response.statusCode
+            ) else {
+                // Navigation-finished cannot make a 302 login game-ready.
+                reportNavigationFailure(PlayerLoadFailure.httpError(statusCode: response.statusCode))
+                decisionHandler(.cancel)
+                return
+            }
+            PlayerWebViewPool.observeMainDocumentResponse(
+                webView, response: response, lease: attachmentLease
+            )
+            decisionHandler(.allow)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
