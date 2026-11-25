@@ -3006,33 +3006,41 @@ private struct CreatorDiscoverySheet: View {
                             .accessibilityIdentifier("creator.discovery.previousResults")
                         }
                         ForEach(creators) { creator in
-                            Button {
-                                profileRequest = CreatorProfileRequest(id: creator.creator_id)
-                            } label: {
-                                CreatorDirectoryRow(
-                                    creatorID: creator.creator_id,
-                                    publicGameCount: creator.post_count,
-                                    topics: creator.topics
+                            if let rowID = CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
+                                for: creator.creator_id
+                            ) {
+                                Button {
+                                    guard CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
+                                        for: creator.creator_id) == rowID else { return }
+                                    profileRequest = CreatorProfileRequest(id: creator.creator_id)
+                                } label: {
+                                    CreatorDirectoryRow(
+                                        creatorID: creator.creator_id,
+                                        publicGameCount: creator.post_count,
+                                        topics: creator.topics
+                                    )
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(
+                                    CreatorDirectoryRowLayout.accessibilityLabel(
+                                        creatorID: creator.creator_id,
+                                        count: creator.post_count,
+                                        topics: creator.topics
+                                    )
                                 )
-                                .contentShape(Rectangle())
+                                .accessibilityIdentifier(rowID)
+                            } else {
+                                // Do not render malformed raw IDs as tappable
+                                // destinations or expose control text to VoiceOver.
+                                Label("Creator unavailable: invalid public identity",
+                                      systemImage: "person.crop.circle.badge.exclamationmark")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .frame(minHeight: 44, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .accessibilityIdentifier("creator.discovery.invalidRow")
                             }
-                            .buttonStyle(.plain)
-                            .disabled(CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
-                                for: creator.creator_id) == nil)
-                            .accessibilityLabel(
-                                CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
-                                    for: creator.creator_id) == nil
-                                ? "Creator unavailable: invalid public identity"
-                                : CreatorDirectoryRowLayout.accessibilityLabel(
-                                    creatorID: creator.creator_id,
-                                    count: creator.post_count,
-                                    topics: creator.topics
-                                )
-                            )
-                            .accessibilityIdentifier(
-                                CreatorDirectoryRowLayout.rowAccessibilityIdentifier(
-                                    for: creator.creator_id) ?? "creator.discovery.invalidRow"
-                            )
                         }
                     }
                     if CreatorDiscoveryResultsPolicy.allowsNextPage(
