@@ -2539,9 +2539,48 @@ final class PlayerSmokeTests: XCTestCase {
         let search = app.searchFields.firstMatch
         if !search.exists { app.swipeDown() }
         XCTAssertTrue(search.waitForExistence(timeout: 10) && search.isHittable)
+        func captureSearchInput(_ name: String) {
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = name
+            shot.lifetime = .keepAlways
+            add(shot)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = name + "-ax"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
         search.tap()
-        search.typeText(title)
-        XCTAssertEqual(search.value as? String, title,
+        captureSearchInput("arcade-pulse-explicit-apply-input-start")
+        // Keep the exact genuine title, including spaces and mixed scripts.
+        // Observe each boundary rather than masking dropped input by retrying
+        // or falling back to a shorter query. Re-resolve the native element
+        // after the immersive-to-grid transition, without re-tapping it.
+        let words = title.components(separatedBy: " ")
+        var expectedDraft = ""
+        for (index, word) in words.enumerated() {
+            let segment = index == 0 ? word : " " + word
+            expectedDraft += segment
+            let currentSearch = app.searchFields.firstMatch
+            guard currentSearch.exists && currentSearch.isHittable &&
+                    app.keyboards.firstMatch.exists else {
+                captureSearchInput("arcade-pulse-explicit-apply-focus-lost-\(index)")
+                XCTFail("Native search ownership/keyboard lost before title segment \(index).")
+                return
+            }
+            currentSearch.typeText(segment)
+            let expected = expectedDraft
+            let draftMatches = NSPredicate { _, _ in
+                app.searchFields.firstMatch.value as? String == expected
+            }
+            let expectation = XCTNSPredicateExpectation(predicate: draftMatches, object: nil)
+            let result = XCTWaiter.wait(for: [expectation], timeout: 5)
+            captureSearchInput("arcade-pulse-explicit-apply-input-segment-\(index)")
+            guard result == .completed else {
+                XCTFail("Native draft diverged at title segment \(index); expected \(expected), got \(String(describing: app.searchFields.firstMatch.value)).")
+                return
+            }
+        }
+        XCTAssertEqual(app.searchFields.firstMatch.value as? String, title,
                        "The actual mixed-script draft must survive typing.")
         let apply = app.buttons["feed.grid.applySearch"].firstMatch
         let clear = app.buttons["feed.grid.clearSearch"].firstMatch
