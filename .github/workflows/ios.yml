@@ -171,6 +171,23 @@ jobs:
             /tmp/test-feedback.json
           if-no-files-found: ignore
 
+  # Separate evidence only: a failed genuine native test remains failed.
+  # Run after the player-smoke job so this read-only probe cannot warm its
+  # backend or alter the timing or selected game of that test.
+  public-package-failure-diagnostic:
+    needs: player-smoke
+    if: ${{ always() && needs.player-smoke.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Observe public GamePackage envelope after native failure
+        run: python3 tools/test-feedback/observe-public-package-failure.py
+
   # Real iPad UI evaluation at a regular-width size class.
   ipad-feed-ui-evaluator:
     runs-on: macos-latest
