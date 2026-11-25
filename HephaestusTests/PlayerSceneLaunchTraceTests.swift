@@ -48,6 +48,26 @@ struct PlayerSceneLaunchTraceTests {
         }
     }
 
+    @Test func debugWitnessNeverCrossesNonceLeaseOrTerminalBoundary() {
+        var trace = PlayerSceneLaunchTrace()
+        for index in 1...160 {
+            let nonce = "current-\(index)"
+            let lease = UInt64(index)
+            let handle = PlayerSceneLaunchTrace.Handle(nonce: nonce, lease: lease)
+            trace.begin(nonce: nonce, lease: nil)
+            trace.record(.debugDocumentStart, nonce: nonce, lease: nil)
+            trace.attach(nonce: nonce, lease: lease)
+            trace.record(.debugScriptError, nonce: "retired", lease: lease)
+            trace.record(.debugPromiseRejection, nonce: nonce, lease: nil)
+            trace.record(.debugDOMReady, nonce: nonce, lease: lease)
+            trace.record(.debugDOMReady, nonce: nonce, lease: lease)
+            let result = trace.finishTimeout(handle)
+            #expect(result == "prepared,receiverAttached,debugDocumentStart,debugDOMReady,timeout")
+            trace.record(.debugScriptError, nonce: nonce, lease: lease)
+            #expect(trace.finishTimeout(handle) == result)
+        }
+    }
+
     @Test func cardinalityBoundAndCanonicalOrder() {
         var trace = PlayerSceneLaunchTrace()
         let handle = PlayerSceneLaunchTrace.Handle(nonce: "private", lease: 5)

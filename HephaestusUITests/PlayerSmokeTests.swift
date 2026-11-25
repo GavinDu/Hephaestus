@@ -38,6 +38,7 @@ private func safePlayerSmokeSceneTrace(_ value: String?) -> String {
     let parts = value.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
     guard parts.count == 1 || parts.count == 2 else { return "unattributed_timeout" }
     let allowed = Set(["prepared", "navigationStarted", "receiverAttached", "navigationFinished",
+                       "debugDocumentStart", "debugDOMReady", "debugScriptError", "debugPromiseRejection",
                        "prewarmReceived", "prewarmRejected", "prewarmAccepted", "attachedReceived",
                        "bridgeRejected", "bridgeAdmitted", "metricRejected", "reducerAccepted",
                        "deliveryInvoked", "sheetAccepted", "sheetRejected", "timeout"])
@@ -116,7 +117,10 @@ final class PlayerSmokeTests: XCTestCase {
         XCTAssertEqual(safePlayerSmokeSceneTrace("prepared,private-secret,timeout"), "unattributed_timeout")
         XCTAssertEqual(safePlayerSmokeSceneTrace("prepared,prepared,timeout"), "unattributed_timeout")
         XCTAssertEqual(safePlayerSmokeSceneTrace("prepared,navigationFinished"), "unattributed_timeout")
-        XCTAssertEqual(safePlayerSmokeSceneTrace(String(repeating: "x", count: 301)), "unattributed_timeout")
+        XCTAssertEqual(safePlayerSmokeSceneTrace(String(repeating: "x", count: 513)), "unattributed_timeout")
+        XCTAssertEqual(safePlayerSmokeSceneTrace("prepared,debugDocumentStart,debugScriptError,timeout|unbound_window=none"),
+                       "prepared,debugDocumentStart,debugScriptError,timeout|unbound_window=none")
+        XCTAssertEqual(safePlayerSmokeSceneTrace("prepared,debugScriptError:private,timeout"), "unattributed_timeout")
         XCTAssertEqual(safePlayerSmokeSceneTrace(nil), "unattributed_timeout")
     }
 

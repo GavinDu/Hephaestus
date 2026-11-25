@@ -463,6 +463,7 @@ enum PlayerFirstSceneWaitPolicy {
 struct PlayerSceneLaunchTrace {
     enum Stage: String, CaseIterable, Hashable {
         case prepared, navigationStarted, receiverAttached, navigationFinished
+        case debugDocumentStart, debugDOMReady, debugScriptError, debugPromiseRejection
         case prewarmReceived, prewarmRejected, prewarmAccepted
         case attachedReceived, bridgeRejected, bridgeAdmitted
         case metricRejected, reducerAccepted, deliveryInvoked, sheetAccepted, sheetRejected, timeout
@@ -1840,12 +1841,44 @@ enum PlayerWebViewPool {
         // This app has no other WKUserScripts in this private pooled player.
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
-        let source = """
+        var source = """
         Object.defineProperty(window, '__hephaestusNativeBridge', {
           value: Object.freeze({schema: 2, documentNonce: '\(nonce)'}),
           writable: false, configurable: false
         });
         """
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-scene-trace") {
+            // A transport/boot witness, not a scene event or trusted runtime verdict.
+            // Never read error text, resource URLs, game state or credentials.
+            source += """
+
+            (() => {
+              const seen = new Set();
+              const observe = (stage) => {
+                if (seen.has(stage)) return;
+                seen.add(stage);
+                try {
+                  window.webkit?.messageHandlers?.hephaestusRunResult?.postMessage({
+                    type: 'debug_document_witness', schema: 2,
+                    documentNonce: '\(nonce)', stage
+                  });
+                } catch { /* diagnostic only */ }
+              };
+              observe('debugDocumentStart');
+              document.addEventListener('DOMContentLoaded',
+                () => observe('debugDOMReady'), { once: true });
+              window.addEventListener('error', (event) => {
+                if (event instanceof ErrorEvent || event.target?.tagName === 'SCRIPT') {
+                  observe('debugScriptError');
+                }
+              }, true);
+              window.addEventListener('unhandledrejection',
+                () => observe('debugPromiseRejection'));
+            })();
+            """
+        }
+        #endif
         controller.addUserScript(WKUserScript(
             source: source, injectionTime: .atDocumentStart,
             forMainFrameOnly: true
@@ -2305,6 +2338,37 @@ enum PlayerWebViewPool {
         )
     }
 
+    #if DEBUG
+    /// Test-only document witness shares the existing handler but never enters
+    /// the session binder, game reducer, result callback or scene ledger.
+    private static func consumeDebugDocumentWitness(
+        _ message: WKScriptMessage, view: WKWebView, lease: UInt64?
+    ) -> Bool {
+        guard let body = message.body as? [String: Any],
+              body["type"] as? String == "debug_document_witness" else { return false }
+        // Consume even malformed claims; never forward them as runtime messages.
+        guard ProcessInfo.processInfo.arguments.contains("--ui-test-scene-trace"),
+              message.name == prewarmMetricName, message.webView === view,
+              pooledView === view, message.frameInfo.isMainFrame,
+              sessionFingerprint == credentialFingerprint(),
+              let url = currentURL, message.frameInfo.request.url == url,
+              PlayerNativeMetricPayload.strictInt(body["schema"]) == 2,
+              let nonce = body["documentNonce"] as? String,
+              documentEpochGate.acceptsV2(nonce),
+              let label = body["stage"] as? String,
+              let stage = PlayerSceneLaunchTrace.Stage(rawValue: label),
+              [.debugDocumentStart, .debugDOMReady, .debugScriptError, .debugPromiseRejection].contains(stage)
+        else { return true }
+        let origin = message.frameInfo.securityOrigin
+        guard PlayerWebKitOriginPolicy.matches(
+            backendURL: BackendConfig.baseURL, originScheme: origin.protocol,
+            originHost: origin.host, originPort: origin.port
+        ) else { return true }
+        sceneLaunchTrace.record(stage, nonce: nonce, lease: lease)
+        return true
+    }
+    #endif
+
     /// Reject all callbacks from retired views/credential epochs. Untrusted
     /// attached messages still run through the original Coordinator's full
     /// native main-frame/origin/nonce/session/game/typed-metric admission.
@@ -2323,11 +2387,17 @@ enum PlayerWebViewPool {
             credentialScopeCurrent: scopeIsCurrent
         ) {
         case .speculative:
+            #if DEBUG
+            if consumeDebugDocumentWitness(message, view: view, lease: nil) { return }
+            #endif
             observeUnboundSceneClaim(message, view: view)
             collectPrewarmMetric(message)
         case .attached:
             guard let lease = attachedReceiverLease,
                   ownsActiveAttachment(view, lease: lease) else { return }
+            #if DEBUG
+            if consumeDebugDocumentWitness(message, view: view, lease: lease) { return }
+            #endif
             observeUnboundSceneClaim(message, view: view)
             attachedMessageReceiver?.userContentController(
                 controller, didReceive: message
