@@ -1452,6 +1452,31 @@ struct HephaestusTests {
     #expect(!PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: 503))
 }
 
+/// #691: both genuine WKNavigationResponse delegates consume this single
+/// pure status gate; Swift sample values are not synthetic published games.
+@MainActor @Test func nativeMainDocumentRejectsNonfinalHTTPResponsesAtAllBoundaries() {
+    for status in 100...599 {
+        let expected = (200...299).contains(status) || status == 304
+        #expect(PlayerMainDocumentHTTPPolicy.permitsMainDocument(statusCode: status) == expected)
+        #expect(PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: status) == expected)
+    }
+    for status in [Int.min, -9999, -1, 0, 1, 99, 600, 999, Int.max] {
+        #expect(!PlayerMainDocumentHTTPPolicy.permitsMainDocument(statusCode: status))
+        #expect(!PlayerPrewarmResponsePolicy.shouldCacheResponse(statusCode: status))
+    }
+    for status in [200, 201, 204, 206, 299, 304] {
+        #expect(PlayerMainDocumentHTTPPolicy.permitsMainDocument(statusCode: status))
+    }
+    for status in [100, 101, 103, 199, 300, 301, 302, 303, 305, 307, 308, 399, 401, 403, 404, 426, 503] {
+        #expect(!PlayerMainDocumentHTTPPolicy.permitsMainDocument(statusCode: status))
+    }
+    // Additional 160 invalid negative/out-of-range values guard extensions.
+    for delta in 0..<160 {
+        #expect(!PlayerMainDocumentHTTPPolicy.permitsMainDocument(statusCode: -1 - delta))
+        #expect(!PlayerMainDocumentHTTPPolicy.permitsMainDocument(statusCode: 600 + delta))
+    }
+}
+
 @Test func playerHTTPFailuresDistinguishRetryableServerErrorsFromPermanentErrors() {
     for status in [408, 425, 429, 500, 502, 503, 504] {
         let error = PlayerLoadFailure.httpError(statusCode: status)
