@@ -2312,32 +2312,6 @@ enum PlayerWebViewPool {
         ) == offered
     }
 
-    /// Observe only the shape of scene claims from the trusted origin and
-    /// current pooled view. A legacy/wrong nonce may belong to an earlier
-    /// same-origin document: never add it to sceneLaunchTrace or authorize
-    /// readiness, session binding, score, or native delivery.
-    private static func observeUnboundSceneClaim(_ message: WKScriptMessage, view: WKWebView) {
-        guard message.name == prewarmMetricName,
-              message.webView === view, pooledView === view,
-              documentEpochGate.navigationStarted, message.frameInfo.isMainFrame,
-              let body = message.body as? [String: Any],
-              body["type"] as? String == "player_metric",
-              body["metric"] as? String == "first_scene_render_submit",
-              let url = currentURL, view.url == url,
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let expectedGameID = components.queryItems?.first(where: { $0.name == "game" })?.value,
-              body["gameId"] as? String == expectedGameID else { return }
-        let source = message.frameInfo.securityOrigin
-        guard PlayerWebKitOriginPolicy.matches(
-            backendURL: BackendConfig.baseURL, originScheme: source.protocol,
-            originHost: source.host, originPort: source.port
-        ) else { return }
-        unboundSceneWindow.observe(
-            schema: PlayerNativeMetricPayload.strictInt(body["schema"]),
-            nonce: body["documentNonce"] as? String, currentNonce: documentEpochGate.currentNonce
-        )
-    }
-
     #if DEBUG
     /// Test-only document witness shares the existing handler but never enters
     /// the session binder, game reducer, result callback or scene ledger.
@@ -2368,6 +2342,32 @@ enum PlayerWebViewPool {
         return true
     }
     #endif
+
+    /// Observe only the shape of scene claims from the trusted origin and
+    /// current pooled view. A legacy/wrong nonce may belong to an earlier
+    /// same-origin document: never add it to sceneLaunchTrace or authorize
+    /// readiness, session binding, score, or native delivery.
+    private static func observeUnboundSceneClaim(_ message: WKScriptMessage, view: WKWebView) {
+        guard message.name == prewarmMetricName,
+              message.webView === view, pooledView === view,
+              documentEpochGate.navigationStarted, message.frameInfo.isMainFrame,
+              let body = message.body as? [String: Any],
+              body["type"] as? String == "player_metric",
+              body["metric"] as? String == "first_scene_render_submit",
+              let url = currentURL, view.url == url,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let expectedGameID = components.queryItems?.first(where: { $0.name == "game" })?.value,
+              body["gameId"] as? String == expectedGameID else { return }
+        let source = message.frameInfo.securityOrigin
+        guard PlayerWebKitOriginPolicy.matches(
+            backendURL: BackendConfig.baseURL, originScheme: source.protocol,
+            originHost: source.host, originPort: source.port
+        ) else { return }
+        unboundSceneWindow.observe(
+            schema: PlayerNativeMetricPayload.strictInt(body["schema"]),
+            nonce: body["documentNonce"] as? String, currentNonce: documentEpochGate.currentNonce
+        )
+    }
 
     /// Reject all callbacks from retired views/credential epochs. Untrusted
     /// attached messages still run through the original Coordinator's full

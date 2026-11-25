@@ -64,7 +64,8 @@ struct PlayerSceneLaunchTraceTests {
             let result = trace.finishTimeout(handle)
             #expect(result == "prepared,receiverAttached,debugDocumentStart,debugDOMReady,timeout")
             trace.record(.debugScriptError, nonce: nonce, lease: lease)
-            #expect(trace.finishTimeout(handle) == result)
+            let afterRetirement = trace.finishTimeout(handle)
+            #expect(afterRetirement == result)
         }
     }
 
