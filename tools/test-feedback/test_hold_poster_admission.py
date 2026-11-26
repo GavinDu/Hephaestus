@@ -53,5 +53,30 @@ class NativeHoldPosterURLPolicySourceTests(unittest.TestCase):
         self.assertNotIn("evaluateJavaScript", policy)
 
 
+    def test_redirect_policy_pins_every_hop_to_original_native_origin(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        policy = source.split("enum PlayerPosterRedirectHopPolicy {", 1)[1].split(
+            "// MARK: - Quality (performance control)", 1
+        )[0]
+        for required in (
+            "static let maximumRedirects = 3",
+            "(0..<maximumRedirects).contains(alreadyFollowed)",
+            "admittedUnambiguousURL(original, backendOrigin: backendOrigin)",
+            "admittedUnambiguousURL(previous, backendOrigin: backendOrigin)",
+            "admittedUnambiguousURL(proposed, backendOrigin: backendOrigin)",
+            "let pinnedOrigin = originKey(start)",
+            "originKey(prior) == pinnedOrigin",
+            "originKey(next) == pinnedOrigin",
+            "components.percentEncodedHost",
+            "PlayerHoldPosterURLPolicy.admittedURL(",
+            "(1...65_535).contains(port)",
+        ):
+            self.assertIn(required, policy)
+        # This policy must stay independent of transport and readiness.
+        # Actual delegate wiring and cancellation are separately scoped.
+        for forbidden in ("URLSession.shared", "evaluateJavaScript", "WKWebView(", "firstSceneRenderSubmit"):
+            self.assertNotIn(forbidden, policy)
+
+
 if __name__ == "__main__":
     unittest.main()
