@@ -1,6 +1,8 @@
 import Combine
 import CoreFoundation
 import CryptoKit
+import ImageIO
+import UniformTypeIdentifiers
 import Network
 import SwiftUI
 import UIKit
@@ -126,6 +128,84 @@ enum PlayerPosterRedirectHopPolicy {
         let port = parts.port ?? (scheme == "https" ? 443 : 80)
         guard (1...65_535).contains(port) else { return nil }
         return "\(scheme)|\(host)|\(port)"
+    }
+}
+
+/// Pure admission for a future lease-owned hold-poster transport (#715).
+/// Mirrors Generator preview.go's PNG/JPEG, 2 MiB and 4096 dimension
+/// limits. No image decode or network request occurs in this policy.
+/// The shipping AsyncImage does not yet invoke it.
+struct PlayerHoldPosterResponseBudget {
+    static let maximumBytes = 2 * 1024 * 1024
+    static let maximumDimension = 4096
+    static let maximumPixels = 16_777_216
+
+    enum Format: String {
+        case png = "image/png"
+        case jpeg = "image/jpeg"
+
+        var typeIdentifier: String {
+            switch self {
+            case .png: UTType.png.identifier
+            case .jpeg: UTType.jpeg.identifier
+            }
+        }
+    }
+
+    let format: Format
+    let declaredLength: Int?
+    private(set) var receivedBytes = 0
+    private(set) var rejected = false
+
+    init?(statusCode: Int, mimeType: String?, expectedLength: Int64,
+          contentEncoding: String?) {
+        guard statusCode == 200,
+              let mimeType, let format = Format(rawValue: mimeType.lowercased()),
+              expectedLength == -1 || (1...Int64(Self.maximumBytes)).contains(expectedLength),
+              contentEncoding == nil || contentEncoding?.lowercased() == "identity"
+        else { return nil }
+        self.format = format
+        self.declaredLength = expectedLength == -1 ? nil : Int(expectedLength)
+    }
+
+    /// Call BEFORE appending a received chunk to the bounded data buffer.
+    /// A rejected response is terminal, even if a later chunk is small.
+    mutating func admitChunk(byteCount: Int) -> Bool {
+        let limit = declaredLength ?? Self.maximumBytes
+        guard !rejected, byteCount >= 0, byteCount <= limit - receivedBytes else {
+            rejected = true
+            return false
+        }
+        receivedBytes += byteCount
+        return true
+    }
+
+    // A future transport must call this only after successful terminal completion;
+    // unknown Content-Length cannot prove EOF or successful delivery on its own.
+    var complete: Bool {
+        !rejected && receivedBytes > 0 &&
+            (declaredLength == nil || receivedBytes == declaredLength)
+    }
+
+    static func dimensionsAllowed(width: Int, height: Int) -> Bool {
+        guard (1...maximumDimension).contains(width),
+              (1...maximumDimension).contains(height) else { return false }
+        return width <= maximumPixels / height
+    }
+
+    /// Inspect encoded type and header metadata before any raster decode.
+    /// This does not certify complete bitstream validity or image moderation.
+    func admitsEncodedHeader(_ data: Data) -> Bool {
+        guard complete, data.count == receivedBytes else { return false }
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, options),
+              let identifier = CGImageSourceGetType(source),
+              (identifier as String) == format.typeIdentifier,
+              CGImageSourceGetCount(source) == 1,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, options) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int else { return false }
+        return Self.dimensionsAllowed(width: width, height: height)
     }
 }
 
