@@ -297,6 +297,25 @@ enum ForYouPageLayout {
         requestedScope == currentScope && requestedGeneration == currentGeneration
     }
 
+    /// A private cursor belongs to an exact scope, account, session and page
+    /// lease. Reject old success, error and spinner callbacks consistently.
+    static func shouldApplyViewerPaginationResult(
+        requestedScope: SocialFeedScope, currentScope: SocialFeedScope,
+        requestedGeneration: Int, currentGeneration: Int,
+        requestedViewerID: String, currentViewerID: String,
+        requestedSessionEpoch: Int, currentSessionEpoch: Int,
+        requestedPaginationEpoch: Int, currentPaginationEpoch: Int
+    ) -> Bool {
+        shouldApplyPaginationResult(
+            requestedScope: requestedScope, currentScope: currentScope,
+            requestedGeneration: requestedGeneration,
+            currentGeneration: currentGeneration
+        ) &&
+            requestedViewerID == currentViewerID &&
+            requestedSessionEpoch == currentSessionEpoch &&
+            requestedPaginationEpoch == currentPaginationEpoch
+    }
+
     // Play Next stays within its originating feed; an existing game should
     // not be replaced by an unrelated For You fetch after finishing a round.
     // Clear any search filter so the target card can become the settled page.
