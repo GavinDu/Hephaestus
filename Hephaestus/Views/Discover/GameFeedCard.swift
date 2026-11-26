@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 
 /// Public expression provenance is backend text, not a cover overlay.
 /// Accessibility text requires a vertical metadata and counts layout.
@@ -78,6 +79,22 @@ enum GameFeedCardCreatorIdentityPolicy {
 /// and VoiceOver action ordering are independently tested on real cards.
 enum GameFeedCardSocialActionLayout {
     static let minimumHitSize: CGFloat = ArcadePulseTheme.minimumTarget
+}
+
+/// Native ButtonStyle retains one action owner. The transient pressed state
+/// is diagnostic, not a second tap recognizer or a presentation trigger.
+private struct GridCommentsPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .onChange(of: configuration.isPressed) { _, pressed in
+                #if DEBUG
+                Logger(subsystem: "ai.tinydream.Hephaestus",
+                       category: "ArcadePulseComments")
+                    .notice("UI_GRID_COMMENTS_PRESS_ACTIVE=\(pressed, privacy: .public)")
+                #endif
+            }
+    }
 }
 
 /// A game-first social card. Until the API returns real preview assets and creator
@@ -279,9 +296,11 @@ struct GameFeedCard: View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .bottomLeading) {
                 LinearGradient(colors: palette, startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .allowsHitTesting(false)
                 posterArtwork
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
+                    .allowsHitTesting(false)
                 // This grid card does not normally own the feed's shared
                 // decoder. If explicitly enabled, keep the current poster
                 // visible until AVPlayerLayer has a *real* decoded frame.
@@ -298,6 +317,7 @@ struct GameFeedCard: View {
                     .id(previewPlayback.presentationGeneration)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityHidden(true)
+                    .allowsHitTesting(false)
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 8) {
@@ -396,7 +416,7 @@ struct GameFeedCard: View {
                                    height: GameFeedCardSocialActionLayout.minimumHitSize)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(GridCommentsPressStyle())
                     .accessibilityLabel("View comments")
                     .accessibilityIdentifier("grid.game.social.comments")
 
@@ -472,6 +492,9 @@ struct GameFeedCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: HephaestusDesign.cardRadius, style: .continuous)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                // Decorative stroke must never own a card control's touch.
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
         }
         .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 5)
         .onAppear {

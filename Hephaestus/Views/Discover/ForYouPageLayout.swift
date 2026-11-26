@@ -1,6 +1,71 @@
 import Foundation
 import SwiftUI
 
+/// Identity of the actual result action and its feed at the instant of tap.
+/// Equality revokes stale navigation without treating a page offset as an ID.
+struct FeedPlayNextContext: Equatable {
+    let presentationID: UUID
+    let runID: String
+    let gameID: String
+    let viewerID: String
+    let sessionEpoch: Int
+    let scope: SocialFeedScope
+    let searchQuery: String
+    let rootGeneration: Int
+}
+
+struct FeedPlayNextOperation {
+    let id = UUID()
+    let context: FeedPlayNextContext
+}
+
+enum FeedPlayNextUnavailableReason: Equatable {
+    case originUnavailable, loading, pageFailed, moreAvailable, noMoreMatches
+
+    var message: String {
+        switch self {
+        case .originUnavailable: return "This game is no longer in the current feed."
+        case .loading: return "The feed is still loading. Try Next Game again."
+        case .pageFailed: return "Could not load more games. Try Next Game again."
+        case .moreAvailable: return "No next match yet. Try Next Game again."
+        case .noMoreMatches: return "No more matches in this feed."
+        }
+    }
+}
+
+struct FeedPlayNextFeedback {
+    let context: FeedPlayNextContext
+    let reason: FeedPlayNextUnavailableReason
+
+    func message(for current: FeedPlayNextContext?, presentationID: UUID) -> String? {
+        guard let current, context == current,
+              context.presentationID == presentationID else { return nil }
+        return reason.message
+    }
+}
+
+enum FeedPlayNextPolicy {
+    static func unavailableReason(originPresent: Bool, isLoading: Bool,
+                                  hasCursor: Bool, hasError: Bool) -> FeedPlayNextUnavailableReason {
+        if isLoading { return .loading }
+        if !originPresent { return .originUnavailable }
+        if hasError { return .pageFailed }
+        return hasCursor ? .moreAvailable : .noMoreMatches
+    }
+
+    static func isCurrent(_ operation: FeedPlayNextOperation,
+                          pending: FeedPlayNextOperation?,
+                          current: FeedPlayNextContext?) -> Bool {
+        guard let pending, let current else { return false }
+        return pending.id == operation.id && operation.context == current
+    }
+
+    static func nextGameID(after originID: String, visibleIDs: [String]) -> String? {
+        guard let origin = visibleIDs.firstIndex(of: originID) else { return nil }
+        return visibleIDs.dropFirst(origin + 1).first { $0 != originID }
+    }
+}
+
 /// A genuine selected For You page may hide decorative topic hashtags
 /// in compact/Accessibility5 mode to preserve Play. The existing real
 /// Game Actions sheet is scrollable and can disclose the *same* valid
