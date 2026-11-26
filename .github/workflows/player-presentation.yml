@@ -10,6 +10,11 @@ on:
       - "HephaestusUITests/**"
       - "Hephaestus.xcodeproj/**"
       - ".github/workflows/player-presentation.yml"
+      - ".github/workflows/ios.yml"
+      - "tools/test-feedback/verify-live-game-fixture.py"
+      - "tools/test-feedback/test_verify_live_game_fixture.py"
+      - "tools/test-feedback/observe-public-package-failure.py"
+      - "tools/test-feedback/test_observe_public_package_failure.py"
   push:
     branches: [main]
     paths:
@@ -18,6 +23,11 @@ on:
       - "HephaestusUITests/**"
       - "Hephaestus.xcodeproj/**"
       - ".github/workflows/player-presentation.yml"
+      - ".github/workflows/ios.yml"
+      - "tools/test-feedback/verify-live-game-fixture.py"
+      - "tools/test-feedback/test_verify_live_game_fixture.py"
+      - "tools/test-feedback/observe-public-package-failure.py"
+      - "tools/test-feedback/test_observe_public_package_failure.py"
 
 permissions:
   contents: read
