@@ -66,5 +66,30 @@ class IPadCommentsStreamWorkflowContractTests(unittest.TestCase):
         )
 
 
+    def test_grid_comments_has_one_native_press_owner_and_inert_decorations(self):
+        card = (WORKFLOW.parents[2] / "Hephaestus" / "Views" / "Discover"
+                / "GameFeedCard.swift").read_text(encoding="utf-8")
+        style = card.split("private struct GridCommentsPressStyle: ButtonStyle", 1)[1].split(
+            "/// A game-first social card.", 1)[0]
+        comments = card.split("Button(action: onOpenComments)", 1)[1].split("Menu {", 1)[0]
+        self.assertIn(".onChange(of: configuration.isPressed)", style)
+        self.assertIn("#if DEBUG", style)
+        self.assertIn("UI_GRID_COMMENTS_PRESS_ACTIVE=", style)
+        self.assertIn("privacy: .public", style)
+        self.assertNotIn("TapGesture", style)
+        self.assertNotIn("onOpenComments", style)
+        self.assertIn(".buttonStyle(GridCommentsPressStyle())", comments)
+        self.assertIn(".contentShape(Rectangle())", comments)
+        self.assertIn("GameFeedCardSocialActionLayout.minimumHitSize", comments)
+        self.assertNotIn("Gesture(", comments)
+        stage = card.split("ZStack(alignment: .bottomLeading)", 1)[1].split(
+            "VStack(alignment: .leading, spacing: 7)", 1)[0]
+        self.assertEqual(stage.count(".allowsHitTesting(false)"), 3)
+        border = card.split(".stroke(Color.primary.opacity(0.06), lineWidth: 1)", 1)[1].split(
+            ".shadow(", 1)[0]
+        self.assertIn(".allowsHitTesting(false)", border)
+        self.assertIn(".accessibilityHidden(true)", border)
+
+
 if __name__ == "__main__":
     unittest.main()
