@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import OSLog
 
 /// Public expression provenance is backend text, not a cover overlay.
@@ -81,19 +82,93 @@ enum GameFeedCardSocialActionLayout {
     static let minimumHitSize: CGFloat = ArcadePulseTheme.minimumTarget
 }
 
-/// Native ButtonStyle retains one action owner. The transient pressed state
-/// is diagnostic, not a second tap recognizer or a presentation trigger.
-private struct GridCommentsPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .opacity(configuration.isPressed ? 0.72 : 1)
-            .onChange(of: configuration.isPressed) { _, pressed in
-                #if DEBUG
-                Logger(subsystem: "ai.tinydream.Hephaestus",
-                       category: "ArcadePulseComments")
-                    .notice("UI_GRID_COMMENTS_PRESS_ACTIVE=\(pressed, privacy: .public)")
-                #endif
-            }
+/// Native UIControl tracking isolates a real grid Comments activation from
+/// the SwiftUI adaptive grid's transient pressed-state observations. It has
+/// exactly one primary action, not a parallel SwiftUI TapGesture.
+@MainActor
+final class GridCommentsTrackingButton: UIButton {
+    override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
+        let accepted = super.beginTracking(touch, with: event)
+        #if DEBUG
+        Logger(subsystem: "ai.tinydream.Hephaestus", category: "ArcadePulseComments")
+            .notice("UI_GRID_COMMENTS_NATIVE_BEGIN accepted=\(accepted, privacy: .public)")
+        #endif
+        return accepted
+    }
+
+    override func endTracking(_ touch: UITouch?, with event: UIEvent?) {
+        #if DEBUG
+        Logger(subsystem: "ai.tinydream.Hephaestus", category: "ArcadePulseComments")
+            .notice("UI_GRID_COMMENTS_NATIVE_END")
+        #endif
+        super.endTracking(touch, with: event)
+    }
+
+    override func cancelTracking(with event: UIEvent?) {
+        #if DEBUG
+        Logger(subsystem: "ai.tinydream.Hephaestus", category: "ArcadePulseComments")
+            .notice("UI_GRID_COMMENTS_NATIVE_CANCEL")
+        #endif
+        super.cancelTracking(with: event)
+    }
+}
+
+@MainActor
+struct GridCommentsNativeButton: UIViewRepresentable {
+    let action: () -> Void
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var action: (() -> Void)?
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+        }
+
+        @objc func activate() {
+            #if DEBUG
+            Logger(subsystem: "ai.tinydream.Hephaestus", category: "ArcadePulseComments")
+                .notice("UI_GRID_COMMENTS_NATIVE_PRIMARY_ACTION")
+            #endif
+            action?()
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    static func makeControl(coordinator: Coordinator) -> GridCommentsTrackingButton {
+        let button = GridCommentsTrackingButton(frame: .zero)
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: "bubble.right",
+                                      withConfiguration: UIImage.SymbolConfiguration(
+                                          pointSize: 17, weight: .regular))
+        configuration.contentInsets = .zero
+        configuration.baseForegroundColor = .label
+        button.configuration = configuration
+        button.isAccessibilityElement = true
+        button.accessibilityLabel = "View comments"
+        button.accessibilityIdentifier = "grid.game.social.comments"
+        button.accessibilityTraits.insert(.button)
+        button.addTarget(coordinator, action: #selector(Coordinator.activate),
+                         for: .primaryActionTriggered)
+        return button
+    }
+
+    func makeUIView(context: Context) -> GridCommentsTrackingButton {
+        Self.makeControl(coordinator: context.coordinator)
+    }
+
+    func updateUIView(_ uiView: GridCommentsTrackingButton, context: Context) {
+        context.coordinator.action = action
+    }
+
+    static func dismantleUIView(_ uiView: GridCommentsTrackingButton,
+                                coordinator: Coordinator) {
+        coordinator.action = nil
+        uiView.removeTarget(coordinator, action: #selector(Coordinator.activate),
+                            for: .primaryActionTriggered)
     }
 }
 
@@ -410,15 +485,12 @@ struct GameFeedCard: View {
                     .accessibilityLabel(isLiked ? "Unlike game" : "Like game")
                     .accessibilityIdentifier("grid.game.social.like")
 
-                    Button(action: onOpenComments) {
-                        Image(systemName: "bubble.right")
-                            .frame(width: GameFeedCardSocialActionLayout.minimumHitSize,
-                                   height: GameFeedCardSocialActionLayout.minimumHitSize)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(GridCommentsPressStyle())
-                    .accessibilityLabel("View comments")
-                    .accessibilityIdentifier("grid.game.social.comments")
+                    GridCommentsNativeButton(action: onOpenComments)
+                        // Do not reuse a native activation owner for another
+                        // published card during a grid/rotation transition.
+                        .id(game.id)
+                        .frame(width: GameFeedCardSocialActionLayout.minimumHitSize,
+                               height: GameFeedCardSocialActionLayout.minimumHitSize)
 
                     Menu {
                         Button("Not interested", systemImage: "hand.thumbsdown",
