@@ -173,20 +173,27 @@ struct PlayerHoldPosterResponseBudgetTests {
     @Test func boundedStreamingRejectsOverflowMismatchAndTerminalFailure() {
         let cap = Budget.maximumBytes
         var exact = Budget(statusCode: 200, mimeType: "image/png", expectedLength: Int64(cap), contentEncoding: nil)!
-        #expect(exact.admitChunk(byteCount: cap - 1))
+        let chunkAccepted1 = exact.admitChunk(byteCount: cap - 1)
+        #expect(chunkAccepted1)
         #expect(!exact.complete)
-        #expect(exact.admitChunk(byteCount: 1))
+        let chunkAccepted2 = exact.admitChunk(byteCount: 1)
+        #expect(chunkAccepted2)
         #expect(exact.complete)
-        #expect(!exact.admitChunk(byteCount: 1))
+        let chunkAccepted3 = exact.admitChunk(byteCount: 1)
+        #expect(!chunkAccepted3)
         #expect(!exact.complete)
-        #expect(!exact.admitChunk(byteCount: 0))
+        let chunkAccepted4 = exact.admitChunk(byteCount: 0)
+        #expect(!chunkAccepted4)
         var unknown = Budget(statusCode: 200, mimeType: "image/jpeg", expectedLength: -1, contentEncoding: "identity")!
         #expect(!unknown.complete)
-        #expect(unknown.admitChunk(byteCount: cap))
+        let chunkAccepted5 = unknown.admitChunk(byteCount: cap)
+        #expect(chunkAccepted5)
         #expect(unknown.complete)
-        #expect(!unknown.admitChunk(byteCount: Int.max))
+        let chunkAccepted6 = unknown.admitChunk(byteCount: Int.max)
+        #expect(!chunkAccepted6)
         var negative = Budget(statusCode: 200, mimeType: "image/png", expectedLength: 4, contentEncoding: nil)!
-        #expect(!negative.admitChunk(byteCount: -1))
+        let chunkAccepted7 = negative.admitChunk(byteCount: -1)
+        #expect(!chunkAccepted7)
         #expect(!negative.complete)
     }
 
@@ -224,16 +231,19 @@ struct PlayerHoldPosterResponseBudgetTests {
             let data = try encodedFixture(type)
             var correct = try #require(Budget(statusCode: 200, mimeType: mime, expectedLength: Int64(data.count), contentEncoding: nil))
             #expect(!correct.admitsEncodedHeader(data))
-            #expect(correct.admitChunk(byteCount: data.count))
+            let chunkAccepted8 = correct.admitChunk(byteCount: data.count)
+            #expect(chunkAccepted8)
             #expect(correct.admitsEncodedHeader(data))
             #expect(!correct.admitsEncodedHeader(Data(data.dropLast())))
             var wrong = try #require(Budget(statusCode: 200, mimeType: wrongMIME, expectedLength: -1, contentEncoding: nil))
-            #expect(wrong.admitChunk(byteCount: data.count))
+            let chunkAccepted9 = wrong.admitChunk(byteCount: data.count)
+            #expect(chunkAccepted9)
             #expect(!wrong.admitsEncodedHeader(data))
         }
         let corrupt = Data(repeating: 0, count: 32)
         var budget = try #require(Budget(statusCode: 200, mimeType: "image/png", expectedLength: 32, contentEncoding: nil))
-        #expect(budget.admitChunk(byteCount: corrupt.count))
+        let chunkAccepted10 = budget.admitChunk(byteCount: corrupt.count)
+        #expect(chunkAccepted10)
         #expect(!budget.admitsEncodedHeader(corrupt))
     }
 }
