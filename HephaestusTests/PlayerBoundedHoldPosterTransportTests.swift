@@ -32,6 +32,30 @@ struct PlayerBoundedHoldPosterTransportTests {
         #expect(!delegate.acceptsTerminalURL(from))
     }
 
+    @Test func completionDelegateForwardsOnlyAdmittedRequest() async throws {
+        let delegate = try #require(PlayerHoldPosterRedirectDelegate(original: original, backendOrigin: backend))
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let task = session.dataTask(with: original)
+        let next = URL(string: "https://cdn.example.test/next.png")!
+        let response = try #require(HTTPURLResponse(url: original, statusCode: 302, httpVersion: "HTTP/1.1",
+            headerFields: ["Location": next.absoluteString]))
+        var proposed = URLRequest(url: next)
+        proposed.setValue("Bearer fixture", forHTTPHeaderField: "Authorization")
+        let result: URLRequest? = await withCheckedContinuation { continuation in
+            delegate.urlSession(session, task: task, willPerformHTTPRedirection: response,
+                                newRequest: proposed) { value in continuation.resume(returning: value) }
+        }
+        #expect(result?.url == next)
+        #expect(result?.value(forHTTPHeaderField: "Authorization") == nil)
+        let rejected: URLRequest? = await withCheckedContinuation { continuation in
+            delegate.urlSession(session, task: task, willPerformHTTPRedirection: response,
+                                newRequest: proposed) { value in continuation.resume(returning: value) }
+        }
+        #expect(rejected == nil)
+        #expect(delegate.denied)
+    }
+
     @Test func hostileRedirectPermanentlyDeniesTransferAcross160Cases() throws {
         for i in 0..<160 {
             let delegate = try #require(PlayerHoldPosterRedirectDelegate(original: original, backendOrigin: backend))

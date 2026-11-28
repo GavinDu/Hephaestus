@@ -15,6 +15,8 @@ on:
       - "tools/test-feedback/test_verify_live_game_fixture.py"
       - "tools/test-feedback/observe-public-package-failure.py"
       - "tools/test-feedback/test_observe_public_package_failure.py"
+      - "tools/test-feedback/check_creator_discovery_contract.py"
+      - "tools/test-feedback/test_check_creator_discovery_contract.py"
   push:
     branches: [main]
     paths:
@@ -28,6 +30,8 @@ on:
       - "tools/test-feedback/test_verify_live_game_fixture.py"
       - "tools/test-feedback/observe-public-package-failure.py"
       - "tools/test-feedback/test_observe_public_package_failure.py"
+      - "tools/test-feedback/check_creator_discovery_contract.py"
+      - "tools/test-feedback/test_check_creator_discovery_contract.py"
 
 permissions:
   contents: read

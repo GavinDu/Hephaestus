@@ -11,6 +11,9 @@ class BoundedPosterTransportTests(unittest.TestCase):
         for marker in (
             "PlayerPosterRedirectHopPolicy.admittedHop(",
             "willPerformHTTPRedirection",
+            "completionHandler: @escaping @Sendable (URLRequest?) -> Void",
+            "Task { @MainActor in",
+            "completionHandler(admitted)",
             "from == currentURL",
             'proposed.httpMethod == "GET"',
             "return Self.request(for: accepted)",
@@ -31,6 +34,7 @@ class BoundedPosterTransportTests(unittest.TestCase):
             self.assertIn(marker, src)
         self.assertLess(src.index("budget.admitChunk(byteCount: 1)"), src.index("data.append(byte)"))
         self.assertLess(src.index("budget.finish(transportSucceeded: transportSucceeded)"), src.index("budget.admitsEncodedHeader(data)"))
+        self.assertNotIn(") async -> URLRequest?", src)
         for forbidden in ("URLSession.shared", "UIImage(data:", "evaluateJavaScript", "DevLog.", "data(for:"):
             self.assertNotIn(forbidden, src)
 

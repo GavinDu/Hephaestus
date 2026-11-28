@@ -51,12 +51,20 @@ final class PlayerHoldPosterRedirectDelegate: NSObject, URLSessionTaskDelegate {
         !denied && url == currentURL
     }
 
+    // Use the completion-handler requirement, not its async ObjC thunk.
+    // Xcode 26.6 / Swift 6.3.3 crashed during SILGen for that thunk.
     nonisolated func urlSession(
         _ session: URLSession, task: URLSessionTask,
         willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest
-    ) async -> URLRequest? {
-        await admit(status: response.statusCode, from: response.url, proposed: request)
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        let status = response.statusCode
+        let from = response.url
+        Task { @MainActor in
+            let admitted = self.admit(status: status, from: from, proposed: request)
+            completionHandler(admitted)
+        }
     }
 }
 

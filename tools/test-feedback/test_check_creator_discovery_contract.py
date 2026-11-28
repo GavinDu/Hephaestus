@@ -4,6 +4,7 @@ import io
 import json
 import unittest
 from unittest import mock
+from urllib import error
 
 import check_creator_discovery_contract as contract
 
@@ -56,6 +57,89 @@ class CreatorDiscoveryContractTests(unittest.TestCase):
         self.failure(self.valid, "unexpected_redirect", status=302)
         self.assertIsNone(contract.RejectRedirects().redirect_request(
             None, None, 302, "redirect", {}, "https://other.invalid"))
+
+    def test_redirect_classification_never_treats_target_as_success(self):
+        cases = [
+            ("/player?token=unit-secret", "same_origin_player"),
+            ("https://html-5-game-generator.replit.app:443/player/", "same_origin_player"),
+            ("/login?next=unit-secret", "same_origin_login"),
+            ("//html-5-game-generator.replit.app/auth/login", "same_origin_login"),
+            ("/player-other", "same_origin_other"),
+            ("?token=unit-secret", "same_origin_other"),
+            ("https://html-5-game-generator.replit.app:444/player", "cross_origin"),
+            ("https://html-5-game-generator.replit.app:0/player", "cross_origin"),
+            ("///player", "missing_or_invalid"),
+            ("/player\n", "missing_or_invalid"),
+            ("https://other.invalid/login?token=unit-secret", "cross_origin"),
+            ("http://html-5-game-generator.replit.app/player", "insecure_or_non_https"),
+            ("javascript:alert(1)", "insecure_or_non_https"),
+            ("https:login", "missing_or_invalid"),
+            ("https://user:secret@html-5-game-generator.replit.app/player", "missing_or_invalid"),
+            ("https://html-5-game-generator.replit.app:bad/player", "missing_or_invalid"),
+            ("https://[broken", "missing_or_invalid"),
+            ("/player\\n", "missing_or_invalid"),
+            ("/\\\\other.invalid", "missing_or_invalid"),
+            (None, "missing_or_invalid"),
+            ("", "missing_or_invalid"),
+        ]
+        for location, expected in cases:
+            with self.subTest(location=location):
+                self.assertEqual(contract.classify_redirect(location), expected)
+                with self.assertRaises(contract.ContractError) as caught:
+                    contract.validate_response(302, "application/json",
+                                               encode(self.valid), location)
+                self.assertEqual(caught.exception.category, "unexpected_redirect")
+                self.assertEqual(caught.exception.http_status, 302)
+                self.assertEqual(caught.exception.redirect_category, expected)
+
+    def test_http_error_redirect_reports_fixed_category_without_follow_or_payload(self):
+        failure = error.HTTPError(contract.PUBLIC_ENDPOINT, 302, "unit-secret",
+                                  {"Location": "/player?token=unit-secret"},
+                                  io.BytesIO(b"unit-secret-body"))
+        opener = mock.Mock()
+        opener.open.side_effect = failure
+        output = io.StringIO()
+        with mock.patch.object(contract.request, "build_opener", return_value=opener):
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(contract.main(), 1)
+        opener.open.assert_called_once()
+        self.assertEqual(opener.open.call_args.args[0].get_header("Accept"), "application/json")
+        self.assertEqual(output.getvalue().strip(),
+                         "creator_schema_contract result=FAIL category=unexpected_redirect "
+                         "http_status=302 redirect_category=same_origin_player")
+        self.assertNotIn("unit-secret", output.getvalue())
+
+    def test_redirect_handler_rejects_before_urllib_parses_malformed_location(self):
+        req = contract.request.Request(contract.PUBLIC_ENDPOINT)
+        handler = contract.RejectRedirects()
+        for status in (301, 302, 303, 307, 308):
+            with self.subTest(status=status):
+                raw = {"Location": "https://[broken"}
+                stream = io.BytesIO(b"never-read")
+                with self.assertRaises(error.HTTPError) as caught:
+                    getattr(handler, "http_error_" + str(status))(
+                        req, stream, status, "redirect", raw)
+                self.assertEqual(caught.exception.code, status)
+                self.assertEqual(caught.exception.headers, raw)
+                self.assertEqual(stream.tell(), 0)
+                caught.exception.close()
+
+    def test_nonstandard_redirect_response_is_not_read_or_followed(self):
+        response = mock.MagicMock()
+        response.status = 307
+        response.headers = {"Location": "https://other.invalid/hidden?token=unit-secret"}
+        response.__enter__.return_value = response
+        opener = mock.Mock()
+        opener.open.return_value = response
+        output = io.StringIO()
+        with mock.patch.object(contract.request, "build_opener", return_value=opener):
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(contract.main(), 1)
+        opener.open.assert_called_once()
+        response.read.assert_not_called()
+        self.assertEqual(output.getvalue().strip(),
+                         "creator_schema_contract result=FAIL category=unexpected_redirect "
+                         "http_status=307 redirect_category=cross_origin")
 
     def test_required_fields_and_cursor_cannot_be_missing_or_null(self):
         self.failure({"next_cursor": None}, "missing_or_invalid_creators")
