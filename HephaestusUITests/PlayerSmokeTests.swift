@@ -1624,7 +1624,35 @@ final class PlayerSmokeTests: XCTestCase {
         }
         XCTAssertTrue(commentAction.exists,
                       "Real For You posts must offer an accessible comment action; inspect authentic feed/Retry evidence.")
+        let selectedGameTitle = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "feed.page.title.")
+        ).firstMatch
+        XCTAssertTrue(selectedGameTitle.waitForExistence(timeout: 5),
+                      "The live selected For You game must have its native title.")
+        let expectedPublishedTitle = selectedGameTitle.label
+        let expectedTitleIdentifier = selectedGameTitle.identifier
+        XCTAssertFalse(expectedPublishedTitle.isEmpty)
+        XCTAssertTrue(commentAction.isHittable,
+                      "The genuine selected game's comment action must be reachable.")
+        let beforeTap = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        beforeTap.name = "arcade-pulse-comments-genuine-before-tap"
+        beforeTap.lifetime = .keepAlways
+        add(beforeTap)
         commentAction.tap()
+        let realHeader = app.descendants(matching: .any)[
+            "comments.sheet.gameHeader"
+        ].firstMatch
+        let headerMounted = realHeader.waitForExistence(timeout: 10)
+        let headerEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        headerEvidence.name = headerMounted
+            ? "arcade-pulse-comments-genuine-header-before-keyboard"
+            : "arcade-pulse-comments-genuine-header-missing"
+        headerEvidence.lifetime = .keepAlways
+        add(headerEvidence)
+        XCTAssertTrue(headerMounted,
+                      "Actual published game's native Comments header must mount after the real tap.")
+        XCTAssertTrue(realHeader.label.contains(expectedPublishedTitle),
+                      "Native header must announce the unchanged backend game title.")
         // An axis:.vertical SwiftUI TextField can surface as a UITextView
         // rather than the generic accessibility wrapper carrying the SwiftUI
         // identifier. Require an actual *editable* native field, not an
@@ -1649,6 +1677,10 @@ final class PlayerSmokeTests: XCTestCase {
                       "The composer must be an editable element for VoiceOver and XCTest.")
         XCTAssertTrue(composer.isHittable,
                       "Comment composer must remain reachable above the safe-area inset.")
+        XCTAssertLessThanOrEqual(realHeader.frame.maxY, composer.frame.minY,
+                                 "Native expanded header must not cover the editable composer.")
+        // Combined header AX bounds may include system navigation chrome.
+        // Preserve the strict physical Done tap and real feed return below.
         let unavailable = app.descendants(matching: .any)["comments.send.unavailable"].firstMatch
         XCTAssertTrue(unavailable.waitForExistence(timeout: 5),
                       "Empty comments must show an explicitly unavailable Send affordance.")
@@ -1682,6 +1714,10 @@ final class PlayerSmokeTests: XCTestCase {
         done.tap()
         XCTAssertTrue(app.buttons["game.play"].firstMatch.waitForExistence(timeout: 10),
                       "Closing comments must return to the same browsable game feed.")
+        let returnedTitle = app.staticTexts[expectedTitleIdentifier].firstMatch
+        XCTAssertTrue(returnedTitle.waitForExistence(timeout: 5),
+                      "Dismissal must return to the exact selected published game.")
+        XCTAssertEqual(returnedTitle.label, expectedPublishedTitle)
     }
 
     /// The Studio must not pretend to show private drafts or generated
