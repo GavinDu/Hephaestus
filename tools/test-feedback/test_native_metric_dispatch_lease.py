@@ -33,7 +33,7 @@ class NativeMetricDispatchLeaseTests(unittest.TestCase):
         )
         self.assertEqual(body.count("PlayerRuntimeMetricDispatchPolicy.mayStart("), 2)
         self.assertEqual(body.count("await BackendAPI.shared.trackSocialEvent("), 2)
-        self.assertEqual(body.count("self.ownsLiveAttachment"), 2)
+        self.assertEqual(body.count("self.ownsCurrentMetricAttachment"), 2)
         self.assertEqual(body.count("self.launchLifecycle.permitsRuntimeEvents"), 2)
         self.assertEqual(body.count("currentSessionID: self.runtimeSessionID"), 2)
         self.assertEqual(body.count("taskCancelled: Task<Never, Never>.isCancelled"), 2)
