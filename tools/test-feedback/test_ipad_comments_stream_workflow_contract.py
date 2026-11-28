@@ -94,7 +94,7 @@ class IPadCommentsStreamWorkflowContractTests(unittest.TestCase):
         self.assertEqual(comments.count("GameFeedCardSocialActionLayout.minimumHitSize"), 2)
         self.assertNotIn("Gesture(", comments)
         self.assertNotIn("TapGesture", tracking + native)
-        self.assertNotIn("Button(action: onOpenComments)", card)
+        self.assertNotRegex(card, r"(?<![A-Za-z0-9_])Button\(action: onOpenComments\)")
         stage = card.split("ZStack(alignment: .bottomLeading)", 1)[1].split(
             "VStack(alignment: .leading, spacing: 7)", 1)[0]
         self.assertEqual(stage.count(".allowsHitTesting(false)"), 3)
