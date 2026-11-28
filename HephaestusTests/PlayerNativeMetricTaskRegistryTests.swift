@@ -90,4 +90,39 @@ struct PlayerNativeMetricTaskRegistryTests {
         registry.revoke()
         #expect(handles.count == 2)
     }
+
+    @Test func poolRetirementCancelsOnlyTheBoundRegistryAcross160Replacements() {
+        let slot = PlayerNativeMetricAttachmentRevocation()
+        for _ in 0..<160 {
+            let old = PlayerNativeMetricTaskRegistry()
+            let next = PlayerNativeMetricTaskRegistry()
+            var handles: [Task<Void, Never>] = []
+            let oldAccepted = old.submit { _, _ in makeTask(&handles) }
+            let nextAccepted = next.submit { _, _ in makeTask(&handles) }
+            #expect(oldAccepted && nextAccepted)
+            slot.bind(old)
+            slot.bind(old)
+            #expect(!handles[0].isCancelled)
+            slot.bind(next)
+            #expect(handles[0].isCancelled)
+            #expect(!handles[1].isCancelled)
+            #expect(old.inFlightCount == 0)
+            slot.retire()
+            #expect(handles[1].isCancelled)
+            #expect(next.inFlightCount == 0)
+            let retiredEpoch = next.epoch
+            slot.retire()
+            #expect(next.epoch == retiredEpoch)
+        }
+    }
+
+    @Test func poolSlotDoesNotRetainRegistry() {
+        let slot = PlayerNativeMetricAttachmentRevocation()
+        var registry: PlayerNativeMetricTaskRegistry? = PlayerNativeMetricTaskRegistry()
+        weak var witness = registry
+        slot.bind(registry!)
+        registry = nil
+        #expect(witness == nil)
+        slot.retire()
+    }
 }

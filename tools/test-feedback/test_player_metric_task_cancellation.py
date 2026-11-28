@@ -33,6 +33,28 @@ class PlayerNativeMetricTaskSourceTest(unittest.TestCase):
         self.assertIn("defer { registry?.complete(taskID: taskID, epoch: epoch) }", coordinator)
         self.assertEqual(coordinator.count("PlayerRuntimeMetricDispatchPolicy.mayStart("), 2)
 
+    def test_pool_retires_metric_owner_before_lease_or_credential_mutation(self):
+        src = PLAYER.read_text()
+        pool = src.split("enum PlayerWebViewPool {", 1)[1]
+        for method, mutation in (
+            ("static func take(url:", "attachmentLease &+= 1"),
+            ("static func recycle(", "isAttached = false"),
+            ("static func invalidateForSessionChange()", "pooledView = nil"),
+        ):
+            relevant = pool.split(method, 1)[1].split(mutation, 1)[0]
+            self.assertIn("metricAttachment.retire()", relevant, method)
+        attach = pool.split("static func attachMessageReceiver(", 1)[1].split(
+            "attachedMessageReceiver = receiver", 1)[0]
+        self.assertLess(attach.index("ownsAttachedNavigation("),
+                        attach.index("metricAttachment.bind(metricRegistry)"))
+        owns = pool.split("static func ownsCurrentMetricAttachment(", 1)[1].split(
+            "static func recycle(", 1)[0]
+        self.assertLess(owns.index("ensureCurrentCredentialScope()"),
+                        owns.index("return ownsActiveAttachment("))
+        self.assertEqual(src.count("ownsCurrentAttachment: self.ownsCurrentMetricAttachment,"), 2)
+        self.assertIn("metricRegistry: context.coordinator.metricTelemetryTasks", src)
+        self.assertIn("private weak var registry: PlayerNativeMetricTaskRegistry?", src)
+
     def test_backend_aborts_cooperative_cancel_before_post(self):
         src = BACKEND.read_text()
         method = src.split("func trackSocialEvent(gameID: String", 1)[1].split(

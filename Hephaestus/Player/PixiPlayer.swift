@@ -330,6 +330,26 @@ final class PlayerNativeMetricTaskRegistry {
     }
 }
 
+/// The pool weakly observes only its current attached document's task
+/// registry. Retire before replacing ownership, not on eventual SwiftUI
+/// dismantle. This never retracts a server-committed event.
+@MainActor
+final class PlayerNativeMetricAttachmentRevocation {
+    private weak var registry: PlayerNativeMetricTaskRegistry?
+
+    func bind(_ next: PlayerNativeMetricTaskRegistry) {
+        if registry === next { return }
+        retire()
+        registry = next
+    }
+
+    func retire() {
+        let prior = registry
+        registry = nil
+        prior?.revoke()
+    }
+}
+
 /// Accept only trusted runtime metric kinds and their newer sequence values.
 /// The trusted JS runtime increments a global native sequence counter, so
 /// three per-kind high-water marks reject repeats without growing memory.
@@ -1746,6 +1766,7 @@ enum PlayerWebViewPool {
     // Transfer holds one exact native lease until the Coordinator mounts.
     private static var transferringLease: UInt64?
     private static var attachedReceiverLease: UInt64?
+    private static let metricAttachment = PlayerNativeMetricAttachmentRevocation()
     private static weak var attachedMessageReceiver: (any WKScriptMessageHandler)?
     private static var documentEpochGate = PlayerNativeDocumentEpochGate()
     private static var mainDocumentResponseObservations = PlayerMainDocumentResponseObservations()
@@ -1943,6 +1964,7 @@ enum PlayerWebViewPool {
         isAttached = true
         // Every distinct interactive SwiftUI Coordinator owns a new lease,
         // even if it reuses the same prewarmed WKWebView after a retry.
+        metricAttachment.retire()
         attachmentLease &+= 1
         attachedMessageReceiver = nil
         attachedReceiverLease = nil
@@ -2013,8 +2035,16 @@ enum PlayerWebViewPool {
         )
     }
 
+    /// Native metric admission must also close the Keychain-notification gap.
+    /// Rechecking can retire the current registry, including the calling task.
+    static func ownsCurrentMetricAttachment(_ webView: WKWebView, lease: UInt64) -> Bool {
+        ensureCurrentCredentialScope()
+        return ownsActiveAttachment(webView, lease: lease)
+    }
+
     static func recycle(_ webView: WKWebView, lease: UInt64) {
         guard ownsActiveAttachment(webView, lease: lease) else { return }
+        metricAttachment.retire()
         prewarmExpiryTask?.cancel()
         prewarmExpiryTask = nil
         prewarmEpoch &+= 1
@@ -2057,6 +2087,7 @@ enum PlayerWebViewPool {
     /// This also tears down an attached runtime. The player sheet observes
     /// the same event and displays an actionable session-changed message.
     static func invalidateForSessionChange() {
+        metricAttachment.retire()
         prewarmExpiryTask?.cancel()
         prewarmExpiryTask = nil
         prewarmEpoch &+= 1
@@ -2114,12 +2145,13 @@ enum PlayerWebViewPool {
     @discardableResult
     static func attachMessageReceiver(
         _ receiver: WKScriptMessageHandler, webView: WKWebView,
-        url: URL, lease: UInt64
+        url: URL, lease: UInt64, metricRegistry: PlayerNativeMetricTaskRegistry
     ) -> Bool {
         ensureCurrentCredentialScope()
         guard lease != 0,
               ownsAttachedNavigation(webView, url: url, lease: lease)
         else { return false }
+        metricAttachment.bind(metricRegistry)
         attachedMessageReceiver = receiver
         attachedReceiverLease = lease
         transferringLease = nil
@@ -3249,7 +3281,8 @@ private struct PlayerWebView: UIViewRepresentable {
         // An old Coordinator can never displace this lease's receiver.
         guard PlayerWebViewPool.attachMessageReceiver(
             context.coordinator.messageProxy, webView: webView,
-            url: url, lease: handoff.lease
+            url: url, lease: handoff.lease,
+            metricRegistry: context.coordinator.metricTelemetryTasks
         ) else {
             // A credential rotation may have retired this exact WKWebView,
             // but a newer sheet may also have RETAKEN the same pooled view
@@ -3338,7 +3371,11 @@ private struct PlayerWebView: UIViewRepresentable {
         private var verifiedRunFetchTasks: [String: Task<Void, Never>] = [:]
         // Bounded, cancellable first-input/perf telemetry owned by this
         // Coordinator. Detached/replaced document POSTs are never left queued.
-        private let metricTelemetryTasks = PlayerNativeMetricTaskRegistry()
+        fileprivate let metricTelemetryTasks = PlayerNativeMetricTaskRegistry()
+        private var ownsCurrentMetricAttachment: Bool {
+            guard let view = attachedWebView else { return false }
+            return PlayerWebViewPool.ownsCurrentMetricAttachment(view, lease: attachmentLease)
+        }
         private var navigationFailureGate = PlayerNavigationFailureGate()
         private var metricSequenceGate = PlayerRuntimeMetricSequenceGate()
         private var firstSceneRenderSubmissionGate = PlayerFirstSceneRenderSubmissionGate()
@@ -3593,7 +3630,7 @@ private struct PlayerWebView: UIViewRepresentable {
                         // Never retain the old Coordinator over URLSession await.
                         let validGameID: String? = {
                             guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
-                                ownsCurrentAttachment: self.ownsLiveAttachment,
+                                ownsCurrentAttachment: self.ownsCurrentMetricAttachment,
                                 permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
                                 taskCancelled: Task<Never, Never>.isCancelled,
                                 expectedSessionID: runtimeSessionID,
@@ -3615,7 +3652,7 @@ private struct PlayerWebView: UIViewRepresentable {
                         defer { registry?.complete(taskID: taskID, epoch: epoch) }
                         let validGameID: String? = {
                             guard let self, PlayerRuntimeMetricDispatchPolicy.mayStart(
-                                ownsCurrentAttachment: self.ownsLiveAttachment,
+                                ownsCurrentAttachment: self.ownsCurrentMetricAttachment,
                                 permitsRuntimeEvents: self.launchLifecycle.permitsRuntimeEvents,
                                 taskCancelled: Task<Never, Never>.isCancelled,
                                 expectedSessionID: runtimeSessionID,
