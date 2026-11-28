@@ -178,6 +178,9 @@ struct PlayerHoldPosterResponseBudgetTests {
         #expect(!exact.complete)
         let chunkAccepted2 = exact.admitChunk(byteCount: 1)
         #expect(chunkAccepted2)
+        #expect(!exact.complete)
+        let exactFinished = exact.finish(transportSucceeded: true)
+        #expect(exactFinished)
         #expect(exact.complete)
         let chunkAccepted3 = exact.admitChunk(byteCount: 1)
         #expect(!chunkAccepted3)
@@ -188,6 +191,9 @@ struct PlayerHoldPosterResponseBudgetTests {
         #expect(!unknown.complete)
         let chunkAccepted5 = unknown.admitChunk(byteCount: cap)
         #expect(chunkAccepted5)
+        #expect(!unknown.complete)
+        let unknownFinished = unknown.finish(transportSucceeded: true)
+        #expect(unknownFinished)
         #expect(unknown.complete)
         let chunkAccepted6 = unknown.admitChunk(byteCount: Int.max)
         #expect(!chunkAccepted6)
@@ -195,6 +201,38 @@ struct PlayerHoldPosterResponseBudgetTests {
         let chunkAccepted7 = negative.admitChunk(byteCount: -1)
         #expect(!chunkAccepted7)
         #expect(!negative.complete)
+    }
+
+    @Test func onlySuccessfulTerminalTransportCanAuthorizeHeaders() {
+        for length: Int64 in [-1, 4] {
+            var failed = Budget(statusCode: 200, mimeType: "image/png", expectedLength: length, contentEncoding: nil)!
+            let accepted = failed.admitChunk(byteCount: 4)
+            #expect(accepted)
+            #expect(!failed.complete)
+            let failedFinish = failed.finish(transportSucceeded: false)
+            #expect(!failedFinish)
+            let revived = failed.finish(transportSucceeded: true)
+            #expect(!revived)
+            #expect(!failed.complete)
+            var duplicate = Budget(statusCode: 200, mimeType: "image/png", expectedLength: length, contentEncoding: nil)!
+            let acceptedDuplicate = duplicate.admitChunk(byteCount: 4)
+            #expect(acceptedDuplicate)
+            let firstFinish = duplicate.finish(transportSucceeded: true)
+            #expect(firstFinish)
+            let secondFinish = duplicate.finish(transportSucceeded: true)
+            #expect(!secondFinish)
+            #expect(!duplicate.complete)
+        }
+        var truncated = Budget(statusCode: 200, mimeType: "image/png", expectedLength: 4, contentEncoding: nil)!
+        let shortChunk = truncated.admitChunk(byteCount: 3)
+        #expect(shortChunk)
+        let shortFinish = truncated.finish(transportSucceeded: true)
+        #expect(!shortFinish)
+        #expect(!truncated.complete)
+        var empty = Budget(statusCode: 200, mimeType: "image/png", expectedLength: -1, contentEncoding: nil)!
+        let emptyFinish = empty.finish(transportSucceeded: true)
+        #expect(!emptyFinish)
+        #expect(!empty.complete)
     }
 
     @Test func oneHundredSixtyHostileMetadataCombinationsFailClosed() {
@@ -233,17 +271,24 @@ struct PlayerHoldPosterResponseBudgetTests {
             #expect(!correct.admitsEncodedHeader(data))
             let chunkAccepted8 = correct.admitChunk(byteCount: data.count)
             #expect(chunkAccepted8)
+            #expect(!correct.admitsEncodedHeader(data))
+            let correctFinished = correct.finish(transportSucceeded: true)
+            #expect(correctFinished)
             #expect(correct.admitsEncodedHeader(data))
             #expect(!correct.admitsEncodedHeader(Data(data.dropLast())))
             var wrong = try #require(Budget(statusCode: 200, mimeType: wrongMIME, expectedLength: -1, contentEncoding: nil))
             let chunkAccepted9 = wrong.admitChunk(byteCount: data.count)
             #expect(chunkAccepted9)
+            let wrongFinished = wrong.finish(transportSucceeded: true)
+            #expect(wrongFinished)
             #expect(!wrong.admitsEncodedHeader(data))
         }
         let corrupt = Data(repeating: 0, count: 32)
         var budget = try #require(Budget(statusCode: 200, mimeType: "image/png", expectedLength: 32, contentEncoding: nil))
         let chunkAccepted10 = budget.admitChunk(byteCount: corrupt.count)
         #expect(chunkAccepted10)
+        let corruptFinished = budget.finish(transportSucceeded: true)
+        #expect(corruptFinished)
         #expect(!budget.admitsEncodedHeader(corrupt))
     }
 }

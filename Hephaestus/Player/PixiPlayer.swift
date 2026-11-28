@@ -156,6 +156,7 @@ struct PlayerHoldPosterResponseBudget {
     let declaredLength: Int?
     private(set) var receivedBytes = 0
     private(set) var rejected = false
+    private var finished = false
 
     init?(statusCode: Int, mimeType: String?, expectedLength: Int64,
           contentEncoding: String?) {
@@ -172,7 +173,7 @@ struct PlayerHoldPosterResponseBudget {
     /// A rejected response is terminal, even if a later chunk is small.
     mutating func admitChunk(byteCount: Int) -> Bool {
         let limit = declaredLength ?? Self.maximumBytes
-        guard !rejected, byteCount >= 0, byteCount <= limit - receivedBytes else {
+        guard !rejected, !finished, byteCount >= 0, byteCount <= limit - receivedBytes else {
             rejected = true
             return false
         }
@@ -180,11 +181,21 @@ struct PlayerHoldPosterResponseBudget {
         return true
     }
 
-    // A future transport must call this only after successful terminal completion;
-    // unknown Content-Length cannot prove EOF or successful delivery on its own.
+    /// Call exactly once from the transport's terminal completion callback.
+    /// Reaching a byte count alone never authorizes header inspection/decode.
+    /// Failed, empty, truncated or duplicate completion is terminally rejected.
+    mutating func finish(transportSucceeded: Bool) -> Bool {
+        guard !rejected, !finished, transportSucceeded, receivedBytes > 0,
+              declaredLength == nil || receivedBytes == declaredLength else {
+            rejected = true
+            return false
+        }
+        finished = true
+        return true
+    }
+
     var complete: Bool {
-        !rejected && receivedBytes > 0 &&
-            (declaredLength == nil || receivedBytes == declaredLength)
+        finished && !rejected
     }
 
     static func dimensionsAllowed(width: Int, height: Int) -> Bool {
