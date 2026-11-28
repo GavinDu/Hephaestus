@@ -585,6 +585,17 @@ enum PlayerScenePosterHandoffPolicy {
     }
 }
 
+/// Terminal no-scene recovery must unmount the current interactive WKWebView.
+/// SwiftUI dismantle then revokes the exact Coordinator lease, cancels its
+/// verification/metric work, stops loading and navigates to empty HTML.
+/// This is a mount decision, NOT a JS-render/GPU-present attestation.
+enum PlayerTerminalNoSceneMountPolicy {
+    static func shouldMount(currentAttempt: Int, terminalNoSceneAttempt: Int?) -> Bool {
+        guard let terminalNoSceneAttempt else { return true }
+        return terminalNoSceneAttempt != currentAttempt
+    }
+}
+
 /// First scene submission is a one-time, validated milestone, not proof
 /// of GPU composition or the first interactive frame.
 struct PlayerFirstSceneRenderSubmissionGate {
@@ -2412,6 +2423,8 @@ struct PixiPlayerSheet: View {
     // Current attached runtime's renderer *submission*, not GPU-present.
     // Any retry/sheet epoch revokes the diagnostic immediately.
     @State private var firstSceneSubmittedForAttempt: (epoch: Int, milliseconds: Int)?
+    // Terminal no-scene recovery unmounts only the timed-out attempt.
+    @State private var terminalNoSceneAttempt: Int?
     @State private var didTrackGameplayStart = false
     @State private var verifiedResult: VerifiedRunResult?
     @AppStorage(PlayerQuality.defaultsKey) private var qualityRaw = PlayerQuality.auto.rawValue
@@ -2566,24 +2579,29 @@ struct PixiPlayerSheet: View {
         // a retired/retried sheet cannot mutate the current presentation.
         let callbackEpoch = attempt
         return ZStack {
-                if let url = playerURL {
+                if PlayerTerminalNoSceneMountPolicy.shouldMount(
+                    currentAttempt: attempt, terminalNoSceneAttempt: terminalNoSceneAttempt
+                ), let url = playerURL {
                     PlayerWebView(
                         url: url,
                         gameID: gameID,
                         onProgress: { value in
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             progress = value
                         },
                         onLoadFinish: {
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             handleLoadFinish()
                         },
                         onLoadFail: { error in
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             isLoading = false
@@ -2599,7 +2617,8 @@ struct PixiPlayerSheet: View {
                                                    name: "LoadFailed", message: diagnostic)
                         },
                         onTerminate: {
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             // A terminated document must not turn a known permanent
@@ -2648,13 +2667,15 @@ struct PixiPlayerSheet: View {
                             }
                         },
                         onPrewarmHit: {
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             prewarmHit = true
                         },
                         onFirstSceneRenderSubmit: { ms in
-                            guard PlayerLaunchCallbackGate.accepts(
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(
                                 expectedEpoch: callbackEpoch, currentEpoch: attempt,
                                 sessionRevoked: sessionRevoked
                             ) else { return }
@@ -2664,7 +2685,8 @@ struct PixiPlayerSheet: View {
                             fadeHoldPosterAfterCurrentScene()
                         },
                         onFirstInput: {
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             if !didTrackGameplayStart {
@@ -2673,7 +2695,8 @@ struct PixiPlayerSheet: View {
                             }
                         },
                         onVerifiedRun: { result in
-                            guard PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
+                            guard terminalNoSceneAttempt != callbackEpoch,
+                                  PlayerLaunchCallbackGate.accepts(expectedEpoch: callbackEpoch,
                                                          currentEpoch: attempt,
                                                          sessionRevoked: sessionRevoked) else { return }
                             verifiedResult = result
@@ -3024,6 +3047,10 @@ struct PixiPlayerSheet: View {
                         sessionRevoked: sessionRevoked,
                         isForeground: scenePhase == .active
                       ) else { return }
+                // Retire the current attempt before publishing its terminal error.
+                // SwiftUI reconciliation invokes exact-lease dismantle; this is
+                // not synchronous pool revocation (tracked in #770).
+                terminalNoSceneAttempt = watchdogAttempt
                 // No compositor or rendered-scene claims from didFinish.
                 // This is a stalled scene, NOT evidence of failed transport.
                 // Keep manual Retry and safe exit without auto-retrying on
