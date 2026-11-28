@@ -1,4 +1,7 @@
 import Foundation
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 import Testing
 @testable import Hephaestus
 
@@ -162,4 +165,130 @@ struct PlayerHoldPosterURLPolicyTests {
                                 alreadyFollowed: 2, backendOrigin: production) == nil)
     }
 
+}
+
+struct PlayerHoldPosterResponseBudgetTests {
+    private typealias Budget = PlayerHoldPosterResponseBudget
+
+    @Test func boundedStreamingRejectsOverflowMismatchAndTerminalFailure() {
+        let cap = Budget.maximumBytes
+        var exact = Budget(statusCode: 200, mimeType: "image/png", expectedLength: Int64(cap), contentEncoding: nil)!
+        let chunkAccepted1 = exact.admitChunk(byteCount: cap - 1)
+        #expect(chunkAccepted1)
+        #expect(!exact.complete)
+        let chunkAccepted2 = exact.admitChunk(byteCount: 1)
+        #expect(chunkAccepted2)
+        #expect(!exact.complete)
+        let exactFinished = exact.finish(transportSucceeded: true)
+        #expect(exactFinished)
+        #expect(exact.complete)
+        let chunkAccepted3 = exact.admitChunk(byteCount: 1)
+        #expect(!chunkAccepted3)
+        #expect(!exact.complete)
+        let chunkAccepted4 = exact.admitChunk(byteCount: 0)
+        #expect(!chunkAccepted4)
+        var unknown = Budget(statusCode: 200, mimeType: "image/jpeg", expectedLength: -1, contentEncoding: "identity")!
+        #expect(!unknown.complete)
+        let chunkAccepted5 = unknown.admitChunk(byteCount: cap)
+        #expect(chunkAccepted5)
+        #expect(!unknown.complete)
+        let unknownFinished = unknown.finish(transportSucceeded: true)
+        #expect(unknownFinished)
+        #expect(unknown.complete)
+        let chunkAccepted6 = unknown.admitChunk(byteCount: Int.max)
+        #expect(!chunkAccepted6)
+        var negative = Budget(statusCode: 200, mimeType: "image/png", expectedLength: 4, contentEncoding: nil)!
+        let chunkAccepted7 = negative.admitChunk(byteCount: -1)
+        #expect(!chunkAccepted7)
+        #expect(!negative.complete)
+    }
+
+    @Test func onlySuccessfulTerminalTransportCanAuthorizeHeaders() {
+        for length: Int64 in [-1, 4] {
+            var failed = Budget(statusCode: 200, mimeType: "image/png", expectedLength: length, contentEncoding: nil)!
+            let accepted = failed.admitChunk(byteCount: 4)
+            #expect(accepted)
+            #expect(!failed.complete)
+            let failedFinish = failed.finish(transportSucceeded: false)
+            #expect(!failedFinish)
+            let revived = failed.finish(transportSucceeded: true)
+            #expect(!revived)
+            #expect(!failed.complete)
+            var duplicate = Budget(statusCode: 200, mimeType: "image/png", expectedLength: length, contentEncoding: nil)!
+            let acceptedDuplicate = duplicate.admitChunk(byteCount: 4)
+            #expect(acceptedDuplicate)
+            let firstFinish = duplicate.finish(transportSucceeded: true)
+            #expect(firstFinish)
+            let secondFinish = duplicate.finish(transportSucceeded: true)
+            #expect(!secondFinish)
+            #expect(!duplicate.complete)
+        }
+        var truncated = Budget(statusCode: 200, mimeType: "image/png", expectedLength: 4, contentEncoding: nil)!
+        let shortChunk = truncated.admitChunk(byteCount: 3)
+        #expect(shortChunk)
+        let shortFinish = truncated.finish(transportSucceeded: true)
+        #expect(!shortFinish)
+        #expect(!truncated.complete)
+        var empty = Budget(statusCode: 200, mimeType: "image/png", expectedLength: -1, contentEncoding: nil)!
+        let emptyFinish = empty.finish(transportSucceeded: true)
+        #expect(!emptyFinish)
+        #expect(!empty.complete)
+    }
+
+    @Test func oneHundredSixtyHostileMetadataCombinationsFailClosed() {
+        for cycle in 0..<160 {
+            #expect(Budget(statusCode: 300 + cycle % 100, mimeType: "image/png", expectedLength: 1, contentEncoding: nil) == nil)
+            #expect(Budget(statusCode: 200, mimeType: "image/gif", expectedLength: 1, contentEncoding: nil) == nil)
+            #expect(Budget(statusCode: 200, mimeType: "image/jpeg", expectedLength: Int64(Budget.maximumBytes) + Int64(cycle) + 1, contentEncoding: nil) == nil)
+            #expect(Budget(statusCode: 200, mimeType: "image/png", expectedLength: -2 - Int64(cycle), contentEncoding: nil) == nil)
+            #expect(Budget(statusCode: 200, mimeType: "image/png", expectedLength: 1, contentEncoding: "gzip") == nil)
+            #expect(!Budget.dimensionsAllowed(width: 4097 + cycle, height: 1))
+            #expect(!Budget.dimensionsAllowed(width: 1, height: Int.max))
+        }
+        #expect(Budget.dimensionsAllowed(width: 4096, height: 4096))
+        #expect(!Budget.dimensionsAllowed(width: 0, height: 1))
+        #expect(Budget(statusCode: 200, mimeType: "image/png", expectedLength: 0, contentEncoding: nil) == nil)
+    }
+
+    private func encodedFixture(_ type: UTType) throws -> Data {
+        let context = try #require(CGContext(data: nil, width: 2, height: 2,
+            bitsPerComponent: 8, bytesPerRow: 8, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        let image = try #require(context.makeImage())
+        let output = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(output as CFMutableData, type.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        try #require(CGImageDestinationFinalize(destination))
+        return output as Data
+    }
+
+    @Test func actualEncodedPNGAndJPEGHeadersMustMatchMIMEAndCount() throws {
+        for (type, mime, wrongMIME) in [(UTType.png, "image/png", "image/jpeg"), (UTType.jpeg, "image/jpeg", "image/png")] {
+            let data = try encodedFixture(type)
+            var correct = try #require(Budget(statusCode: 200, mimeType: mime, expectedLength: Int64(data.count), contentEncoding: nil))
+            #expect(!correct.admitsEncodedHeader(data))
+            let chunkAccepted8 = correct.admitChunk(byteCount: data.count)
+            #expect(chunkAccepted8)
+            #expect(!correct.admitsEncodedHeader(data))
+            let correctFinished = correct.finish(transportSucceeded: true)
+            #expect(correctFinished)
+            #expect(correct.admitsEncodedHeader(data))
+            #expect(!correct.admitsEncodedHeader(Data(data.dropLast())))
+            var wrong = try #require(Budget(statusCode: 200, mimeType: wrongMIME, expectedLength: -1, contentEncoding: nil))
+            let chunkAccepted9 = wrong.admitChunk(byteCount: data.count)
+            #expect(chunkAccepted9)
+            let wrongFinished = wrong.finish(transportSucceeded: true)
+            #expect(wrongFinished)
+            #expect(!wrong.admitsEncodedHeader(data))
+        }
+        let corrupt = Data(repeating: 0, count: 32)
+        var budget = try #require(Budget(statusCode: 200, mimeType: "image/png", expectedLength: 32, contentEncoding: nil))
+        let chunkAccepted10 = budget.admitChunk(byteCount: corrupt.count)
+        #expect(chunkAccepted10)
+        let corruptFinished = budget.finish(transportSucceeded: true)
+        #expect(corruptFinished)
+        #expect(!budget.admitsEncodedHeader(corrupt))
+    }
 }

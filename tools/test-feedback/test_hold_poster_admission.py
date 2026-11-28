@@ -78,5 +78,32 @@ class NativeHoldPosterURLPolicySourceTests(unittest.TestCase):
             self.assertNotIn(forbidden, policy)
 
 
+    def test_future_response_budget_matches_generator_preview_and_has_no_decode(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        policy = source.split("struct PlayerHoldPosterResponseBudget {", 1)[1].split(
+            "// MARK: - Quality (performance control)", 1
+        )[0]
+        for required in (
+            "maximumBytes = 2 * 1024 * 1024",
+            "maximumDimension = 4096",
+            "maximumPixels = 16_777_216",
+            "statusCode == 200",
+            "byteCount <= limit - receivedBytes",
+            "rejected = true",
+            "receivedBytes == declaredLength",
+            "mutating func finish(transportSucceeded: Bool)",
+            "guard !rejected, !finished, transportSucceeded, receivedBytes > 0",
+            "finished && !rejected",
+            "guard complete, data.count == receivedBytes",
+            "CGImageSourceGetCount(source) == 1",
+            "CGImageSourceCopyPropertiesAtIndex",
+            "kCGImageSourceShouldCache: false",
+            "width <= maximumPixels / height",
+        ):
+            self.assertIn(required, policy)
+        for forbidden in ("CGImageSourceCreateImageAtIndex", "UIImage(data:", "URLSession.shared", "evaluateJavaScript"):
+            self.assertNotIn(forbidden, policy)
+
+
 if __name__ == "__main__":
     unittest.main()
