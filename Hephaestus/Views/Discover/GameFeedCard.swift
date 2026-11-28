@@ -106,10 +106,45 @@ final class GridCommentsTrackingButton: UIButton {
 
     override func cancelTracking(with event: UIEvent?) {
         #if DEBUG
+        // Observe bounded ancestor state without changing gesture ownership
+        // or logging touch positions, game identity or user data.
+        var ancestor = superview
+        var depth = 0
+        var activeGestures = 0
+        var activeScrollPans = 0
+        var scrollingAncestors = 0
+        while let view = ancestor, depth < 16 {
+            for recognizer in view.gestureRecognizers ?? [] {
+                if recognizer.state == .began || recognizer.state == .changed {
+                    activeGestures += 1
+                }
+            }
+            if let scroll = view as? UIScrollView {
+                if scroll.panGestureRecognizer.state == .began ||
+                    scroll.panGestureRecognizer.state == .changed {
+                    activeScrollPans += 1
+                }
+                if scroll.isDragging || scroll.isDecelerating {
+                    scrollingAncestors += 1
+                }
+            }
+            ancestor = view.superview
+            depth += 1
+        }
+        let attached = window != nil
         Logger(subsystem: "ai.tinydream.Hephaestus", category: "ArcadePulseComments")
-            .notice("UI_GRID_COMMENTS_NATIVE_CANCEL")
+            .notice("UI_GRID_COMMENTS_NATIVE_CANCEL attached=\(attached, privacy: .public) activeGestures=\(activeGestures, privacy: .public) activeScrollPans=\(activeScrollPans, privacy: .public) scrollingAncestors=\(scrollingAncestors, privacy: .public)")
         #endif
         super.cancelTracking(with: event)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        #if DEBUG
+        let attached = window != nil
+        Logger(subsystem: "ai.tinydream.Hephaestus", category: "ArcadePulseComments")
+            .notice("UI_GRID_COMMENTS_NATIVE_WINDOW attached=\(attached, privacy: .public)")
+        #endif
     }
 }
 
@@ -166,6 +201,10 @@ struct GridCommentsNativeButton: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: GridCommentsTrackingButton,
                                 coordinator: Coordinator) {
+        #if DEBUG
+        Logger(subsystem: "ai.tinydream.Hephaestus", category: "ArcadePulseComments")
+            .notice("UI_GRID_COMMENTS_NATIVE_DISMANTLE")
+        #endif
         coordinator.action = nil
         uiView.removeTarget(coordinator, action: #selector(Coordinator.activate),
                             for: .primaryActionTriggered)
