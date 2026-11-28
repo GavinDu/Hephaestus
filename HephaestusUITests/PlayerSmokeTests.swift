@@ -3379,6 +3379,26 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertEqual(pages.count, 1,
                            "Only the settled game page may enter the accessibility tree in \(profile.1).")
             let pagerFrame = pager.frame
+            let shouldShowStorefront = UIDevice.current.userInterfaceIdiom == .pad &&
+                expectedLandscape && pagerFrame.width >= 1240 && pagerFrame.height >= 700
+            let storefront = app.descendants(matching: .any)["feed.ipad.storefront"].firstMatch
+            let storefrontRows = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "feed.storefront.game."))
+            if shouldShowStorefront {
+                XCTAssertTrue(storefront.waitForExistence(timeout: 8),
+                              "Spacious iPad For You must expose the actual storefront.")
+                XCTAssertGreaterThanOrEqual(storefrontRows.count, 1,
+                              "The genuine multi-game feed must provide another storefront game.")
+                XCTAssertLessThanOrEqual(storefrontRows.count, 3)
+                for row in storefrontRows.allElementsBoundByIndex {
+                    XCTAssertTrue(row.isHittable)
+                    XCTAssertGreaterThanOrEqual(row.frame.width + 0.000001, 44)
+                    XCTAssertGreaterThanOrEqual(row.frame.height + 0.000001, 44)
+                }
+            } else {
+                XCTAssertFalse(storefront.exists,
+                               "Storefront must collapse in the narrow or portrait feed.")
+            }
             // Swiping correctly does not excuse an undersized visual stage.
             // Geometry is checked separately from actual preview-media provenance.
             XCTAssertTrue(mediaSurface.exists,
@@ -3539,6 +3559,29 @@ final class PlayerSmokeTests: XCTestCase {
             XCTAssertGreaterThan(visualDelta ?? 0, 0.005,
                                  "The feed should visibly change after paging in \(profile.1).")
             print("UI_EVALUATOR_SCREENSHOT device=\(UIDevice.current.userInterfaceIdiom) orientation=\(profile.1) changed_pixel_ratio=\(String(format: "%.4f", visualDelta ?? 0))")
+
+            // Keep the original physical swipe and its untouched before/after
+            // screenshots. Independently test a real storefront row afterward.
+            if shouldShowStorefront {
+                let row = storefrontRows.firstMatch
+                XCTAssertTrue(row.waitForExistence(timeout: 8) && row.isHittable)
+                let prefix = "feed.storefront.game."
+                let rowID = row.identifier
+                XCTAssertTrue(rowID.hasPrefix(prefix))
+                let target = "feed.page.title." + String(rowID.dropFirst(prefix.count))
+                XCTAssertNotEqual(target, candidateID,
+                                  "Storefront cannot advertise the already settled page.")
+                row.tap()
+                let selected = app.descendants(matching: .any)[target].firstMatch
+                XCTAssertTrue(selected.waitForExistence(timeout: 10) && selected.isHittable,
+                              "The actual storefront row must settle its exact real game.")
+                XCTAssertEqual(pages.count, 1)
+                XCTAssertTrue(app.buttons["game.play"].firstMatch.isHittable)
+                let storefrontEvidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                storefrontEvidence.name = "arcade-pulse-ipad-storefront-selected-real-game"
+                storefrontEvidence.lifetime = .keepAlways
+                add(storefrontEvidence)
+            }
         }
 
         XCUIDevice.shared.orientation = .portrait
