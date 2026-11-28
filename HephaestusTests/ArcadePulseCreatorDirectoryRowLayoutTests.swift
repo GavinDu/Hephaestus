@@ -48,6 +48,22 @@ struct ArcadePulseCreatorDirectoryRowLayoutTests {
                     for: "doodlequest"))
     }
 
+    @Test func embeddedControlsNeverBecomeNavigableDirectoryRows() {
+        for invalid in ["creator\nname", "creator\u{0000}name",
+                        "creator\tname", "creator\u{007F}name",
+                        "creator\u{0085}name", "\u{0001}creator",
+                        "creator\u{001B}"] {
+            #expect(CreatorDirectoryRowLayout.rowAccessibilityIdentifier(for: invalid) == nil)
+        }
+        for valid in ["创作者", "créateur", "مبدع", "creator-123", "creator_🎮"] {
+            #expect(CreatorDirectoryRowLayout.rowAccessibilityIdentifier(for: valid) ==
+                    "creator.discovery.row.\(valid)")
+        }
+        for invalid in [" creator", "creator ", "", " \n "] {
+            #expect(CreatorDirectoryRowLayout.rowAccessibilityIdentifier(for: invalid) == nil)
+        }
+    }
+
     @Test func realPublicGameCountsHaveCorrectSingularPlural() {
         #expect(CreatorDirectoryRowLayout.publicGameCount(0) == "0 public games")
         #expect(CreatorDirectoryRowLayout.publicGameCount(1) == "1 public game")
